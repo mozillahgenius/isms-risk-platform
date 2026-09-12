@@ -1,0 +1,129 @@
+{
+  "version": 2,
+  "platform": "macos",
+  "items": [
+    {
+      "name": "disk_encrypted",
+      "collector": "native",
+      "commands": [{"executable": "/usr/bin/fdesetup", "args": ["status"]}],
+      "output": "stdout",
+      "kind": "boolean"
+    },
+    {
+      "name": "screen_lock",
+      "collector": "native",
+      "commands": [{"executable": "/usr/sbin/sysadminctl", "args": ["-screenLock", "status"]}],
+      "output": "combined",
+      "kind": "screen_lock"
+    },
+    {
+      "name": "os_version",
+      "collector": "native",
+      "commands": [{"executable": "/usr/bin/sw_vers", "args": ["-productVersion"]}],
+      "output": "stdout",
+      "kind": "os_version"
+    },
+    {
+      "name": "patch_current",
+      "collector": "native",
+      "commands": [{"executable": "/usr/sbin/softwareupdate", "args": ["--list"]}],
+      "output": "stdout",
+      "kind": "boolean"
+    },
+    {
+      "name": "auto_update_checks_enabled",
+      "collector": "native",
+      "commands": [{"executable": "/usr/sbin/softwareupdate", "args": ["--schedule"]}],
+      "output": "stdout",
+      "kind": "boolean"
+    },
+    {
+      "name": "firewall_enabled",
+      "collector": "native",
+      "commands": [{"executable": "/usr/libexec/ApplicationFirewall/socketfilterfw", "args": ["--getglobalstate"]}],
+      "output": "stdout",
+      "kind": "boolean"
+    },
+    {
+      "name": "edr_running",
+      "collector": "native",
+      "commands": [{"executable": "/bin/ps", "args": ["-axo", "pid="]}],
+      "output": "stdout",
+      "executable_path_prefixes": {"sentinelone": ["/Library/SentinelOne/", "/Library/Sentinel/"], "crowdstrike": ["/Library/CS/", "/Library/CrowdStrike/"]},
+      "process_path_lookup": "kernel_proc_pidpath",
+      "kind": "presence"
+    },
+    {
+      "name": "edr_vendor",
+      "collector": "native",
+      "commands": [{"executable": "/bin/ps", "args": ["-axo", "pid="]}],
+      "output": "stdout",
+      "executable_path_prefixes": {"sentinelone": ["/Library/SentinelOne/", "/Library/Sentinel/"], "crowdstrike": ["/Library/CS/", "/Library/CrowdStrike/"]},
+      "process_path_lookup": "kernel_proc_pidpath",
+      "kind": "edr_vendor"
+    },
+    {
+      "name": "builtin_protection",
+      "collector": "native",
+      "commands": [
+        {"executable": "/usr/bin/pgrep", "args": ["-fi", "xprotect"]},
+        {"executable": "/usr/bin/defaults", "args": ["read", "/Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist", "CFBundleShortVersionString"]},
+        {"executable": "/usr/bin/defaults", "args": ["read", "/Library/Apple/System/Library/CoreServices/XProtect.app/Contents/Info.plist", "CFBundleShortVersionString"]},
+        {"executable": "/usr/sbin/spctl", "args": ["--status"]},
+        {"executable": "/usr/bin/csrutil", "args": ["status"]},
+        {"executable": "/usr/bin/systemextensionsctl", "args": ["list"]}
+      ],
+      "output": "stdout",
+      "promotes_to": ["edr_running"],
+      "kind": "builtin_protection"
+    },
+    {
+      "name": "admin_account_count",
+      "collector": "native",
+      "commands": [{"executable": "/usr/bin/dscl", "args": [".", "-read", "/Groups/admin", "GroupMembership"]}],
+      "output": "stdout",
+      "admin_exclusions": {"names": ["root"], "prefixes": ["_"]},
+      "kind": "count"
+    },
+    {
+      "name": "password_manager_installed",
+      "collector": "native",
+      "commands": [{"executable": "/usr/sbin/system_profiler", "args": ["SPApplicationsDataType", "-detailLevel", "mini"]}],
+      "output": "stdout",
+      "approved_names": ["1Password", "Bitwarden", "KeePassXC"],
+      "kind": "presence"
+    },
+    {
+      "name": "unapproved_apps",
+      "collector": "native",
+      "commands": [
+        {"executable": "/usr/sbin/system_profiler", "args": ["SPApplicationsDataType", "-detailLevel", "mini"]},
+        {"executable": "/usr/bin/find", "args": ["/Applications", "-name", "*.app", "-prune", "-print"]}
+      ],
+      "output": "stdout",
+      "approved_names": ["1Password", "Bitwarden", "KeePassXC", "Google Chrome", "Safari", "Microsoft Edge", "Firefox"],
+      "location_prefixes": ["/Applications"],
+      "excluded_location_prefixes": ["/System/Applications", "~/Applications"],
+      "location_depth": 1,
+      "application_inventory": "system_profiler_and_directory",
+      "include_hidden_bundles": true,
+      "kind": "names"
+    },
+    {
+      "name": "device_identity",
+      "collector": "native",
+      "commands": [
+        {"executable": "/usr/sbin/system_profiler", "args": ["SPHardwareDataType"]},
+        {"executable": "/bin/hostname", "args": []}
+      ],
+      "output": "stdout",
+      "kind": "identity"
+    },
+    {
+      "name": "off_premise",
+      "collector": "metadata",
+      "commands": [],
+      "kind": "enrollment"
+    }
+  ]
+}

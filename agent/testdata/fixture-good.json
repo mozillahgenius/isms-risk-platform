@@ -1,0 +1,16 @@
+{
+  "disk_encrypted": [{"encrypted": true}],
+  "screen_lock": [{"enabled": true, "delay_seconds": 300}],
+  "os_version": [{"major": 14, "minor": 6, "patch": 1, "build": "23G93"}],
+  "patch_current": [{"current": true}],
+  "auto_update_checks_enabled": [{"enabled": true}],
+  "firewall_enabled": [{"enabled": true}],
+  "edr_running": [{"name": "sentinelone"}],
+  "edr_vendor": [{"vendor": "sentinelone"}],
+  "builtin_protection": [{"xprotect_process_count": 5, "xprotect_definition_version": "5355", "xprotect_remediator_version": "157", "spctl_assessments_enabled": true, "csrutil_enabled": true, "system_extensions": []}],
+  "admin_account_count": [{"username": "operator"}],
+  "password_manager_installed": [{"name": "1Password"}],
+  "unapproved_apps": [],
+  "device_identity": [{"serial": "fixture-serial", "model": "Mac mini", "hostname": "fixture-mac", "os_family": "macos"}],
+  "off_premise": [{"source": "enrollment"}]
+}

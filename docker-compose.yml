@@ -1,0 +1,49 @@
+# Deployment layout from design doc 11.2. Intended to run inside a closed network (internal only).
+#
+# Currently only postgres and minio have content. web / worker / scheduler /
+# auditlogd will be added once their Phase 1+ implementations land (listing empty services
+# would make them look like they "already exist", so they are left out).
+#
+# Relocatability constraints from design doc 11.3:
+#   - Do not write state to the local filesystem (Postgres and MinIO only)
+#   - Do not embed host names or paths in code (pass them via environment variables)
+#   - Do not depend on macOS-specific features (the scheduler is a dedicated container; no launchd)
+services:
+  postgres:
+    # Design doc 11.1 specifies PostgreSQL 16. The dev machine has no Docker and is verified on 17, so
+    # treat this as authoritative and run CI on PG16 (docs/DECISIONS.md D-11).
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-isms}
+      POSTGRES_USER: ${POSTGRES_USER:-isms_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD は必須。既定値を持たせない}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"   # internal only. Do not expose on 0.0.0.0
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER は必須}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD は必須}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  miniodata:

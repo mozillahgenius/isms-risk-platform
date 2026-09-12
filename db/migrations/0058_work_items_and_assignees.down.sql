@@ -1,0 +1,10 @@
+SET ROLE schema_owner;
+DROP TRIGGER IF EXISTS trg_guard_work_item_assignee ON app.work_item_assignees;
+DROP FUNCTION IF EXISTS app.guard_work_item_assignee();
+DROP FUNCTION IF EXISTS app.set_management_frameworks_for_work(text,uuid,text[]);
+DROP FUNCTION IF EXISTS app.require_work_item_permission(uuid,text);
+DROP FUNCTION IF EXISTS app.require_work_permission(text,uuid,text);
+DROP FUNCTION IF EXISTS app.work_type_for_resource(text);
+DROP TABLE IF EXISTS app.work_item_assignees;
+DROP TABLE IF EXISTS app.work_items;
+RESET ROLE;

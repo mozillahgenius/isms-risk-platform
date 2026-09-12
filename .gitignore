@@ -1,0 +1,45 @@
+# Never commit real customer data
+*.xlsx
+!phase0/golden/*.json
+*.csv
+!db/seeds/*.csv
+!db/seeds/snapshots/
+!db/seeds/snapshots/**/*.csv
+
+# ---- Dependencies / build output (regenerable) ----
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.next/
+dist/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# ---- Secrets (never track) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*_rsa
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+
+# ---- Runtime state, logs, backups ----
+.DS_Store
+*.tmp
+tmp/
+*.log
+logs/
+*.bak
+*.bak-*
+*.pre-*
+*.dump
+*.sql.gz
+*.tar.gz

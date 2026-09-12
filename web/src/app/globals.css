@@ -1,0 +1,268 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Design system (modern refresh / light + dark)
+   - Keeps existing var names (--background etc.) compatible while extending them
+   - Theme precedence: explicit html[data-theme] first, otherwise prefers-color-scheme
+   ============================================================ */
+:root {
+  /* Fonts. The source project injected --font-geist-* via next/font, but this one does not fetch
+     external fonts (CSP is locked to self, and it should look the same offline), so
+     resolve to OS fonts here. Referencing var() while undefined invalidates the whole
+     font-family declaration and falls back to the default font. */
+  --font-geist-sans: ui-sans-serif, system-ui;
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Surfaces and borders (cool off-white, slightly toward indigo) */
+  --background:    #f6f7fb;   /* App background */
+  --surface:       #ffffff;   /* Cards and panels */
+  --surface-2:     #f0f1f6;   /* Secondary surfaces such as the sidebar */
+  --surface-3:     #e7e9f1;   /* hover / active */
+  --border:        #e4e6ef;
+  --border-strong: #d2d5e2;
+  /* Text */
+  --foreground:    #171922;
+  --fg-2:          #3b3f4c;
+  --muted:         #6b7180;
+  --faint:         #797e8c;   /* Faintest auxiliary text and icons (slightly darker for readability) */
+  /* Accent (refined indigo/violet) */
+  --accent:        #5b57e0;
+  --accent-hover:  #4a46d1;
+  --accent-weak:   #edecfb;
+  --accent-line:   #d9d7f7;   /* Accent rules, underlines, and focus rings */
+  --accent-fg:     #ffffff;
+  /* Semantic */
+  --success:       #12a074;
+  --success-weak:  #e2f4ec;
+  --warning:       #b7791f;
+  --warning-weak:  #f8efd9;
+  --danger:        #d64545;
+  --danger-weak:   #fbe7e7;
+  /* Badge text colors (darker than semantic colors to meet 4.5:1 on weak backgrounds; light theme) */
+  --badge-success-fg: #0a6b48;
+  --badge-warning-fg: #8a5510;
+  --badge-danger-fg:  #a32a26;
+  /* Scrollbar */
+  --scrollbar:     #cdd0dd;
+  --scrollbar-hover:#a9a9b4;
+  /* Border radius (unified on one scale) */
+  --radius:  10px;
+  --radius-sm: 7px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  /* Shadows (faint tint matched to the background color) */
+  --shadow-sm: 0 1px 2px rgba(24,26,42,.06), 0 1px 1px rgba(24,26,42,.04);
+  --shadow-md: 0 6px 20px rgba(24,26,42,.09);
+  --shadow-lg: 0 18px 48px rgba(24,26,42,.16);
+  --ring: 0 0 0 3px var(--accent-line);
+}
+
+/* ---- Dark tokens (explicit data-theme="dark") ---- */
+[data-theme="dark"] {
+  --background:    #0b0c10;
+  --surface:       #15171d;
+  --surface-2:     #101218;
+  --surface-3:     #1d2029;
+  --border:        #23262f;
+  --border-strong: #333844;
+  --foreground:    #e9ebf1;
+  --fg-2:          #b6bac6;
+  --muted:         #868c9a;
+  --faint:         #7c8393;
+  --accent:        #837ff4;
+  --accent-hover:  #948ff7;
+  --accent-weak:   #1e1b3a;
+  --accent-line:   #302b57;
+  --accent-fg:     #ffffff;
+  --success:       #35c48f;
+  --success-weak:  #10251d;
+  --warning:       #e0a94a;
+  --warning-weak:  #281f11;
+  --danger:        #ec6a6a;
+  --danger-weak:   #2a1515;
+  /* Badge text colors (in dark, semantic colors already have enough contrast on weak backgrounds, so used as is) */
+  --badge-success-fg: var(--success);
+  --badge-warning-fg: var(--warning);
+  --badge-danger-fg:  var(--danger);
+  --scrollbar:     #363b47;
+  --scrollbar-hover:#4b515e;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md: 0 8px 22px rgba(0,0,0,.5);
+  --shadow-lg: 0 22px 54px rgba(0,0,0,.62);
+}
+
+/* ---- System fallback when JS is disabled (does not override an explicit light setting) ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --background:    #0b0c10;
+    --surface:       #15171d;
+    --surface-2:     #101218;
+    --surface-3:     #1d2029;
+    --border:        #23262f;
+    --border-strong: #333844;
+    --foreground:    #e9ebf1;
+    --fg-2:          #b6bac6;
+    --muted:         #868c9a;
+    --faint:         #7c8393;
+    --accent:        #837ff4;
+    --accent-hover:  #948ff7;
+    --accent-weak:   #1e1b3a;
+    --accent-line:   #302b57;
+    --accent-fg:     #ffffff;
+    --success:       #35c48f;
+    --success-weak:  #10251d;
+    --warning:       #e0a94a;
+    --warning-weak:  #281f11;
+    --danger:        #ec6a6a;
+    --danger-weak:   #2a1515;
+    --badge-success-fg: var(--success);
+    --badge-warning-fg: var(--warning);
+    --badge-danger-fg:  var(--danger);
+    --scrollbar:     #363b47;
+    --scrollbar-hover:#4b515e;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-md: 0 8px 22px rgba(0,0,0,.5);
+    --shadow-lg: 0 22px 54px rgba(0,0,0,.62);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-weak: var(--accent-weak);
+  --color-accent-line: var(--accent-line);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-success-weak: var(--success-weak);
+  --color-warning: var(--warning);
+  --color-warning-weak: var(--warning-weak);
+  --color-danger: var(--danger);
+  --color-danger-weak: var(--danger-weak);
+  --radius-token: var(--radius);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ============ Base ============ */
+html { scroll-behavior: smooth; color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) { color-scheme: dark; } }
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), -apple-system, "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", Meiryo, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: .005em;
+  transition: background .2s ease, color .2s ease;
+}
+
+h1 { letter-spacing: -.02em; }
+
+::selection { background: var(--accent-weak); color: var(--foreground); }
+
+@layer base {
+  a { color: inherit; }
+}
+
+/* Focus ring */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Thin custom scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+
+/* ============ Reusable components ============ */
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .card-hover { transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+  .card-hover:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); transform: translateY(-1px); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    border-radius: var(--radius); padding: .45rem .9rem; font-size: .875rem; font-weight: 550;
+    color: var(--fg-2);
+    border: 1px solid var(--border); background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+  .btn-primary {
+    background: var(--accent); color: var(--accent-fg); border-color: transparent;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; }
+  .btn-ghost:hover { background: var(--surface-3); }
+
+  .input {
+    width: 100%; border: 1px solid var(--border); background: var(--surface);
+    color: var(--foreground);
+    border-radius: var(--radius); padding: .5rem .7rem; font-size: .9rem;
+    transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .input::placeholder { color: var(--muted); }
+  .input:focus { border-color: var(--accent); box-shadow: var(--ring); outline: none; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: .3rem;
+    height: 22px; padding: 0 .5rem; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .01em;
+    background: var(--surface-3); color: var(--fg-2);
+  }
+  .badge-note    { background: var(--accent-weak); color: var(--accent); }
+  .badge-project { background: var(--success-weak); color: var(--badge-success-fg); }
+  .badge-client  { background: var(--warning-weak); color: var(--badge-warning-fg); }
+  .badge-task    { background: var(--surface-3); color: var(--fg-2); }
+
+  /* Contents of the theme toggle button. **Switched by CSS, not JS state**, so
+     it is correct from server render onward and there is no hydration mismatch.
+     Always set display within this rule. If combined with Tailwind's `contents` utility,
+     the utility layer comes later and overrides display:none, showing both icons. */
+  .theme-when-light { display: contents; }
+  .theme-when-dark  { display: none; }
+  [data-theme="dark"] .theme-when-light { display: none; }
+  [data-theme="dark"] .theme-when-dark  { display: contents; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) .theme-when-light { display: none; }
+    :root:not([data-theme]) .theme-when-dark  { display: contents; }
+  }
+
+  /* Status styles (cover project PROJECT_STATUS / audit action) */
+  .badge-active    { background: var(--accent-weak); color: var(--accent); }          /* In progress / UPDATE */
+  .badge-done      { background: var(--success-weak); color: var(--badge-success-fg); } /* Done / INSERT */
+  .badge-on-hold   { background: var(--warning-weak); color: var(--badge-warning-fg); } /* On hold */
+  .badge-lead      { background: var(--surface-3); color: var(--fg-2); }              /* Prospect / default for anything other than DELETE */
+  .badge-archived  { background: var(--surface-3); color: var(--fg-2); }              /* Archived */
+  .badge-danger    { background: var(--danger-weak); color: var(--badge-danger-fg); }  /* DELETE */
+}

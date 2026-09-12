@@ -1,0 +1,12 @@
+SET ROLE schema_owner;
+DROP FUNCTION IF EXISTS app.set_management_frameworks_for_assignee(text,uuid,text[]);
+DROP TRIGGER IF EXISTS trg_guard_work_assignment ON app.work_assignments;
+DROP FUNCTION IF EXISTS app.guard_work_assignment();
+DROP FUNCTION IF EXISTS app.assignment_target_exists(text,uuid,uuid);
+DROP FUNCTION IF EXISTS app.require_management_permission(text,uuid,text);
+DROP FUNCTION IF EXISTS app.current_management_role();
+DROP TABLE IF EXISTS app.external_questionnaire_answers;
+DROP TABLE IF EXISTS app.external_questionnaire_questions;
+DROP TABLE IF EXISTS app.external_questionnaires;
+DROP TABLE IF EXISTS app.work_assignments;
+RESET ROLE;

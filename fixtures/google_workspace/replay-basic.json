@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "connector": "google_workspace",
+  "manifest_version": 3,
+  "captured_at": "2026-08-14T09:00:00Z",
+  "resources": {
+    "users": {
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "users": [
+              {
+                "id": "acct-001",
+                "primaryEmail": "employee@example.invalid",
+                "isAdmin": false,
+                "isEnrolledIn2Sv": true,
+                "suspended": false,
+                "lastLoginTime": "2026-08-13T08:00:00Z"
+              },
+              {
+                "id": "acct-002",
+                "primaryEmail": "security@example.invalid",
+                "isAdmin": true,
+                "isEnrolledIn2Sv": true,
+                "suspended": false,
+                "lastLoginTime": "2026-08-13T08:30:00Z"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "groups": {
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "groups": [
+              {
+                "id": "group-001",
+                "name": "Security",
+                "email": "security@example.invalid"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "group_members": {
+      "responses": [
+        {
+          "status": 200,
+          "for_external_id": "group-001",
+          "body": {
+            "members": [
+              {"id": "acct-001", "type": "USER"}
+            ]
+          }
+        }
+      ]
+    },
+    "oauth_tokens": {
+      "responses": [
+        {
+          "status": 200,
+          "for_external_id": "acct-001",
+          "body": {
+            "tokens": [
+              {
+                "clientId": "oauth-001",
+                "scopes": ["https://www.googleapis.com/auth/drive.metadata.readonly"],
+                "displayText": "Inventory Reader"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drive_files": {
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "files": [
+              {
+                "id": "file-001",
+                "name": "公開前提ではない資料",
+                "mimeType": "application/pdf",
+                "driveId": null,
+                "parents": [],
+                "modifiedTime": "2026-08-13T10:00:00Z"
+              },
+              {
+                "id": "file-002",
+                "name": "共有ドライブ資料",
+                "mimeType": "application/vnd.google-apps.document",
+                "driveId": "shared-drive-001",
+                "parents": ["file-001"],
+                "modifiedTime": "2026-08-13T11:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "external_id": "file-gone",
+          "error": "the file was deleted during collection"
+        }
+      ]
+    },
+    "drive_permissions": {
+      "responses": [
+        {
+          "status": 200,
+          "for_external_id": "file-001",
+          "body": {
+            "permissions": [
+              {
+                "id": "perm-001",
+                "type": "user",
+                "role": "reader",
+                "emailAddress": "employee@example.invalid",
+                "allowFileDiscovery": false
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "for_external_id": "file-002",
+          "error": "permission denied for this shared drive"
+        }
+      ]
+    },
+    "admin_reports_login": {
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "items": [
+              {
+                "id": {"uniqueQualifier": "event-001", "time": "2026-08-13T12:00:00Z"},
+                "events": [{"name": "login_success"}],
+                "actor": {"email": "employee@example.invalid"}
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

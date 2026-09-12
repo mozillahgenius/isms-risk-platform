@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "platform": "macos",
+  "items": [
+    {"name": "disk_encrypted", "query": "SELECT encrypted FROM disk_encryption;", "kind": "boolean"},
+    {"name": "screen_lock", "query": "SELECT enabled, delay_seconds FROM preferences WHERE domain = 'com.apple.screensaver';", "kind": "screen_lock"},
+    {"name": "os_version", "query": "SELECT major, minor, patch, build FROM os_version;", "kind": "os_version"},
+    {"name": "patch_current", "query": "SELECT current FROM system_info;", "kind": "boolean"},
+    {"name": "auto_update_enabled", "query": "SELECT enabled FROM preferences WHERE domain = 'com.apple.SoftwareUpdate';", "kind": "boolean"},
+    {"name": "firewall_enabled", "query": "SELECT enabled FROM alf;", "kind": "boolean"},
+    {"name": "edr_running", "query": "SELECT name FROM processes WHERE name IN ('sentinelone', 'crowdstrike', 'falcon-sensor');", "kind": "presence"},
+    {"name": "admin_account_count", "query": "SELECT username FROM user_groups WHERE groupname = 'admin';", "kind": "count"},
+    {"name": "password_manager_installed", "query": "SELECT name FROM apps WHERE name IN ('1Password', 'Bitwarden', 'KeePassXC');", "kind": "presence"},
+    {"name": "unapproved_apps", "query": "SELECT name FROM apps WHERE name NOT IN ('1Password', 'Bitwarden', 'KeePassXC', 'Google Chrome', 'Safari', 'Microsoft Edge', 'Firefox');", "kind": "names"},
+    {"name": "device_identity", "query": "SELECT serial, model, hostname, os_family FROM system_info;", "kind": "identity"},
+    {"name": "off_premise", "query": "SELECT 'enrollment' AS source;", "kind": "enrollment"}
+  ]
+}

@@ -1,0 +1,9 @@
+大項目記号,大項目,中項目,小項目コード,小項目,要請No,要請事項
+S-10,サンプル統制領域,規程管理,10-10,規程の見直し,(1),サンプル統制: 情報セキュリティ規程を年1回見直し、承認を記録する。(Sample control: security policies are reviewed and approved once a year.)
+S-10,サンプル統制領域,規程管理,10-10,規程の見直し,(2),サンプル統制: 規程の例外は、責任者と期限を付けて記録する。(Sample control: policy exceptions are recorded with an owner and an expiry date.)
+S-10,サンプル統制領域,役割と責任,20-10,担当の明確化,(1),サンプル統制: 情報セキュリティの役割と責任を文書にする。(Sample control: security roles and responsibilities are documented.)
+S-20,サンプル運用領域,アクセス管理,10-10,アクセス権の見直し,(1),サンプル統制: アクセス権の棚卸を四半期ごとに実施する。(Sample control: access reviews are performed quarterly.)
+S-20,サンプル運用領域,アクセス管理,10-10,アクセス権の見直し,(2),サンプル統制: 退職者のアカウントは退職日の翌営業日までに無効にする。(Sample control: leaver accounts are disabled by the next business day.)
+S-20,サンプル運用領域,バックアップ,20-10,復元の確認,(1),サンプル統制: バックアップからの復元を四半期ごとに試験する。(Sample control: backup restores are tested every quarter.)
+S-30,サンプル管理領域,リスク管理,10-10,リスクの見直し,(1),サンプル統制: リスク台帳を半期ごとに経営層が確認する。(Sample control: management reviews the risk register twice a year.)
+S-30,サンプル管理領域,インシデント対応,20-10,事後の振り返り,(1),サンプル統制: インシデントを記録し、終結後に振り返りを行う。(Sample control: incidents are logged and reviewed after closure.)

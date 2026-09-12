@@ -1,0 +1,144 @@
+# Google Workspace connector (reader) - design doc 3.2
+#
+# The source of truth is this file in Git. The DB (catalog.connector_manifests) is a projection of it,
+# loaded only by db/seeds/0003_connectors.py (nothing gets in without passing validation).
+#
+# **Each version is a separate file.** app.integrations references (connector, manifest_version) by
+# FK, so a version that has been used even once cannot be deleted. Overwriting one file and only bumping version
+# would make old versions impossible to reproduce when the DB is rebuilt.
+connector: google_workspace
+kind: reader
+version: 3
+
+auth:
+  type: service_account_dwd
+  # A reader can only declare read-only scopes (enforced by validation).
+  scopes:
+    - https://www.googleapis.com/auth/admin.directory.user.readonly
+    - https://www.googleapis.com/auth/admin.directory.group.readonly
+    - https://www.googleapis.com/auth/admin.directory.domain.readonly
+    - https://www.googleapis.com/auth/admin.reports.audit.readonly
+    - https://www.googleapis.com/auth/drive.readonly
+    - https://www.googleapis.com/auth/drive.metadata.readonly
+
+# Declare the allowed HTTP methods. reader / elevated_reader may use GET / HEAD only
+# (even with read-only scopes, being able to declare POST would allow writes at runtime).
+http:
+  methods: [GET]
+  # Hosts that may be reached. Hosts not listed here are unreachable (structurally prevents credentials from being sent out).
+  allowed_hosts:
+    - www.googleapis.com
+    - admin.googleapis.com
+
+resources:
+  - name: users
+    endpoint: admin/directory/v1/users
+    params: {customer: my_customer, projection: full}
+    paging: {type: page_token, param: pageToken, size: 500}
+    map_to: accounts
+    fields:
+      external_id: id              # immutable ID. Do not use email as the primary key
+      email: primaryEmail
+      suspended: suspended
+      mfa_enrolled: isEnrolledIn2Sv
+      is_admin: isAdmin
+      last_login_at: lastLoginTime
+    on_error: {403: fail_run, 429: retry}
+
+  - name: groups
+    endpoint: admin/directory/v1/groups
+    params: {customer: my_customer}
+    paging: {type: page_token, param: pageToken, size: 200}
+    map_to: groups
+    fields:
+      external_id: id
+      name: name
+      email: email                 # Drive permissions refer to groups by emailAddress
+    on_error: {403: fail_run, 429: retry}
+
+  - name: group_members
+    endpoint: admin/directory/v1/groups/{group_id}/members
+    iterate_over: {resource: groups, bind: {group_id: external_id}}
+    paging: {type: page_token, param: pageToken, size: 200}
+    map_to: memberships_graph
+    fields:
+      account_external_id: id
+      member_type: type
+    on_error: {404: skip, 403: record_as_unreadable, 429: retry}
+
+  - name: oauth_tokens
+    endpoint: admin/directory/v1/users/{user_id}/tokens
+    iterate_over: {resource: users, bind: {user_id: external_id}}
+    paging: {type: none}
+    map_to: app_grants
+    fields:
+      oauth_app_external_id: clientId
+      scopes: scopes
+      display_name: displayText
+    on_error: {404: skip, 403: record_as_unreadable, 429: retry}
+
+  - name: drive_files
+    endpoint: drive/v3/files
+    params:
+      supportsAllDrives: true
+      includeItemsFromAllDrives: true
+      corpora: allDrives
+      q: "trashed = false"
+      fields: "nextPageToken,files(id,name,mimeType,owners,driveId,parents,modifiedTime)"
+    paging: {type: page_token, param: pageToken, size: 1000}
+    map_to: resources
+    fields:
+      external_id: id
+      name: name
+      kind: mimeType
+      drive_id: driveId
+      last_modified_at: modifiedTime
+    incremental:
+      type: changes_api
+      cursor_scope: [per_impersonated_user, per_shared_drive]
+      cursor: startPageToken
+      on_cursor_invalid: fallback_full_scan_for_that_scope
+    on_error: {403: record_as_unreadable, 404: record_as_gone, 429: retry}
+
+  - name: drive_permissions
+    endpoint: drive/v3/files/{file_id}/permissions
+    iterate_over: {resource: drive_files, bind: {file_id: external_id}}
+    params:
+      supportsAllDrives: true
+      fields: "nextPageToken,permissions(id,type,role,domain,emailAddress,allowFileDiscovery,expirationTime)"
+    paging: {type: page_token, param: pageToken, size: 100}
+    depends_on: drive_files
+    map_to: grants
+    fields:
+      subject_kind: $derive.permission_subject_kind   # derived from type + domain
+      subject_domain: domain
+      subject_account_email: emailAddress
+      role: role
+      discoverable: allowFileDiscovery
+      expires_at: expirationTime
+    on_error: {403: record_as_unreadable, 404: record_as_gone, 429: retry}
+
+  - name: admin_reports_login
+    endpoint: admin/reports/v1/activity/users/all/applications/login
+    params: {maxResults: 1000}
+    paging: {type: page_token, param: pageToken, size: 1000}
+    map_to: raw_events
+    fields:
+      external_id: id.uniqueQualifier
+      occurred_at: id.time
+      event_type: events.name
+      actor_email: actor.email
+    incremental: {type: time_window, cursor: startTime}
+    on_error: {403: record_as_unreadable, 429: retry}
+
+rate_limit:
+  strategy: token_bucket
+  qps: 8
+  concurrency: 4
+  backoff: exponential_jitter
+  max_retries: 5
+  respect_headers: [Retry-After]
+
+sync:
+  full: weekly
+  incremental: hourly
