@@ -6,8 +6,8 @@ import { ANNEX_A_CODE, type RegisterKey, type StepFacts } from './isoSteps';
 import { ISMS_FRAMEWORK_KEY } from './navigation';
 import { withTenant, type TenantReadResult } from './tenant';
 
-// Reads the catalog schema (= the projection of the rules). Never writes anything.
-// app.* / audit.* are not touched from here (they need tenant context; see tenantDataStatus()).
+// catalog スキーマ（＝ルールの投影）を読むところ。書き込みは一切しない。
+// app.* / audit.* はここから触らない（テナント文脈が要る。tenantDataStatus() を参照）。
 
 
 export type DomVersion = {
@@ -42,8 +42,8 @@ export type Control = {
   framework_key: string;
   code: string;
   title_ja: string;
-  // catalog.controls.theme is nullable (a control may have no classification).
-  // Typing it as string would crash the screen the moment real data turns out NULL.
+  // catalog.controls.theme は NULL 可（分類の無い統制が在り得る）。
+  // 型を string と偽ると、実データが NULL になった瞬間に画面が落ちる。
   theme: string | null;
   guidance_md: string | null;
   retired_at: string | null;
@@ -168,10 +168,10 @@ export async function listFrameworks(): Promise<Framework[]> {
 export type ControlFilter = { q?: string; theme?: string; framework?: string };
 
 export async function listControls(f: ControlFilter = {}): Promise<Control[]> {
-  // What is trimmed here is **input coming from the URL**, not the stored value.
-  // Normalizing stored values is the job of the CHECK in migration 0023 (D-29), so the screen does none of it.
-  // Trimming the input only drops leading/trailing whitespace, and stored values are canonical, so the match result is unchanged.
-  // Input shaping so that a hand-typed URL still resolves even if it contains whitespace.
+  // ここで trim するのは **URL から来た入力**であって、保存値ではない。
+  // 保存値の正規化は migration 0023 の CHECK が担う（D-29）ので、画面側では一切行わない。
+  // 入力の trim は前後の空白を落とすだけで、保存値は正規形なので突き合わせ結果は変わらない。
+  // 手打ちの URL に空白が混ざっても引けるようにするための入力整形。
   const q = (f.q ?? '').trim();
   const theme = (f.theme ?? '').trim();
   const framework = (f.framework ?? '').trim();
@@ -198,7 +198,7 @@ export async function getControl(id: string): Promise<Control | null> {
   });
 }
 
-/** References to a control. Includes references from mappings and risk templates, and returns the counts as is without hiding them. */
+/** 統制の被参照。対応表・リスク雛形からの参照も含め、件数を隠さずそのまま返す。 */
 export type ControlBacklinks = {
   mappings_from: number;
   mappings_to: number;
@@ -251,7 +251,7 @@ export async function listRisks(f: RiskFilter = {}): Promise<RiskTemplate[]> {
   });
 }
 
-/** List of domains used for filter options. Phase is treated as an independent column. */
+/** 絞り込みの選択肢に使う領域の一覧。Phase は独立した列として扱う。 */
 export async function listRiskDomains(framework = ''): Promise<string[]> {
   return query(async (sql) => {
     const rows = await sql<{ domain: string }[]>`
@@ -355,13 +355,13 @@ export async function listChecks(): Promise<CheckRow[]> {
 }
 
 /**
- * Whether operational (tenant business) data can be read.
+ * 運用（テナント業務）データの読み取り可否。
  *
- * The screens connect as app_ro, and app.* needs an RLS tenant context.
- * Reading without a context fails with `tenant context is not set` instead of returning "0 rows".
- * So writing "0 operational records" would be a lie. If it cannot be read, say it cannot be read.
+ * 画面は app_ro で繋いでおり、app.* には RLS のテナント文脈が要る。
+ * 文脈が無い状態で読むと「0 件」ではなく `tenant context is not set` で失敗する。
+ * つまり「運用データ 0 件」と書くのは嘘になる。読めないなら読めないと出す。
  */
-/** Latest run result of each check (needs tenant context). */
+/** チェックの最新の実行結果（テナント文脈が要る）。 */
 export type CheckRunRow = {
   check_key: string;
   title_ja: string;
@@ -372,13 +372,13 @@ export type CheckRunRow = {
   coverage_ratio: string | null;
   negative_verified: boolean;
   verified_digest: string | null;
-  /** Whether that verification is still valid for the check's current content. null = not verified */
+  /** その確認が、いまのチェックの中身に対しても有効か。null = 確認していない */
   digest_current: boolean | null;
   error_detail: string | null;
   started_at: string;
 };
 
-/** Returns only the latest one per check. History belongs to a different screen. */
+/** チェックごとに最新の 1 件だけを返す。履歴は別の画面の話。 */
 export const LATEST_CHECK_RUNS_SQL = `
   SELECT c.key AS check_key, c.title_ja, c.severity, c.cadence,
          r.result, r.row_count, r.coverage_ratio, r.negative_verified,
@@ -428,14 +428,14 @@ export async function getTenantDataStatus(): Promise<TenantDataStatus> {
     return { readable: true, tenants: n };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // The screen only shows a sanitized reason. Log the unsanitized one here.
-    // Without this, the screen's "see the server log for details" would point to something that does not exist.
+    // 画面には丸めた理由しか出さない。丸める前をここでログへ残す。
+    // 残さないと、画面の「詳細はサーバのログを参照」が指す先が存在しないことになる。
     console.error('[operations] 運用データを読めませんでした:', e);
     return { readable: false, reason: safeReason(msg) };
   }
 }
 
-/** Tenant overview and latest check results. Needs tenant context, so read via withTenant. */
+/** テナントの概要とチェックの最新結果。テナント文脈が要るので withTenant 経由で読む。 */
 export async function getTenantOperations(frameworkKey = ''): Promise<
   TenantReadResult<{
     summary: TenantSummary | null;
@@ -542,23 +542,23 @@ export async function getTenantOperations(frameworkKey = ''): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Measurements used to judge the stages (how ISMS is being advanced)
+// 段階（ISMS の進め方）の判定に使う実測
 //
-// Some things cannot be called "done" from row counts alone.
-//   - Even with 12 policies, if their bodies are placeholders, they are not in place
-//   - No matter how many controls there are, if they are not Annex A controls, they cannot be matched against the Statement of Applicability
-//   - Even with 4 check definitions, without a record confirming they fail when run against a broken state, they are not evidence
-// So queries that read the "content", not just the counts, live here.
+// 行数だけでは「できている」と言えないものがある。
+//   - 規程は 12 本あっても本文が仮置きなら、整備済みではない
+//   - 統制は 304 件あっても附属書 A のものでなければ、適用宣言書の相手にならない
+//   - チェックは定義が 4 本あっても、実行して落ちることを確かめた記録が無ければ証拠にならない
+// なので、件数のほかに「中身」を読む問い合わせをここに置く。
 // ---------------------------------------------------------------------------
 
 export type AnnexAShape = { total: number; wellFormed: number };
 
 /**
- * ISO/IEC 27001:2022 Annex A controls.
+ * ISO/IEC 27001:2022 附属書 A の統制。
  *
- * Looking only at counts, linking controls that are not Annex A to ISO27001:2022 would still pass.
- * Also count how many have codes of the form A.x.y, and pass any discrepancy to the screen and the judgment.
- * The judgment is done on the isoSteps side (annexA in resolveTool). This only returns measurements.
+ * 件数だけを見ると、附属書 A ではない統制を ISO27001:2022 に紐付けても通ってしまう。
+ * コードが A.x.y の形をしている件数を併せて数え、食い違いを画面と判定へ渡す。
+ * 判定は isoSteps 側（resolveTool の annexA）で行う。ここは実測を返すだけ。
  */
 export async function getAnnexAShape(): Promise<AnnexAShape> {
   return query(async (sql) => {
@@ -573,12 +573,12 @@ export async function getAnnexAShape(): Promise<AnnexAShape> {
 }
 
 /**
- * Number of check results whose reverse verification is done.
+ * 逆向きの確認が済んだチェック結果の件数。
  *
- * "It ran" alone is not treated as evidence. Count only those confirmed to fail when broken (negative_verified)
- * and whose confirmation **also applies to the check's current content** (the fingerprint matches).
- * When it cannot be read for lack of tenant context, return null rather than 0.
- * Writing 0 when it could not be read would be a lie.
+ * 「実行した」だけでは証拠にしない。壊して落ちることを確かめた（negative_verified）うえで、
+ * その確認が**いまのチェックの中身にも当てはまる**（指紋が一致する）ものだけを数える。
+ * テナント文脈が無くて読めないときは 0 ではなく null を返す。
+ * 読めていないのに 0 件と書くのは嘘になる。
  */
 export async function getVerifiedCheckRunCount(): Promise<number | null> {
   const r = await withTenant(async (sql) => {
@@ -598,18 +598,18 @@ export async function getVerifiedCheckRunCount(): Promise<number | null> {
 }
 
 /**
- * Measurements of the organization's own ledger (app schema). Needs tenant context, so read via withTenant.
+ * 自社の台帳（app スキーマ）の実測。テナント文脈が要るので withTenant 経由で読む。
  *
- * What is counted is **rows registered in the ledger**. Approval and assignment of a responsible manager are not counting conditions
- * (user decision of 2026-09-07: data that has been entered is treated as valid as is).
- * Return null when it could not be read (do not mix it up with 0).
+ * 数えるのは**台帳に登録されている行**。承認や管理責任者の割り当ては数の条件にしない
+ * （2026-09-07 のユーザー判断。入っているデータはそのまま有効として扱う）。
+ * 読めなかったときは null を返す（0 件と混ぜない）。
  *
- * **Always filter by frameworkKey.** There is a single ledger, and frameworks are lenses on top of it
- * (ISMS_SHARED_LEDGER_DESCRIPTION in navigation.ts). Counting without filtering would mix
- * IPO-readiness-only assets and measures into the ISO screens, and the counts would disagree with other screens.
+ * **frameworkKey で必ず絞る。** 台帳は 1 本で、枠組みはその上のレンズ
+ * （navigation.ts の ISMS_SHARED_LEDGER_DESCRIPTION）。絞らずに数えると、
+ * ISO の画面に上場準備だけの資産・施策まで混ざり、他の画面と数が食い違う。
  */
-// "Up to today" compares against today in JST ((now() AT TIME ZONE 'Asia/Tokyo')::date). current_date depends on the DB time zone,
-// so with a UTC DB, records entered with today's date between 0:00 and 8:59 JST would not be counted. Aligned with the registration side (todayJst in the server actions).
+// 「今日まで」は JST の今日で比べる（(now() AT TIME ZONE 'Asia/Tokyo')::date）。current_date は DB のタイムゾーンで決まり、
+// UTC の DB だと JST の 0:00〜8:59 に今日の日付で入れた記録が数に入らない。登録側（サーバーアクションの todayJst）とそろえる。
 export async function getRegisterFacts(
   frameworkKey: string,
 ): Promise<Record<RegisterKey, number> | null> {
@@ -714,12 +714,12 @@ export async function getRegisterFacts(
 }
 
 /**
- * Read, in a single pass, the measurements needed to judge the stages and the lists the stage screens show.
+ * 段階の判定に要る実測と、段階の画面が並べる一覧を、まとめて 1 回だけ読む。
  *
- * Policies, the annual calendar, and roles are needed both for the judgment (keys and substantive body) and for displaying the lists.
- * Reading them separately for judgment and display queries the same tables twice, and
- * if the DB changes between the two reads, the judgment and the list disagree within the same screen.
- * The rows read once here are used for both (the count aggregation getCounts is a separate query).
+ * 規程・年間行事・ロールは、判定（キーと本文の実質）にも一覧の表示にも要る。
+ * 判定用と表示用で別々に読むと、同じ表を二度引くうえに、
+ * 二つの読みの間に DB が変わると、同じ画面の中で判定と一覧が食い違う。
+ * ここで 1 度引いた行を両方に使う（件数の集計 getCounts は別の問い合わせ）。
  */
 export type StepBundle = {
   facts: StepFacts;
@@ -737,8 +737,8 @@ export async function getStepBundle(): Promise<StepBundle> {
       listRoles(),
       getAnnexAShape(),
       getVerifiedCheckRunCount(),
-      // The stage screens (/ and /steps/*) always end up in ISMS mode via resolveAppMode.
-      // Ledger counts are also counted within that framework (so the numbers match the other ISMS screens).
+      // 段階の画面（/ と /steps/*）は resolveAppMode で必ず ISMS モードになる。
+      // 台帳の件数もその枠組みで数える（他の ISMS 画面と数を一致させる）。
       getRegisterFacts(ISMS_FRAMEWORK_KEY),
     ]);
   const facts: StepFacts = {

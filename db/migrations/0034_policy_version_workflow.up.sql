@@ -1,19 +1,19 @@
--- 0034 app: versioning, approval and activation workflow for policy documents
+-- 0034 app: 規程文書（policy）の版管理・承認・有効化ワークフロー
 --
--- The existing app.policies / app.policy_versions / app.approvals (0011) were
--- not used by the Web side at all, and the following were missing:
---   (1) no DB constraint that "only one version is currently effective"
---   (2) no mechanism preventing approved versions from being rewritten
---   (3) no path making approval and activation one consistent operation
---   (4) no path that actually uses app.approvals
---   (5) no user identification on the write path to record "who approved"
---       (app.set_tenant_context only puts the tenant ID in a GUC)
+-- 既存の app.policies / app.policy_versions / app.approvals（0011）は
+-- Web 側から一切使われておらず、以下が欠けていた。
+--   (1) 「現在有効な版は1つだけ」という制約が DB に無い
+--   (2) 承認済みの版が書き換えられることを防ぐ仕組みが無い
+--   (3) 承認・有効化を1つの整合した操作にする経路が無い
+--   (4) app.approvals を実際に使う経路が無い
+--   (5) 「誰が承認したか」を残すための利用者識別が書き込み経路に無い
+--       （app.set_tenant_context はテナントIDしか GUC に置いていない）
 --
--- Unless (5) is filled first, approved_by / approver_user_id in (3)(4) are always NULL.
+-- (5) を先に埋めないと (3)(4) の approved_by / approver_user_id が常に NULL になる。
 
 -- ============================================================
--- (5) Allow the session user's identity to be held in a signed GUC, like the tenant context
---     Same approach as app.tenant_context_signature (0006). The key table is reused too.
+-- (5) セッション利用者の識別を、テナント文脈と同じ署名つき GUC で持てるようにする
+--     app.tenant_context_signature と同じ作法（0006）。鍵テーブルも使い回す。
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION app.session_context_signature(p_tenant uuid, p_user uuid) RETURNS text
@@ -35,9 +35,9 @@ END $$;
 ALTER FUNCTION app.session_context_signature(uuid, uuid) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.session_context_signature(uuid, uuid) FROM PUBLIC;
 
--- Replace set_tenant_context so it also sets the session-user GUCs in the same transaction.
--- Return value, arguments and existing validation logic are unchanged (backward compatible). The only
--- additions are the 2 GUCs app.session_user_id / app.session_user_sig.
+-- set_tenant_context を置き換え、同じトランザクションでセッション利用者の GUC も張る。
+-- 返り値・引数・既存の検証ロジックは変えない（後方互換）。追加するのは
+-- app.session_user_id / app.session_user_sig の2 GUC だけ。
 CREATE OR REPLACE FUNCTION app.set_tenant_context(p_token text) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog AS $$
@@ -71,12 +71,12 @@ ALTER FUNCTION app.set_tenant_context(text) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.set_tenant_context(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.set_tenant_context(text) TO app_rw, app_ro;
 
--- Read function paired with current_tenant(). Applies the same validation (signature check).
+-- current_tenant() と対になる読み取り関数。同じ検証（署名照合）を課す。
 CREATE OR REPLACE FUNCTION app.current_session_user() RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog AS $$
 DECLARE
-  v_tenant uuid := app.current_tenant(); -- raises here if not set
+  v_tenant uuid := app.current_tenant(); -- 未設定ならここで例外
   v_id  text := pg_catalog.current_setting('app.session_user_id',  true);
   v_sig text := pg_catalog.current_setting('app.session_user_sig', true);
   v_user uuid;
@@ -102,8 +102,8 @@ REVOKE ALL ON FUNCTION app.current_session_user() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.current_session_user() TO app_rw, app_ro;
 
 -- ============================================================
--- (1) Only one currently effective version per (tenant_id, policy_id)
---     Same shape as risk_assessments_current on app.risk_assessments (0008).
+-- (1) 現在有効な版は (tenant_id, policy_id) につき 1 つだけ
+--     app.risk_assessments の risk_assessments_current（0008）と同じ形。
 -- ============================================================
 
 CREATE UNIQUE INDEX policy_versions_current
@@ -111,9 +111,9 @@ CREATE UNIQUE INDEX policy_versions_current
   WHERE effective_from IS NOT NULL AND superseded_at IS NULL;
 
 -- ============================================================
--- (2) An approved version's body, version number and approval info cannot be rewritten
---     To change content, add a new version (a new row).
---     Updating effective_from / superseded_at (= activation / supersession) is allowed.
+-- (2) 承認済みの版は本文・版番号・承認情報を書き換えられない
+--     内容を変えたいときは新しい版（新しい行）を追加する。
+--     effective_from / superseded_at の更新（＝有効化・失効）は許す。
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION app.protect_approved_policy_version() RETURNS trigger
@@ -130,12 +130,12 @@ BEGIN
         USING ERRCODE = 'integrity_constraint_violation';
     END IF;
   END IF;
-  -- The transition to approved from unapproved (OLD.approved_at IS NULL) cannot be detected by the
-  -- block above (which only looks at already-approved rows). app_rw has ordinary UPDATE privilege
-  -- on app.policy_versions, so without this guard one could bypass approve_policy_version() and,
-  -- in the same transaction, rewrite body_md and forge approved_at/approved_by with a direct UPDATE
-  -- (measured in the Codex review of 2026-09-02: a direct UPDATE was confirmed to go through).
-  -- Require a session flag that is SET LOCAL only inside approve_policy_version().
+  -- 未承認(OLD.approved_at IS NULL)からの承認遷移は、上のブロック(既に承認済みの
+  -- 行しか見ていない)では検知できない。app_rw は app.policy_versions への通常の
+  -- UPDATE権限を持つため、このガードが無いと approve_policy_version() を経由せず、
+  -- 直接UPDATEでbody_mdの書き換えと approved_at/approved_by の詐称を同一トランザク
+  -- ションで行えてしまう(Codexレビュー2026-09-02で実測: 直接UPDATEが通ることを確認)。
+  -- approve_policy_version() 内でのみ SET LOCAL するセッションフラグを要求する。
   IF OLD.approved_at IS NULL AND NEW.approved_at IS NOT NULL THEN
     IF pg_catalog.current_setting('app.policy_approval_in_progress', true) IS DISTINCT FROM 'true' THEN
       RAISE EXCEPTION 'approval must go through app.approve_policy_version()'
@@ -162,9 +162,9 @@ CREATE TRIGGER trg_protect_approved_policy_version_delete
   FOR EACH ROW EXECUTE FUNCTION app.protect_approved_policy_version_delete();
 
 -- ============================================================
--- (3)(4) Functions that make approval and activation a single operation
---     Called from app_rw's ordinary connection (not SECURITY DEFINER).
---     Reuses the validation in app.current_tenant() / app.current_session_user() as-is.
+-- (3)(4) 承認・有効化を1操作にまとめる関数
+--     app_rw の通常接続から呼ぶ（SECURITY DEFINER にしない）。
+--     app.current_tenant() / app.current_session_user() の検証をそのまま使う。
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION app.approve_policy_version(
@@ -188,9 +188,9 @@ BEGIN
     RAISE EXCEPTION 'policy version is already approved';
   END IF;
 
-  -- Session-local flag that lets trg_protect_approved_policy_version reject approval transitions
-  -- (OLD.approved_at IS NULL → NEW.approved_at IS NOT NULL) from any other path.
-  -- Equivalent to SET LOCAL, so it disappears at transaction end.
+  -- trg_protect_approved_policy_version が、この経路以外からの承認遷移
+  -- (OLD.approved_at IS NULL → NEW.approved_at IS NOT NULL)を拒否するための
+  -- セッションローカルフラグ。SET LOCAL 相当なのでトランザクション終了で消える。
   PERFORM pg_catalog.set_config('app.policy_approval_in_progress', 'true', true);
 
   UPDATE app.policy_versions
@@ -227,7 +227,7 @@ BEGIN
     RAISE EXCEPTION 'policy version is not approved; approve before activating';
   END IF;
 
-  -- Supersede the existing current version of the same policy (excluding the target itself).
+  -- 同一規程の既存の現行版を失効させる（対象自身は除く）。
   UPDATE app.policy_versions
      SET superseded_at = pg_catalog.now(), updated_at = pg_catalog.now()
    WHERE tenant_id = v_tenant AND policy_id = v_policy_id

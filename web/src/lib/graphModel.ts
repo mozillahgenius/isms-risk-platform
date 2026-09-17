@@ -1,12 +1,12 @@
-// Builds the nodes and edges shown in the diagram from the catalog (= a projection of the rules). Pure function. Touches neither the DB nor the DOM.
+// カタログ（＝ルールの投影）から、図に出すノードと辺を組み立てる。純関数。DB にも DOM にも触らない。
 //
-// Rules to keep here:
-//   1. **Do not mix relations that actually exist with relations derived from classification.** Every edge has a kind,
-//      so you can tell whether it is 'real' (present as-is in a DB column/FK) or 'derived' (built by splitting text).
-//      Drawing derived ones the same way as real ones would make nonexistent relations look like they exist.
-//   2. **Do not drop things with zero contents.** Frameworks with zero controls, and checks or mappings not yet loaded,
-//      stay in the diagram as nodes colored "not loaded". Dropping them makes them look "never anticipated" rather than "absent".
-//   3. Derived nodes (intermediate headings that are not DB rows) have derived: true. The renderer draws them hollow.
+// ここで守ること:
+//   1. **実在する関係と、分類から導出した関係を混ぜない。** 辺は必ず kind を持ち、
+//      'real'（DB の列・FK にそのまま在る）か 'derived'（テキストを割って作った）かが分かる。
+//      導出したものを実在と同じ顔で描くと、無い関係を有るように見せることになる。
+//   2. **中身が 0 件のものを消さない。** 統制が 0 件のフレームワーク、未投入のチェックや対応表は
+//      「未投入」という色のノードとして図に残す。消すと「無い」ではなく「元から想定が無い」に見える。
+//   3. 導出ノード（DB の行ではない中間の見出し）は derived: true。描画側は白抜きにする。
 
 import { encodeNodeId, groupKey } from './nodeid';
 
@@ -24,23 +24,23 @@ export type PyramidLinkOut = { parent: string; child: string; section: string | 
 
 export type EdgeKind = 'real' | 'derived';
 
-// bucket = the color in the diagram. Keep it one-to-one with the legend (BUCKET_LEGEND in GraphViews).
-export const BUCKET_STRUCTURE = 0; // Skeleton (DOM, categories, frameworks, policies, organization, calendar)
-export const BUCKET_CONTROL = 1; // Controls
-export const BUCKET_RISK = 2; // Risk scenarios
-export const BUCKET_EMPTY = 3; // Not loaded (zero contents)
+// bucket = 図の色。凡例（GraphViews の BUCKET_LEGEND）と 1 対 1 で対応させる。
+export const BUCKET_STRUCTURE = 0; // 骨格（DOM・区分・フレームワーク・規程・体制・カレンダー）
+export const BUCKET_CONTROL = 1; // 統制
+export const BUCKET_RISK = 2; // リスクシナリオ
+export const BUCKET_EMPTY = 3; // 未投入（中身が 0 件）
 
 export type CatalogSnapshot = {
   dom: { version: string } | null;
   frameworks: { key: string; name_ja: string; control_count: number }[];
-  // theme may be NULL (nullable in the DB). Controls without a classification attach directly under the framework.
+  // theme は NULL 可（DB が nullable）。分類の無い統制はフレームワーク直下に付く。
   controls: { id: string; code: string; title_ja: string; theme: string | null; framework_key: string }[];
   risks: { id: string; domain: string; theme: string; measure: string; frame: string; summary: string }[];
   policies: { key: string; title_ja: string }[];
   roles: { key: string; name_ja: string }[];
   assets: { key: string; name_ja: string }[];
   calendar: { key: string; name_ja: string; cadence: string; owner_role: string }[];
-  // Counts in related tables. Those with 0 are shown in the diagram as "not loaded" nodes.
+  // 関連テーブルの件数。0 のものは「未投入」ノードとして図に出す。
   empties: {
     framework_mappings: number;
     risk_template_controls: number;
@@ -61,14 +61,14 @@ export type GraphModel = {
 };
 
 const THEME_SEP = ' / ';
-// A risk's domain has the form "department name (Phase1)". Split it into department and Phase.
+// リスクの domain は「経理・税務（Phase1）」の形。部門と Phase に割る。
 const DOMAIN_RE = /^(.*)（(Phase\d+)）$/;
 
 /**
- * Split a control's theme into levels. Three levels are expected, but a different count is not dropped; use whatever is there.
+ * 統制の theme を段に割る。想定は 3 段だが、段数が違っても落とさず在るだけ使う。
  *
- * theme may be NULL in the DB, so NULL or whitespace-only is treated as "no classification" = an empty array.
- * Controls returning an empty array attach directly under the framework (the row itself is not removed from the diagram).
+ * theme は DB で NULL 可なので、NULL・空白のみは「分類なし」＝ 空配列として扱う。
+ * 空配列を返した統制はフレームワーク直下に付く（行そのものは図から消さない）。
  */
 export function splitTheme(theme: string | null | undefined): string[] {
   if (theme == null) return [];
@@ -78,7 +78,7 @@ export function splitTheme(theme: string | null | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Split a risk's domain into department and Phase. If the shape differs, return only the department (Phase is null). */
+/** リスクの domain を部門と Phase に割る。形が違えば部門だけ返す（Phase は null）。 */
 export function splitDomain(domain: string): { dept: string; phase: string | null } {
   const m = DOMAIN_RE.exec(domain);
   if (!m) return { dept: domain, phase: null };
@@ -90,16 +90,16 @@ type Builder = {
   links: PyramidLinkOut[];
   extraGraphLinks: { s: string; t: string; kind: EdgeKind }[];
   linkKinds: EdgeKind[];
-  // Marker to avoid placing the same edge twice. Classification edges get added once per row belonging to that classification
-  // (if 20 controls share the same theme, the same edge arrives 20 times). Stacking them inflates the edge count,
-  // and node size (number of connections) also drifts from reality.
+  // 同じ辺を二度置かないための印。分類の辺は、その分類に属する行の数だけ足そうとする
+  // （同じ theme を持つ統制が 20 件あれば、同じ辺が 20 回来る）。重ねると本数が水増しされ、
+  // ノードの大きさ（接続本数）も実態とずれる。
   seenLinks: Set<string>;
 };
 
 function addNode(b: Builder, n: PyramidNodeOut): string {
   const cur = b.nodes.get(n.id);
   if (cur) {
-    // If the same node arrives via another path, take the shallower level (level = "the highest position it appears at").
+    // 同じノードが別経路から来たら、浅い方の階層を採る（階層は「最も上に現れる位置」）。
     if (n.level < cur.level) cur.level = n.level;
     return n.id;
   }
@@ -128,7 +128,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     seenLinks: new Set(),
   };
 
-  // --- L0: DOM version --------------------------------------------------------
+  // --- L0: DOM 版 ------------------------------------------------------------
   const domId = encodeNodeId('dom', s.dom?.version ?? 'unknown');
   addNode(b, {
     id: domId,
@@ -138,7 +138,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     bucket: s.dom ? BUCKET_STRUCTURE : BUCKET_EMPTY,
   });
 
-  // --- L1: Categories --------------------------------------------------------
+  // --- L1: 区分 --------------------------------------------------------------
   const sections: { key: string; title: string }[] = [
     { key: 'controls', title: '統制カタログ' },
     { key: 'risks', title: 'リスクシナリオ' },
@@ -154,7 +154,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     addLink(b, domId, id, '構成', 'derived');
   }
 
-  // --- Controls: framework -> 3 theme levels -> control ------------------------
+  // --- 統制: フレームワーク → theme 3 段 → 統制 -------------------------------
   for (const f of s.frameworks) {
     const fid = encodeNodeId('framework', f.key);
     addNode(b, {
@@ -162,7 +162,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
       title: `${f.name_ja}（${f.control_count}件）`,
       level: 2,
       deg: 0,
-      // Frameworks with no controls at all get a different color as "not loaded". Do not drop them.
+      // 統制が 1 件も入っていないフレームワークは「未投入」として色を変える。消さない。
       bucket: f.control_count > 0 ? BUCKET_STRUCTURE : BUCKET_EMPTY,
     });
     addLink(b, sectionId.controls, fid, '実関係: controls.framework_key', 'real');
@@ -182,12 +182,12 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     const cid = encodeNodeId('control', c.id);
     addNode(b, { id: cid, title: `${c.code} ${c.title_ja}`, level: level + 1, deg: 0, bucket: BUCKET_CONTROL });
     addLink(b, parentId, cid, '導出: controls.theme', 'derived');
-    // Control -> framework is a real relation present as-is in a column. In the pyramid the paths overlap, so
-    // add it only on the relation-graph side (do not give the pyramid multiple parents).
+    // 統制→フレームワークは列にそのまま在る実関係。ピラミッドでは経路が重なるので、
+    // 関連グラフの側にだけ足す（ピラミッドを多重親にしない）。
     b.extraGraphLinks.push({ s: cid, t: encodeNodeId('framework', c.framework_key), kind: 'real' });
   }
 
-  // Related items not yet loaded (mappings, checks) are kept as "not loaded" nodes rather than dropped.
+  // 未投入の関連（対応表・チェック）は、消さずに「未投入」ノードとして残す。
   if (s.empties.framework_mappings === 0) {
     const id = group('empty', ['framework_mappings']);
     addNode(b, { id, title: 'フレームワーク対応表（0件・未投入）', level: 2, deg: 0, bucket: BUCKET_EMPTY, derived: true });
@@ -199,7 +199,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     addLink(b, sectionId.controls, id, '未投入', 'derived');
   }
 
-  // --- Risks: department -> Phase -> theme -> measure -> scenario --------------
+  // --- リスク: 部門 → Phase → theme → measure → シナリオ ----------------------
   for (const r of s.risks) {
     const { dept, phase } = splitDomain(r.domain);
     const deptId = group('dept', [dept]);
@@ -230,7 +230,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     addNode(b, { id: rid, title: r.summary, level: level + 1, deg: 0, bucket: BUCKET_RISK });
     addLink(b, measureId, rid, '導出: measure', 'derived');
 
-    // Perspectives (manageability / accuracy / speed) are real relations present as-is in columns. Add them on the relation-graph side.
+    // 観点（管理可能性 / 精度 / スピード）は列にそのまま在る実関係。関連グラフ側に足す。
     const frameId = encodeNodeId('frame', r.frame);
     addNode(b, { id: frameId, title: `観点: ${r.frame}`, level: 2, deg: 0, bucket: BUCKET_STRUCTURE });
     b.extraGraphLinks.push({ s: rid, t: frameId, kind: 'real' });
@@ -242,14 +242,14 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     addLink(b, sectionId.risks, id, '未投入', 'derived');
   }
 
-  // --- Policies ---------------------------------------------------------------
+  // --- 規程 ------------------------------------------------------------------
   for (const p of s.policies) {
     const id = encodeNodeId('policy', p.key);
     addNode(b, { id, title: p.title_ja, level: 2, deg: 0, bucket: BUCKET_STRUCTURE });
     addLink(b, sectionId.policies, id, '実関係: policies_default', 'real');
   }
 
-  // --- Organization and classifications ---------------------------------------
+  // --- 体制と分類 ------------------------------------------------------------
   const rolesGid = group('org', ['roles']);
   addNode(b, { id: rolesGid, title: '標準ロール', level: 2, deg: 0, bucket: BUCKET_STRUCTURE, derived: true });
   addLink(b, sectionId.org, rolesGid, '構成', 'derived');
@@ -268,7 +268,7 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     addLink(b, assetsGid, id, '実関係: asset_classes_default', 'real');
   }
 
-  // --- Annual calendar: cycle -> event (edges to responsible roles are real relations; added on the graph side) -----
+  // --- 年間カレンダー: 周期 → 行事（担当ロールへの辺は実関係。グラフ側に足す）-----
   for (const e of s.calendar) {
     const cadId = group('cadence', [e.cadence]);
     addNode(b, { id: cadId, title: e.cadence, level: 2, deg: 0, bucket: BUCKET_STRUCTURE, derived: true });
@@ -279,11 +279,11 @@ export function buildGraphModel(s: CatalogSnapshot): GraphModel {
     b.extraGraphLinks.push({ s: id, t: encodeNodeId('role', e.owner_role), kind: 'real' });
   }
 
-  // --- Output -----------------------------------------------------------------
+  // --- 出力 ------------------------------------------------------------------
   const nodes = [...b.nodes.values()];
   const known = new Set(nodes.map((n) => n.id));
 
-  // Degree (number of connections). Used for rendered size. Counts both pyramid edges and additional real-relation edges.
+  // 次数（接続本数）。描画の大きさに使う。ピラミッド辺と追加の実関係辺の両方を数える。
   const deg = new Map<string, number>();
   const bump = (id: string) => deg.set(id, (deg.get(id) ?? 0) + 1);
   for (const l of b.links) {

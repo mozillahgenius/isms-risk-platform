@@ -1,4 +1,4 @@
--- 0054: enforce per-fiscal-year evidence, re-evaluation and manager permission for training integration
+-- 0054: 教育連携の年度別証跡、再評価、管理権限を強制する
 
 SET ROLE schema_owner;
 

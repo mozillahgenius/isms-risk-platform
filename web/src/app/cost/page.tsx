@@ -4,7 +4,7 @@ import { saveRate, saveEducationRecord } from '@/app/cost/actions';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '教育コストと人件費' };
 
-// postgres.js returns numeric as strings. Convert with Number() only right before display (same approach as 0035).
+// postgres.js は numeric を文字列で返す。表示直前でのみ Number() 変換する(0035と同じ方針)。
 function yen(value: string | null): string {
   if (value === null) return '—';
   return `¥${Number(value).toLocaleString('ja-JP')}`;

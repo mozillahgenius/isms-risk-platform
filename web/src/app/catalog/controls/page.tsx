@@ -54,7 +54,7 @@ export default async function ControlsPage({ searchParams }: { searchParams: Sea
         {mode && <input type="hidden" name="mode" value={mode} />}
         <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
           検索（コード・表題・分類）
-          <input className="input min-w-[260px]" type="search" name="q" defaultValue={q} placeholder="例: アクセス" />
+          <input className="input min-w-[260px]" type="search" name="q" defaultValue={q} placeholder="例: 取締役会" />
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
           フレームワーク
@@ -107,7 +107,7 @@ export default async function ControlsPage({ searchParams }: { searchParams: Sea
                     </Link>
                   </td>
                   <td className="px-4 py-2">{c.title_ja}</td>
-                  {/* Leaving a control with no category blank makes it impossible to tell "couldn't fetch" from "doesn't exist". */}
+                  {/* 分類が無い統制を空欄にすると「取れなかった」のか「無い」のか区別が付かない。 */}
                   <td className="px-4 py-2 text-[12px] text-[var(--muted)]">
                     {(c.theme ?? '').trim() === '' ? <span className="italic">分類なし</span> : c.theme}
                   </td>

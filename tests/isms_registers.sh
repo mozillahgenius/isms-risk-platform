@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Acceptance for 0065 onward: roles, invariants, tenant isolation and rollback for the previously missing ISMS registers (design doc 2026-09-11 §4).
-# Run against a throwaway DB.
+# 0065 以降の受入: ISMS の不足していた台帳（設計書 2026-09-11 §4）の役割・不変条件・テナント分離・巻き戻し。
+# 使い捨ての DB で走らせる。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="${ISMS_TEST_DB:-isms_registers_$$}"
 die() { printf '[isms registers] %s\n' "$*" >&2; exit 1; }
 pass() { printf '  PASS %s\n' "$*"; }
-# Check not only that it failed but that "it failed for the intended reason" (prevents false passes that fail for some other reason).
+# 落ちたことだけでなく「狙った理由で落ちたか」を確かめる（別の理由で落ちても通ってしまう空振りを防ぐ）。
 expect_fail_because() {
   local want="$1"; shift
   local out
@@ -17,11 +17,11 @@ expect_fail_because() {
 sql() { psql -w -q -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 
 [ "$DB" != "isms_dev" ] || die "refuse shared db"
-# Every psql uses -w (never prompt for a password). If credentials are missing, fail immediately instead of hanging
-# (in an unattended deployment psql waited for a password and the acceptance test hung for 30 minutes; 2026-09-13).
-# In deployment, this DB's credentials are written to PGPASSFILE by scripts/configure_db_roles.py (fixture_databases).
+# どの psql も -w（パスワードを聞かない）。資格情報が足りなければ、止まらずにすぐ落とす
+# （無人の配備で psql がパスワードの入力を待ち、受入試験が30分止まった。2026-09-13）。
+# 配備では、この DB の資格情報は scripts/configure_runtime_db_roles.py が PGPASSFILE に書く（fixture_databases）。
 CREATED_DB=0
-# Always drop the DB we created. If it cannot be dropped, fail the test (do not overlook leftover DBs; same as run_isolated.sh).
+# 作った DB は必ず消す。消せなければ試験を失敗にする（残った DB を見逃さない。run_isolated.sh と同じ）。
 cleanup() {
   local rc=$?
   if [ "$CREATED_DB" = 1 ] && ! dropdb -w --if-exists "$DB" >/dev/null 2>&1; then
@@ -57,7 +57,7 @@ INSERT INTO app.users(tenant_id,id,email,display_name) VALUES
 INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES
  ('$T1','$CISO','ciso'), ('$T1','$ADMIN','secretariat'), ('$T1','$MANAGER','risk_owner'),
  ('$T1','$AUDITOR','auditor'), ('$T1','$MEMBER','employee'), ('$T2','$OTHER','secretariat'),
- -- Another tenant's executive. Confirms that even with decision rights, another tenant's request is not found.
+ -- 他テナントの経営層。判断の権限があっても、別テナントの申請は見つからないことを確かめるため。
  ('$T2','$OTHER','ciso');
 SQL
 
@@ -115,7 +115,7 @@ expect_fail_because 'interested_parties_tenant_id_owner_user_id_fkey' call_as $A
 pass "担当に他テナントの利用者は付けられない"
 
 echo '== テナント分離'
-# call_as also prints set_tenant_context's result row, so read the count from the last line.
+# call_as は set_tenant_context の結果行も出すので、件数は最後の 1 行で見る。
 [ "$(call_as other-token-00000000000000000000000000000006 "SELECT count(*) FROM app.context_issues;" | tail -n1)" = 0 ] || die "tenant leak (issues)"
 [ "$(call_as other-token-00000000000000000000000000000006 "SELECT count(*) FROM app.interested_parties;" | tail -n1)" = 0 ] || die "tenant leak (parties)"
 [ "$(call_as $ADMIN_T "SELECT count(*) FROM app.context_issues;" | tail -n1)" = 2 ] || die "own tenant cannot read"
@@ -156,7 +156,7 @@ expect_fail_because 'row-level security' call_as $AUDITOR_T \
   "INSERT INTO app.legal_requirements(tenant_id,kind,title,requirement) VALUES(app.current_tenant(),'law','越権','越権');"
 pass "監査人は要求事項を直接書いても拒否される"
 [ "$(call_as $MANAGER_T "WITH u AS (UPDATE app.context_issues SET title = title || 'x' RETURNING 1) SELECT count(*) FROM u;" | tail -n1)" = 0 ] || die "manager updated context"
-# First confirm there is something to delete (with no rows, it would pass with 0 even without a policy).
+# 消す対象が在ることを先に確かめる（行が無ければ、ポリシーが無くても 0 件で通ってしまう）。
 PARTIES_BEFORE="$(sql -At -c "SELECT count(*) FROM app.interested_parties")"
 [ "$PARTIES_BEFORE" -ge 1 ] || die "no party to delete (vacuous test)"
 [ "$(call_as $MANAGER_T "WITH d AS (DELETE FROM app.interested_parties RETURNING 1) SELECT count(*) FROM d;" | tail -n1)" = 0 ] || die "manager deleted party"
@@ -274,9 +274,9 @@ pass "申請者は自分の申請を判断できない（経営層でも）"
 expect_fail_because 'rejection reason required' call_as $CISO_T "SELECT app.decide_change_request('$CR', false);"
 pass "却下には理由が要る"
 call_as $CISO_T "SELECT app.decide_change_request('$CR', true, '業務上必要');" >/dev/null
-# Verify the hash by content, not length (a JSON array of title, description, impact, risk, rollback plan, asset).
+# ハッシュは長さではなく中身で確かめる（件名・内容・影響・リスク・戻し方・資産を JSON 配列にしたもの）。
 [ "$(sql -At -c "SELECT count(*) FROM app.approvals ap JOIN app.change_requests c ON c.tenant_id=ap.tenant_id AND c.id=ap.target_id WHERE ap.target_type='change_request' AND ap.target_id='$CR' AND ap.approver_user_id='$CISO' AND ap.target_version_hash = public.digest(convert_to(jsonb_build_array(c.title,c.description,c.impact,c.risk_level,c.rollback_plan,coalesce(c.asset_id::text,''))::text,'UTF8'),'sha256')")" = 1 ] || die "approval record"
-# A boolean concatenated to a string becomes 'true' / 'false' (not psql's display 't').
+# 真偽値は文字列に連結すると 'true' / 'false' になる（psql の表示の 't' ではない）。
 [ "$(sql -At -c "SELECT status || ' ' || (decided_by = '$CISO') FROM app.change_requests WHERE id='$CR'")" = "approved true" ] || die "approved state"
 pass "経営層が承認でき、承認した中身のハッシュが承認の記録に残る"
 expect_fail_because 'not awaiting a decision' call_as $CISO_T "SELECT app.decide_change_request('$CR', true);"
@@ -314,12 +314,12 @@ SHA="decode(repeat('ab', 32), 'hex')"
 call_as $ADMIN_T "SELECT app.require_records_role('import');" >/dev/null && pass "管理者は取り込める"
 expect_fail_because 'records role required' call_as $MANAGER_T "SELECT app.require_records_role('import');"
 pass "マネージャーは取り込めない（台帳の一括作成は管理者以上）"
-# One import: create the record, asset and items in the same transaction. The record's actor is filled with the actual user, not the written value.
+# 取り込み 1 回分: 同じトランザクションで記録・資産・明細を作る。記録の本人は、書いた値ではなく本人で埋まる。
 call_as $ADMIN_T "
 INSERT INTO app.import_batches(tenant_id,id,kind,file_sha256,row_count,created_count,imported_by,imported_at)
   VALUES(app.current_tenant(),'$B1','assets',$SHA,1,1,'$CISO',now() - interval '1 day');
 INSERT INTO app.assets(tenant_id,asset_key,name,asset_type,classification) VALUES(app.current_tenant(),'IMP-1','取り込んだ資産','情報','internal');
--- Active assets need a risk-management framework (the DB checks at commit). Imports attach it via the same path.
+-- 有効な資産にはリスク管理の枠組みが要る（コミット時に DB が確かめる）。取り込みも同じ経路で付ける。
 SELECT app.set_management_frameworks_human('asset', id, ARRAY['RISK-MANAGEMENT']) FROM app.assets WHERE asset_key='IMP-1';
 INSERT INTO app.import_batch_items(tenant_id,batch_id,row_no,target_type,target_id)
   SELECT app.current_tenant(), '$B1', 1, 'asset', id FROM app.assets WHERE asset_key='IMP-1';" >/dev/null
@@ -416,7 +416,7 @@ INSERT INTO app.import_batches(tenant_id,id,kind,file_sha256,row_count,created_c
 INSERT INTO app.departments(tenant_id,name) VALUES(app.current_tenant(),'値違いの部');
 INSERT INTO app.import_batch_items(tenant_id,batch_id,row_no,target_type,target_id,new_department_id) SELECT app.current_tenant(),'$B9',1,'department',id,id FROM app.departments WHERE name='値違いの部';"
 pass "部署の明細に割り当ての値は入らない"
-# Give the membership a non-null original department (to check that an item's original department matches the department before the actual change; 0075).
+# 元の部署を空でない部署にしておく（明細の元の部署が、実際に変わる前の部署と一致するかを確かめるため。0075）。
 PREV="(SELECT id FROM app.departments WHERE name='元の部')"
 call_as $ADMIN_T "
 INSERT INTO app.departments(tenant_id,name) VALUES(app.current_tenant(),'元の部');
@@ -472,7 +472,7 @@ INSERT INTO app.import_batches(tenant_id,id,kind,file_sha256,row_count,created_c
 INSERT INTO app.assets(tenant_id,asset_key,name,asset_type,classification) VALUES(app.current_tenant(),'IMP-6','セーブポイント','情報','internal');
 $TAG='IMP-6';
 INSERT INTO app.import_batch_items(tenant_id,batch_id,row_no,target_type,target_id) SELECT app.current_tenant(),'$B10',1,'asset',id FROM app.assets WHERE asset_key='IMP-6';" >/dev/null
-# Retiring inside a savepoint makes the row's xmin a subtransaction ID. It must still count as "1 retired".
+# セーブポイントの中で退役にすると、行の xmin はサブトランザクションの ID になる。それでも「退役 1 件」と数える。
 call_as $ADMIN_T "
 SAVEPOINT s1;
 UPDATE app.assets SET status='retired', updated_at=now() WHERE asset_key='IMP-6';
@@ -480,7 +480,7 @@ RELEASE SAVEPOINT s1;
 INSERT INTO app.import_undos(tenant_id,batch_id,undone_by,retired_count,skipped_count) VALUES(app.current_tenant(),'$B10','$ADMIN',0,9);" >/dev/null
 [ "$(sql -At -c "SELECT retired_count || '/' || skipped_count FROM app.import_undos WHERE batch_id='$B10'")" = "1/0" ] || die "savepoint undo counts"
 pass "セーブポイントの中で退役にした行も、取り消しの件数に数える"
-# Merely editing another column of an already-retired row in the undo transaction does not count as "retired" (0075; 0074 counted it).
+# 既に退役していた行を、取り消しのトランザクションで別の欄だけ直しても「退役にした」とは数えない（0075。0074 は数えていた）。
 B11=10000000-0000-4000-8000-0000000000b1
 call_as $ADMIN_T "
 INSERT INTO app.import_batches(tenant_id,id,kind,file_sha256,row_count,created_count,imported_by) VALUES(app.current_tenant(),'$B11','assets',$SHA,1,1,'$ADMIN');
@@ -525,7 +525,7 @@ pass "前からある規程は、規程の取り込みの明細に付けられ�
 [ "$(sql -At -c "SELECT count(*) FROM app.row_transitions WHERE target_type='policy' AND new_value='created' AND target_id=(SELECT id FROM app.policies WHERE title='前からある規程')")" = 1 ] || die "policy created mark"
 pass "作った規程は、変化の記録に「作った」として残る（明細の判定は作成日時ではなくトランザクションで見る。0077）"
 sql -c "DELETE FROM app.policies WHERE title='前からある規程';" >/dev/null
-# Even a version created in the same transaction cannot be attached once approved (prevents undo from deleting approved versions; only the top executive approves).
+# 同じトランザクションで作った版でも、承認した版は付けられない（取り消しで承認済みの版を消させない。承認は最高責任者だけ）。
 expect_fail_because 'rows created in this transaction' call_as ciso-token-0000000000000000000000000000000001 "
 INSERT INTO app.import_batches(tenant_id,id,kind,file_sha256,row_count,created_count,imported_by) VALUES(app.current_tenant(),'$B14','policies',$SHA,1,1,'$CISO');
 INSERT INTO app.policies(tenant_id,title) VALUES(app.current_tenant(),'承認する規程');
@@ -553,8 +553,8 @@ INSERT INTO app.import_undos(tenant_id,batch_id,undone_by,retired_count,skipped_
 pass "規程の取り消しは消した版と規程の件数を DB が数える"
 
 echo '== up/down/up'
-# How many to roll back is determined by how many are "currently applied" after that version.
-# If a down partway through is refused, everything up to there is already rolled back, so counting files would roll back too far.
+# 戻す本数は、その版より後に「今適用されている」本数で決める。
+# 途中の down が拒否されると、そこまでは戻っているので、ファイルの数で決めると戻しすぎる。
 applied_after() { sql -At -c "SELECT count(*) FROM public.schema_migrations WHERE version::int > $1"; }
 expect_fail_because '0076 rollback refused' "$ROOT/scripts/migrate.sh" down "$(applied_after 75)"
 pass "規程の取り込みの記録があるうちは 0076 を巻き戻さない"
@@ -574,7 +574,7 @@ expect_fail_because '0070 rollback refused' "$ROOT/scripts/migrate.sh" down "$(a
 [ "$(sql -At -c "SELECT to_regclass('app.change_requests') IS NOT NULL")" = t ] || die "refused down dropped the table"
 pass "変更の申請があるうちは 0070 を巻き戻さない"
 sql -c "DELETE FROM app.change_requests;" >/dev/null
-# Even with no requests, do not roll back while approval records (change_request) remain (rolling back and recreating would link old approvals to a request with the same ID).
+# 申請が無くても、承認の記録（change_request）が残っていれば戻さない（戻して作り直すと、古い承認が同じ ID の申請に結び付く）。
 expect_fail_because '0070 rollback refused' "$ROOT/scripts/migrate.sh" down "$(applied_after 69)"
 pass "承認の記録が残っているうちも 0070 を巻き戻さない"
 sql -c "DELETE FROM app.approvals WHERE target_type='change_request';" >/dev/null

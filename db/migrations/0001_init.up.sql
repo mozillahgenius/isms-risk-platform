@@ -1,28 +1,28 @@
 -- @run-as: admin
--- 0001 initialization (design doc 2.2). Extensions, schemas, roles, provisional tenant-context functions.
+-- 0001 初期化（設計書 2.2）。拡張・スキーマ・ロール・テナント文脈関数の仮定義。
 --
--- Only this file runs as superuser. CREATE EXTENSION and CREATE ROLE do not
--- work with schema_owner privileges. From 0002 on, SET ROLE schema_owner.
+-- ここだけ superuser で実行する。CREATE EXTENSION と CREATE ROLE は
+-- schema_owner の権限では通らない。0002 以降は SET ROLE schema_owner。
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid(), hmac(), digest()
-CREATE EXTENSION IF NOT EXISTS btree_gist;  -- for uuid equality in EXCLUDE constraints
-CREATE EXTENSION IF NOT EXISTS citext;      -- case-insensitive comparison of email addresses
+CREATE EXTENSION IF NOT EXISTS btree_gist;  -- EXCLUDE 制約で uuid の等価比較を使うため
+CREATE EXTENSION IF NOT EXISTS citext;      -- メールアドレスの大小無視比較
 
-CREATE SCHEMA IF NOT EXISTS catalog;        -- DOM (shared master; no tenant_id)
-CREATE SCHEMA IF NOT EXISTS app;            -- tenant data
-CREATE SCHEMA IF NOT EXISTS audit;          -- audit log
+CREATE SCHEMA IF NOT EXISTS catalog;        -- DOM（共有マスタ。tenant_id を持たない）
+CREATE SCHEMA IF NOT EXISTS app;            -- テナントデータ
+CREATE SCHEMA IF NOT EXISTS audit;          -- 監査ログ
 
--- Roles (design doc 9.1). None of them get BYPASSRLS.
--- schema_owner is DDL-only and also owns SECURITY DEFINER functions, so
--- it has no LOGIN (and no path to SET ROLE into it from app_rw/app_ro is created).
--- In environments where roles of the same name already exist (reused dev machines, etc.), attributes may not match the design.
--- CREATE alone leaves an existing role's SUPERUSER / BYPASSRLS in place, so always pin them with ALTER.
+-- ロール（設計書 9.1）。いずれにも BYPASSRLS を与えない。
+-- schema_owner は DDL 専用かつ SECURITY DEFINER 関数の所有者を兼ねるため
+-- LOGIN を持たせない（app_rw/app_ro から SET ROLE する経路も作らない）。
+-- 既に同名ロールがある環境（開発機の使い回し等）で属性が設計どおりとは限らない。
+-- CREATE だけでは既存ロールの SUPERUSER / BYPASSRLS が残るので、必ず ALTER で固定する。
 DO $$
 DECLARE
   r record;
-  -- auth_svc is an extra role not in design doc 9.1. It only issues sessions.
-  -- If app_rw had issuing privileges, app_rw could create a session for any tenant,
-  -- establish context with that token, and tenant isolation would be void entirely (docs/DECISIONS.md D-12).
+  -- auth_svc は設計書 9.1 に無い追加のロール。セッション発行だけを担う。
+  -- app_rw に発行権限を持たせると、app_rw が任意テナント向けのセッションを作って
+  -- そのトークンで文脈を確立でき、テナント分離が丸ごと無効になる（docs/DECISIONS.md D-12）。
   roles constant text[] := ARRAY['schema_owner','app_rw','app_ro','auth_svc',
                                  'auditlogd','audit_verifier'];
   logins constant text[] := ARRAY['app_rw','app_ro','auth_svc','auditlogd','audit_verifier'];
@@ -31,19 +31,19 @@ BEGIN
   FOREACH name IN ARRAY roles LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = name) THEN
       EXECUTE format('CREATE ROLE %I', name);
-      -- Leave a marker that this is "a role created by this migration".
-      -- down drops only roles with this marker, so as not to delete a pre-existing role
-      -- and take its owned objects down with it (DROP OWNED BY is destructive).
+      -- 「この migration が作ったロール」であることを印として残す。
+      -- down はこの印があるものだけ落とす。もともと在ったロールを消して
+      -- その所有物ごと巻き添えにしないため（DROP OWNED BY は破壊的）。
       EXECUTE format('COMMENT ON ROLE %I IS %L', name, 'created-by:isms-platform-migration');
     END IF;
-    -- Pin attributes explicitly every time (idempotent and corrective)
+    -- 属性は毎回明示的に固定する（冪等かつ是正的）
     EXECUTE format(
       'ALTER ROLE %I NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION %s',
       name,
       CASE WHEN name = ANY(logins) THEN 'LOGIN' ELSE 'NOLOGIN' END);
   END LOOP;
 
-  -- Design 9.1 "no role gets BYPASSRLS": measure it at this point and fail if violated
+  -- 設計 9.1「いずれにも BYPASSRLS を与えない」を、この時点で実測して落とす
   FOR r IN SELECT rolname FROM pg_roles
             WHERE rolname = ANY(roles) AND (rolsuper OR rolbypassrls) LOOP
     RAISE EXCEPTION 'role % still has SUPERUSER or BYPASSRLS', r.rolname;
@@ -56,26 +56,26 @@ ALTER SCHEMA audit   OWNER TO schema_owner;
 
 GRANT USAGE ON SCHEMA catalog TO app_rw, app_ro;
 GRANT USAGE ON SCHEMA app     TO app_rw, app_ro;
--- Granting audit USAGE to app_rw/app_ro as well is as intended by design doc 2.2 / 8.3.
--- Viewing the audit log is a CISO / secretariat / auditor privilege (9.5 permission matrix);
--- on the table side it is SELECT only, tenant-scoped by RLS, and UPDATE/DELETE are REVOKEd (0014).
+-- audit の USAGE を app_rw/app_ro にも与えるのは設計書 2.2 / 8.3 の意図どおり。
+-- 監査ログの閲覧は CISO・事務局・監査人の権限（9.5 権限マトリクス）であり、
+-- テーブル側は SELECT のみ・RLS でテナント限定・UPDATE/DELETE は REVOKE 済み（0014）。
 GRANT USAGE ON SCHEMA audit   TO app_rw, app_ro, auditlogd, audit_verifier;
 
--- Prevent anyone from creating objects in the public schema (a default pitfall)
+-- 誰も public スキーマにオブジェクトを作れないようにする（既定の落とし穴）
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
--- ALTER DEFAULT PRIVILEGES only affects "objects that role creates from now on"
--- and is not retroactive. Effective privileges are GRANTed explicitly in 0015, and CI inspects the real objects directly.
+-- ALTER DEFAULT PRIVILEGES は「その実行者が今後作るオブジェクト」にしか効かず、
+-- 既存には遡及しない。実効権限は 0015 で明示 GRANT し、CI が実オブジェクトを直接検査する。
 ALTER DEFAULT PRIVILEGES FOR ROLE schema_owner IN SCHEMA catalog
   GRANT SELECT ON TABLES TO app_rw, app_ro;
 
 -- ------------------------------------------------------------------
--- Tenant context (provisional definition)
+-- テナント文脈（仮定義）
 --
--- Using the design doc 2.2 / 9.2 implementation as-is would let app_rw SET the GUC app.tenant_id
--- itself, failing acceptance #7. 0006 does CREATE OR REPLACE with a version that verifies an HMAC signature.
--- The key table does not exist yet here, so a provisional implementation is used.
--- For "the scope of properties that can be proven", see docs/DECISIONS.md.
+-- 設計書 2.2 / 9.2 の実装をそのまま置くと GUC app.tenant_id を app_rw が
+-- 自分で SET でき、受入 #7 を満たさない。0006 で HMAC 署名を検証する版へ
+-- CREATE OR REPLACE する。ここでは鍵テーブルがまだ無いので仮実装を置く。
+-- 「証明できる性質の範囲」は docs/DECISIONS.md を参照。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.current_tenant() RETURNS uuid
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog AS $$
@@ -89,6 +89,6 @@ END $$;
 
 ALTER FUNCTION app.current_tenant() OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.current_tenant() FROM PUBLIC;
--- app_ro also calls this function when evaluating RLS policy expressions, so it needs EXECUTE
--- (Codex finding: the per-function execute-privilege table is in docs/DECISIONS.md).
+-- app_ro も RLS ポリシー式の評価でこの関数を呼ぶため EXECUTE が要る
+-- （Codex 指摘: 関数ごとの実行権限表は docs/DECISIONS.md）。
 GRANT EXECUTE ON FUNCTION app.current_tenant() TO app_rw, app_ro;

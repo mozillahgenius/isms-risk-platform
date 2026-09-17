@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Acceptance test for manifest validation.
+"""マニフェスト検証の受入試験。
 
-**Verify failure, not success.** Validation easily ends up "looking present while checking nothing".
-Here we prepare one correct manifest, inject
-"realistic ways of breaking it" into it one at a time, and check that each one fails.
+**通ることではなく、落ちることを確かめる。** 検証は「有るように見えて何も見ていない」
+ことが起こりやすい。ここでは正しいマニフェストを 1 つ用意し、そこへ
+「実際に起こりうる壊し方」を 1 つずつ入れて、そのたびに落ちることを見る。
 
-The original (connectors/google_workspace/v3.yaml) is not modified. A copy is made in a temp directory
-and broken there (breaking the original would leave it broken if the test aborted midway).
+本体（connectors/google_workspace/v3.yaml）は改変しない。一時ディレクトリへ
+写しを作って壊す（本体を壊すと、途中で落ちたときに壊れたまま残る）。
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ def _report(ok: bool, label: str, detail: str = ""):
 
 
 def run(doc: dict, tmp: Path, *, connector: str | None = None, version: int | None = None):
-    """Write doc as connectors/<connector>/v<version>.yaml and validate it.
+    """doc を connectors/<connector>/v<version>.yaml として書いて検証する。
 
-    Validation also checks that the location matches the contents, so ROOT is swapped to the temp directory.
+    検証は置き場所と中身の一致も見るので、ROOT を一時ディレクトリへ差し替える。
     """
     c = connector or doc.get("connector", "x")
     v = version if version is not None else doc.get("version", 1)
@@ -89,7 +89,7 @@ def main() -> int:
 
         expect_ok("正しいマニフェストは通る", copy.deepcopy(base), tmp)
 
-        # --- 1. Permissions held by credentials -----------------------------------
+        # --- 1. 資格情報が持つ権限 -------------------------------------------
         d = copy.deepcopy(base)
         d["auth"]["scopes"].append("https://www.googleapis.com/auth/drive")
         expect_ng("reader に書き込みスコープを足すと落ちる", d, tmp, "read-only でない")
@@ -107,7 +107,7 @@ def main() -> int:
         d["auth"]["scopes"] = d["auth"]["scopes"] + [d["auth"]["scopes"][0]]
         expect_ng("スコープの重複は落ちる", d, tmp, "重複")
 
-        # --- 2. Requests that can be issued at runtime ----------------------------
+        # --- 2. 実行時に出せる要求 -------------------------------------------
         d = copy.deepcopy(base)
         d["http"]["methods"] = ["GET", "POST"]
         expect_ng("reader に POST を足すと落ちる", d, tmp, "GET / HEAD しか出せません")
@@ -129,7 +129,7 @@ def main() -> int:
         d["resources"][0]["endpoint"] = "https://evil.example.com/steal"
         expect_ng("endpoint にホストを書くと落ちる", d, tmp, "相対パス")
 
-        # --- 3. Destination of collected data -------------------------------------
+        # --- 3. 取ったものの行き先 -------------------------------------------
         d = copy.deepcopy(base)
         del d["resources"][0]["map_to"]
         expect_ng("map_to が無いと落ちる", d, tmp, "必須のキー")
@@ -151,14 +151,14 @@ def main() -> int:
         expect_ng("必須フィールドが無いと落ちる", d, tmp, "必須のフィールド")
 
         d = copy.deepcopy(base)
-        d["resources"][0]["fields"]["email"] = "id"     # same source as external_id
+        d["resources"][0]["fields"]["email"] = "id"     # external_id と同じ取得元
         expect_ng("同じ取得元の二重写像は落ちる", d, tmp, "二重写像")
 
         d = copy.deepcopy(base)
         d["resources"][5]["fields"]["subject_kind"] = "$derive.nonexistent"
         expect_ng("実装の無い導出は落ちる", d, tmp, "実装の無い導出")
 
-        # --- 4. Execution shape ---------------------------------------------------
+        # --- 4. 実行の形 -----------------------------------------------------
         d = copy.deepcopy(base)
         d["resources"][2]["iterate_over"]["resource"] = "not_a_resource"
         expect_ng("実在しない resource を反復すると落ちる", d, tmp, "実在しません")
@@ -168,7 +168,7 @@ def main() -> int:
         expect_ng("自分自身の反復は落ちる", d, tmp, "自分自身")
 
         d = copy.deepcopy(base)
-        # Create a cycle groups -> drive_permissions -> drive_files -> groups
+        # groups → drive_permissions → drive_files → groups の循環を作る
         d["resources"][1]["depends_on"] = "drive_permissions"
         d["resources"][4]["depends_on"] = "groups"
         expect_ng("依存が循環すると落ちる", d, tmp, "循環")
@@ -193,7 +193,7 @@ def main() -> int:
         d["resources"].append(copy.deepcopy(d["resources"][0]))
         expect_ng("resource 名の重複は落ちる", d, tmp, "重複")
 
-        # --- 5. Overall shape -----------------------------------------------------
+        # --- 5. 全体の形 -----------------------------------------------------
         d = copy.deepcopy(base)
         d["unknown_top_level"] = 1
         expect_ng("知らない最上位キーは落ちる", d, tmp, "知らないキー")
@@ -210,7 +210,7 @@ def main() -> int:
         d["rate_limit"]["max_retries"] = 0
         expect_ng("rate_limit の値が範囲外だと落ちる", d, tmp, "1 以上")
 
-        # Location/content mismatch (the case of bumping the version but forgetting to rename the file)
+        # 置き場所と中身の食い違い（版を上げてファイル名を変え忘れる形）
         d = copy.deepcopy(base)
         d["version"] = 4
         try:
@@ -219,7 +219,7 @@ def main() -> int:
         except vm.Problem as e:
             _report("置き場所が中身と合いません" in str(e), "置き場所と版が食い違うと落ちる", str(e))
 
-        # Duplicate YAML keys (safe_dump cannot produce them, so write them directly)
+        # YAML の重複キー（safe_dump では作れないので直に書く）
         dup = tmp / "connectors" / "dup" / "v1.yaml"
         dup.parent.mkdir(parents=True, exist_ok=True)
         dup.write_text("connector: dup\nkind: reader\nkind: writer\n", encoding="utf-8")

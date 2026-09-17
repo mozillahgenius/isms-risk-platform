@@ -1,4 +1,4 @@
-.PHONY: help db-reset migrate down seed test risk-register-test phase0 ci connector-test agent-test \
+.PHONY: help db-reset migrate down seed business-seed business-control-status test risk-register-test phase0 ci connector-test agent-test \
         web-install web web-build web-start web-test web-check web-verify \
         tenant checker checker-test \
         backup backup-verify
@@ -9,7 +9,9 @@ help:
 	@echo "make db-reset     空 DB を作り直して全マイグレーションを適用"
 	@echo "make migrate      未適用のマイグレーションを適用"
 	@echo "make down         直近 1 本を巻き戻す（make down N=all で全部）"
-	@echo "make seed         DOM 2026.1 と統制カタログ CSV（既定は同梱サンプル。LEGAL_SCRIPTS_DIR で差し替え）を投入（冪等）＋出所を記録"
+	@echo "make seed         DOM 2026.1 と既存 CSV マスタを投入（冪等）＋出所を記録"
+	@echo "make business-seed 自社の資産・施策・リスク初期案を投入（テナントトークンが必要）"
+	@echo "make business-control-status 自社管理策の実態判定を反映（テナントトークンが必要）"
 	@echo "make sync-policies 標準規程を既存テナントへ反映（DRY=1 で巻き戻して確認だけ）"
 	@echo "make risk-register-test リスク台帳の不正入力と履歴権限を確認"
 	@echo "make test         テナント分離・ドメイン制約のテスト（使い捨て DB。isms_dev は汚さない）"
@@ -22,9 +24,9 @@ help:
 	@echo "make agent-test   Phase 3a macOS エージェント受入（隔離 DB + API）"
 	@echo ""
 	@echo "make web-install  画面の依存を入れる（lockfile どおり）"
-	@echo "make web          画面を開発モードで起動（http://127.0.0.1:3110）"
+	@echo "make web          画面を開発モードで起動（http://0.0.0.0:3110）"
 	@echo "make web-build    画面を本番ビルド"
-	@echo "make web-start    ビルド済みの画面を起動（http://127.0.0.1:3110）"
+	@echo "make web-start    ビルド済みの画面を起動（http://0.0.0.0:3110）"
 	@echo "make web-check    画面の型検査・lint・単体テスト・ビルド"
 	@echo "make web-verify   上に加えて外形検査（空 DB・DB 断で実際に落ちるかまで見る）"
 	@echo ""
@@ -64,20 +66,26 @@ seed:
 	ISMS_DB=$(ISMS_DB) python3 db/seeds/record_provenance.py
 
 DRY ?=
-# Use after adding standard policies or writing bodies after the tenant was created.
-# provision_tenant expands them only at tenant creation, so without this they never reach existing tenants.
+business-seed:
+	python3 scripts/seed_business_register.py $(if $(DRY),--dry-run,)
+
+business-control-status:
+	python3 scripts/update_control_implementation_status.py $(if $(DRY),--dry-run,)
+
+# テナントを作った後で標準規程を足した／本文を書いたときに使う。
+# provision_tenant はテナント作成時にしか展開しないので、これが無いと既存テナントへ届かない。
 sync-policies:
 	python3 scripts/sync_tenant_policies.py $(if $(DRY),--dry-run,)
 
 risk-register-test:
 	./tests/risk_register_invariants.sh
 
-# Acceptance tests run on a **throwaway DB**. $(ISMS_DB) is not touched.
-# The tests also add rows to catalog, so running on the shared DB leaves debris and UI counts diverge from the seed.
+# 受入試験は **使い捨ての DB** で走らせる。$(ISMS_DB) には触らない。
+# 試験は catalog にも行を足すため、共有 DB で流すと残骸が残り、画面の件数が seed と食い違う。
 test:
 	./tests/run_isolated.sh
 
-# --- Checks (checker) --------------------------------------------------------
+# --- チェック機能（checker）---------------------------------------------------
 NAME   ?= 検査用
 DOMAIN ?= example.invalid
 EMAIL  ?= admin@example.invalid
@@ -86,9 +94,9 @@ tenant:
 	ISMS_DB=$(ISMS_DB) python3 scripts/new_tenant.py \
 	  --name "$(NAME)" --domain "$(DOMAIN)" --admin-email "$(EMAIL)" --admin-name "$(ADMIN)"
 
-# TOKEN is the one output by make tenant. To keep it out of history, pass it via ISMS_CHECKER_TOKEN.
-# RECEIPT_ID is the execution permit ID issued by ⑦'s POST intake (app.accept_verification_receipt etc.).
-# checker.py now requires it, so if unspecified checker.py itself rejects with exit 2.
+# TOKEN は make tenant が出したもの。履歴に残したくなければ ISMS_CHECKER_TOKEN で渡す。
+# RECEIPT_ID は⑦のPOST受付(app.accept_verification_receipt等)で発行された実行許可ID。
+# checker.py 側で必須化されたため、未指定なら checker.py 自身が exit 2 で拒否する。
 checker:
 	ISMS_DB=$(ISMS_DB) python3 scripts/checker.py $(if $(TOKEN),--token "$(TOKEN)",) $(if $(RECEIPT_ID),--verification-receipt-id "$(RECEIPT_ID)",)
 
@@ -107,13 +115,14 @@ phase0:
 ci:
 	./scripts/ci/run.sh
 
-# --- UI ----------------------------------------------------------------------
-# Keep dependency installation and startup separate. Running npm on every startup leaves room for versions
-# differing from the lockfile to slip in silently. With a lockfile, use npm ci (reinstall exactly per lockfile).
+# --- 画面 ---------------------------------------------------------------------
+# 依存の導入と起動は分ける。起動のたびに npm を走らせると、lockfile と違う版が
+# 黙って入り込む余地ができる。lockfile があるときは npm ci（lockfile どおりに入れ直す）。
 web-install:
 	cd web && if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Listens on 127.0.0.1:3110. To expose it, put an authenticating reverse proxy (oauth2-proxy etc.) in front.
+# VPS の oauth2-proxy 経由でアクセスするため 0.0.0.0:3110 で待つ。
+# Loki が *:3100 を使うためポートを 3110 へ移動した。
 web: web-install
 	cd web && npm run dev
 
@@ -129,7 +138,7 @@ web-test:
 web-check: web-install
 	cd web && npm run typecheck && npm run lint && npm test && npm run build
 
-# Page shape checks. Verifies **that it actually fails when broken** (unseeded isolated DB, unreachable connection target).
-# Does not break isms_dev or stop PostgreSQL.
+# 外形検査。**壊した状態で実際に落ちること**まで見る（seed していない隔離 DB・届かない接続先）。
+# isms_dev を壊したり PostgreSQL を止めたりはしない。
 web-verify: web-check
 	ISMS_DB=$(ISMS_DB) ./scripts/ci/check_web.sh

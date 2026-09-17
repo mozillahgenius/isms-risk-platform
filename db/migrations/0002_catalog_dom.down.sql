@@ -1,4 +1,4 @@
--- Rollback of 0002
+-- 0002 の巻き戻し
 DROP TABLE IF EXISTS catalog.policies_default;
 DROP TABLE IF EXISTS catalog.calendar_events_default;
 DROP TRIGGER IF EXISTS trg_validate_risk_bands ON catalog.risk_criteria_default;

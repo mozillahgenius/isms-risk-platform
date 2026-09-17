@@ -1,13 +1,13 @@
 -- @run-as: admin
--- Rollback of 0065. Removes the organizational issues and interested parties tables and restores the role kinds to the 0064 version.
+-- 0065 の巻き戻し。組織の課題・利害関係者の表を外し、役割の種類を 0064 の版へ戻す。
 --
--- **Do not roll back when data exists** (same as 0055; 4.1 / 4.2 decisions must not silently vanish on down).
--- The guard goes before SET ROLE and takes a SHARE lock before counting (see 0055's down for why).
+-- **データがあるときは巻き戻さない**（0055 と同じ。4.1 / 4.2 の決定を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、数える前に SHARE ロックを取る（理由は 0055 の down を参照）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;
 BEGIN
-  -- For each table, lock and count only if it exists (so DROP ... IF EXISTS is still reached if one is missing or partially rolled back).
+  -- 表ごとに、在るときだけロックして数える（片方だけ無い・途中まで戻った状態でも DROP ... IF EXISTS へ進める）。
   IF to_regclass('app.context_issues') IS NOT NULL THEN
     LOCK TABLE app.context_issues IN SHARE MODE;
     SELECT count(*) INTO n FROM app.context_issues;

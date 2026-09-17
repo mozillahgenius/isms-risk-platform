@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Measure and record in catalog.seed_provenance "where the canonical source of the rules is".
+"""catalog.seed_provenance に「ルールの正本がどこか」を実測して記録する。
 
   python3 db/seeds/record_provenance.py [--scripts-dir <dir>]
 
-The UI's source display reads only this table. Embedding fixed strings in the UI would
-keep the UI looking the same even when upstream changes (that would be decoration, not a source display).
+画面の出所表示はこの表だけを読む。固定文字列を画面へ埋め込むと、
+上流が動いても画面は同じ顔をしたままになる（それは出所表示ではなく飾りになる）。
 
---scripts-dir (or env var LEGAL_SCRIPTS_DIR) is the same as in load_csv.py.
-Default is db/seeds/snapshots (a fictional sample catalog).
-
-Recorded (one row per target, idempotent):
-  dom                    … this repository's db/seeds/0001_dom_2026_1.sql
+記録するもの（対象ごとに 1 行・冪等）:
+  dom                    … このリポジトリの db/seeds/0001_dom_2026_1.sql
   controls               … <scripts-dir>/control_check/control_requirements_master.csv
   risk_scenario_templates… <scripts-dir>/risk_map/risk_map_master.csv
 
-A commit is recorded "only when that file matches HEAD".
-Writing a commit while the working tree is dirty would point to a state that doesn't actually exist.
-If it doesn't match, NULL is stored and the UI shows "uncommitted changes".
+commit は「そのファイルが HEAD と一致しているときだけ」記録する。
+作業ツリーが汚れたまま commit を書くと、実際には存在しない状態を指すため。
+一致しなければ NULL にして、画面側は「未コミットの変更あり」と出す。
 """
 from __future__ import annotations
 
@@ -43,7 +40,7 @@ def sha256_of(path: str) -> str:
 
 
 def git(repo: str, *args: str) -> str | None:
-    """Run git in repo and return stdout. None if git is missing / not a repo / fails."""
+    """repo で git を実行して stdout を返す。git が無い / repo でない / 失敗なら None。"""
     try:
         out = subprocess.run(
             ['git', '-C', repo, *args],
@@ -55,7 +52,7 @@ def git(repo: str, *args: str) -> str | None:
 
 
 def repo_slug(repo: str) -> str:
-    """Return owner/name. Without a remote, return the directory name in parentheses (no URL is written)."""
+    """owner/name を返す。remote が無ければディレクトリ名を括弧付きで返す（URL は書かない）。"""
     url = git(repo, 'config', '--get', 'remote.origin.url')
     if url:
         s = url.rstrip('/')
@@ -69,12 +66,12 @@ def repo_slug(repo: str) -> str:
 
 
 def commit_if_clean(repo: str, rel_path: str, abs_path: str) -> str | None:
-    """Return HEAD's SHA if rel_path's content matches HEAD, else None.
+    """rel_path の中身が HEAD と一致していれば HEAD の SHA を返す。違えば None。
 
-    The check uses a **direct blob hash comparison**, not `git status`.
-    status returns empty for .gitignore'd untracked files and for files marked `assume-unchanged` / `skip-worktree`,
-    so it can report "match" even when the file actually differs from HEAD.
-    Comparing blobs leaves no such loophole.
+    判定は `git status` ではなく **blob ハッシュの直接比較**で行う。
+    status は .gitignore された未追跡ファイル、`assume-unchanged` / `skip-worktree`
+    を指定されたファイルで空を返すため、実際には HEAD と違うのに「一致」と誤判定し得る。
+    blob を突き合わせれば、その抜け道が無い。
     """
     head = git(repo, 'rev-parse', 'HEAD')
     if not head:
@@ -98,12 +95,10 @@ def sql_literal(v: str | None) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    # Read the same variable as load_csv.py (reading a different one would record a file other than the one loaded).
-    ap.add_argument('--scripts-dir', default=os.environ.get('LEGAL_SCRIPTS_DIR', DEFAULT_SCRIPTS))
+    ap.add_argument('--scripts-dir', default=os.environ.get('CATALOG_SCRIPTS_DIR', DEFAULT_SCRIPTS))
     args = ap.parse_args()
 
     scripts_dir = os.path.abspath(args.scripts_dir)
-    # Determine the commit at the top level of the Git repository containing the file (for the bundled sample, this repository).
     upstream_repo = (git(scripts_dir, 'rev-parse', '--show-toplevel')
                      or os.path.normpath(os.path.join(scripts_dir, '..')))
 
@@ -113,9 +108,9 @@ def main() -> int:
             'repo': ROOT,
             'file': os.path.join(ROOT, 'db', 'seeds', '0001_dom_2026_1.sql'),
             'loader': 'db/seeds/0001_dom_2026_1.sql',
-            # Count the rows this seed file defines **that belong to the current DOM**.
-            # Writing the dom_versions row count (= number of versions) would inflate it just because old versions remain,
-            # and it would no longer represent "what came in from this file".
+            # この seed ファイルが定義する行のうち、**現行 DOM に属するもの**を数える。
+            # dom_versions の行数（＝版の数）を書くと、旧版が残っているだけで数が増え、
+            # 「このファイルから何が入ったか」を表さなくなる。
             'count_sql': (
                 'SELECT (SELECT count(*) FROM catalog.roles_default)'
                 '     + (SELECT count(*) FROM catalog.asset_classes_default)'
@@ -131,8 +126,8 @@ def main() -> int:
             'repo': upstream_repo,
             'file': os.path.join(scripts_dir, 'control_check', 'control_requirements_master.csv'),
             'loader': 'db/seeds/load_csv.py',
-            # IPO-KARTE comes from the upstream CSV. ISO Annex A is the standard catalog in 0009_relationships.sql,
-            # so don't mix it into this count.
+            # IPO-KARTE は上流 CSV 由来。ISO Annex A は 0009_relationships.sql の
+            # 標準カタログなので、ここで混ぜて数えない。
             'count_sql': "SELECT count(*) FROM catalog.controls WHERE framework_key = 'IPO-KARTE' AND retired_at IS NULL",
         },
         {
@@ -146,8 +141,8 @@ def main() -> int:
 
     stmts = [
         'SET ROLE schema_owner;',
-        # Without a current DOM, the INSERT ... SELECT below inserts no rows.
-        # Unless we fail early, we can't notice that "no rows were inserted".
+        # 現行 DOM が無いと、下の INSERT ... SELECT は 1 行も入らない。
+        # 先に落としておかないと「1 行も入らなかった」ことに気づけない。
         "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM catalog.dom_versions WHERE is_current) THEN"
         "  RAISE EXCEPTION '現行 DOM がありません。先に db/seeds/0001_dom_2026_1.sql を流してください';"
         " END IF; END $$;",
@@ -166,8 +161,8 @@ def main() -> int:
             'source_sha256': sha256_of(path),
             'loader': t['loader'],
         }
-        # row_count uses the value measured in the DB, not what the loader claims.
-        # Writing the claimed value could record "everything loaded" even if loading failed midway.
+        # row_count は投入した側の申告ではなく DB の実測を使う。
+        # 申告値を書くと、投入が途中で落ちても「全部入った」と記録され得る。
         stmts.append(
             "INSERT INTO catalog.seed_provenance"
             " (target, source_repo, source_commit, source_path, source_sha256,"
@@ -196,10 +191,10 @@ def main() -> int:
         print(f"[provenance] {row['target']}: {row['source_repo']} {rel} "
               f"commit={row['source_commit'] or '(未コミットの変更あり)'} sha={row['source_sha256'][:12]}…")
 
-    # Verify not that 3 rows "exist" but that **all 3 were written in this run**.
-    # Simply counting the total would pass with 3 stale rows left from a previous run,
-    # looking successful even if not a single row was updated this time.
-    # now() is the transaction start time, so rows written in this run share the same loaded_at.
+    # 3 行「在る」ことではなく、**この実行で 3 行とも書けた**ことを確かめる。
+    # 単に総数を数えると、前回の古い行が 3 行残っているだけで通ってしまい、
+    # 今回 1 行も更新できていなくても成功に見える。
+    # now() はトランザクション開始時刻なので、この実行で書いた行は loaded_at が揃う。
     stmts.append(
         "DO $$ BEGIN"
         "  IF (SELECT count(*) FROM catalog.seed_provenance p"

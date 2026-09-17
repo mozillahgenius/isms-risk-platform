@@ -1,4 +1,4 @@
--- Rollback of 0007 (reverse dependency order)
+-- 0007 の巻き戻し（依存の逆順）
 DROP FUNCTION IF EXISTS app.rebuild_effective_grants(uuid);
 DROP TABLE IF EXISTS app.effective_grants;
 DROP TABLE IF EXISTS app.graph_events;

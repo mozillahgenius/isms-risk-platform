@@ -56,7 +56,7 @@ export type AgentPayload = {
   firewall_enabled: boolean | null;
   edr_running: boolean | null;
   edr_vendor: string;
-  builtin_protection: BuiltinProtectionPayload;
+  builtin_protection: BuiltinProtectionPayload | WindowsBuiltinProtectionPayload;
   admin_account_count: number | null;
   password_manager_installed: boolean | null;
   unapproved_apps: string[];
@@ -109,9 +109,14 @@ export function validateAgentPayload(value: unknown): AgentPayload {
     'device_id', 'collected_at', 'agent_version', 'definition_hash',
     'external_id', 'hostname', 'model', 'os_family', 'os_version',
   ]) nonEmptyString(payload[field], field);
+  // v1 は macOS だけ。v2 は macOS と Windows で、保護機能の形だけが OS ごとに違う（DB は端末の OS の定義で照合する）。
+  if (payload.os_family !== 'macos' && !(payload.definition_version === 2 && payload.os_family === 'windows')) {
+    throw new Error('os_family is unsupported');
+  }
   if (payload.definition_version === 2) {
     nonEmptyString(payload.edr_vendor, 'edr_vendor');
-    validateBuiltinProtection(payload.builtin_protection);
+    if (payload.os_family === 'windows') validateWindowsBuiltinProtection(payload.builtin_protection);
+    else validateBuiltinProtection(payload.builtin_protection);
   }
   if (!uuidPattern.test(payload.device_id as string)) throw new Error('device_id is invalid');
   if (Number.isNaN(Date.parse(payload.collected_at as string))) throw new Error('collected_at is invalid');
@@ -200,4 +205,36 @@ function validateBuiltinProtection(value: unknown): asserts value is BuiltinProt
     if (seen.has(extension)) throw new Error('system_extensions contains duplicates');
     seen.add(extension);
   }
+}
+
+// Windows の保護機能（Defender・Tamper Protection・SmartScreen）。SmartScreen は取れないことがあるので null を許す。
+type WindowsBuiltinProtectionPayload = {
+  defender_antivirus_enabled: boolean;
+  defender_realtime_enabled: boolean;
+  defender_signature_version: string;
+  tamper_protection_enabled: boolean;
+  smartscreen_enabled: boolean | null;
+};
+
+function validateWindowsBuiltinProtection(value: unknown): asserts value is WindowsBuiltinProtectionPayload {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('builtin_protection must be an object');
+  }
+  const protection = value as Record<string, unknown>;
+  const fields = new Set([
+    'defender_antivirus_enabled',
+    'defender_realtime_enabled',
+    'defender_signature_version',
+    'tamper_protection_enabled',
+    'smartscreen_enabled',
+  ]);
+  const keys = Object.keys(protection);
+  if (keys.length !== fields.size || keys.some((key) => !fields.has(key))) {
+    throw new Error('builtin_protection fields do not match the fixed contract');
+  }
+  for (const field of ['defender_antivirus_enabled', 'defender_realtime_enabled', 'tamper_protection_enabled']) {
+    if (typeof protection[field] !== 'boolean') throw new Error(`${field} must be boolean`);
+  }
+  nonEmptyString(protection.defender_signature_version, 'defender_signature_version');
+  nullableBoolean(protection.smartscreen_enabled, 'smartscreen_enabled');
 }

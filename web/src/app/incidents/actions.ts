@@ -50,24 +50,24 @@ export async function saveIncident(form: FormData) {
   const relatedMeasureId = optionalText(form, 'related_measure_id', 80);
   const assigneeUserId = optionalText(form, 'assignee_user_id', 80);
   const incidentId = optionalText(form, 'id', 80);
-  // Set resolved_at only at the moment of transitioning to closed. Clear it when moved back to anything other than closed
-  // (so an old resolution time does not linger on reopen).
+  // closedへ遷移した瞬間だけ resolved_at を打つ。closed以外に戻した場合はクリアする
+  // (再オープン時に古い解決日時が残らないように)。
   const resolvedAtExpr = status === 'closed';
 
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_work_permission('incident', ${incidentId ? incidentId : null}::uuid, ${incidentId ? 'write' : 'create'})`;
-    // The UI offers only risk_owner as choices for assignee_user_id, but the form
-    // can be tampered with, so the server also verifies it is an active
-    // membership with role_key='risk_owner' (Codex review 2026-09-02 finding: without verification
-    // regular users could also be assigned). However, rejecting even an "unchanged existing value"
-    // would make existing assignments to departed users unsavable on every edit
-    // (another Codex review finding). Skip this check when it equals the existing value.
+    // assignee_user_id はUIではrisk_ownerだけを選択肢に出すが、フォームは
+    // 改ざん可能なのでサーバー側でも role_key='risk_owner' を持つ有効な
+    // メンバーシップであることを検証する(Codexレビュー2026-09-02指摘: 未検証だと
+    // 一般ユーザーもアサイン可能だった)。ただし「変更していない既存の値」まで
+    // 拒否すると、退職済みユーザーへの既存アサインが編集のたびに保存できなくなる
+    // (これも別のCodexレビュー指摘)。既存値と同じ場合はこの検証をスキップする。
     if (assigneeUserId) {
       let unchanged = false;
       if (incidentId) {
-        // Lock the row with FOR UPDATE and hold it in the same transaction through the UPDATE.
-        // Without the lock, another request can slip in between this check and the UPDATE,
-        // letting the "unchanged" check be bypassed (Codex review 2026-09-02 finding, TOCTOU).
+        // FOR UPDATE で行ロックしてからUPDATEまで同一トランザクションで保持する。
+        // ロックしないと、この確認とUPDATEの間に別リクエストが割り込み、
+        // 「変更していない」の判定がすり抜けうる(Codexレビュー2026-09-02指摘、TOCTOU)。
         const current = await sql<{ assignee_user_id: string | null }[]>`
           SELECT assignee_user_id FROM app.incidents
            WHERE tenant_id = app.current_tenant() AND id = ${incidentId}::uuid
@@ -75,10 +75,10 @@ export async function saveIncident(form: FormData) {
         unchanged = current[0]?.assignee_user_id === assigneeUserId;
       }
       if (!unchanged) {
-        // FOR UPDATE OF mem, u also locks the membership and user rows. Without the
-        // lock, another transaction could revoke/change status between this check and the UPDATE,
-        // and a new assignment to a departed or de-roled user could be committed
-        // (Codex review 2026-09-02 finding, TOCTOU).
+        // FOR UPDATE OF mem, u でメンバーシップ・ユーザー行もロックする。ロック
+        // しないと、この確認からUPDATEまでの間に別トランザクションがrevoke/status
+        // 変更でき、退職・ロール解除済みへの新規アサインが確定しうる
+        // (Codexレビュー2026-09-02指摘、TOCTOU)。
         const owners = await sql<{ id: string }[]>`
           SELECT 1 AS id FROM app.memberships mem
             JOIN app.users u ON u.tenant_id = mem.tenant_id AND u.id = mem.user_id

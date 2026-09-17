@@ -36,7 +36,7 @@ export default async function FrameworksPage() {
             </div>
             <div className={`mt-2 text-[24px] font-semibold ${f.control_count === 0 ? 'text-[var(--danger)]' : ''}`}>
               {f.control_count}
-              <span className="ms-1 text-[12px] font-normal text-[var(--muted)]">件の統制</span>
+              <span className="ml-1 text-[12px] font-normal text-[var(--muted)]">件の統制</span>
             </div>
             {f.control_count === 0 && (
               <p className="mt-1 text-[11px] text-[var(--danger)]">未投入（この規格の統制本体はまだ入っていない）</p>
@@ -51,8 +51,8 @@ export default async function FrameworksPage() {
         ))}
       </div>
 
-      {/* Looking only at counts, linking a control that is not from Annex A to ISO27001:2022 would still pass.
-          Also show the count whose code shape (A.x.y) matches. */}
+      {/* 件数だけを見ていると、附属書 A ではない統制を ISO27001:2022 に紐付けても通ってしまう。
+          コードの形（A.x.y）が合っている件数を併せて出す。 */}
       <section className="card p-4">
         <h2 className="mb-1 text-[13px] font-semibold">附属書 A の統制コードの形</h2>
         <p className="text-[13px]">
@@ -76,7 +76,7 @@ export default async function FrameworksPage() {
         <p className="text-[13px]">
           <b className={counts.framework_mappings === 0 ? 'text-[var(--danger)]' : ''}>{counts.framework_mappings}</b> 件
           {counts.framework_mappings === 0 && (
-            <span className="ms-2 text-[12px] text-[var(--muted)]">
+            <span className="ml-2 text-[12px] text-[var(--muted)]">
               （catalog.framework_mappings が未投入。IPO-KARTE と ISO27001 の対応はまだ作られていない）
             </span>
           )}

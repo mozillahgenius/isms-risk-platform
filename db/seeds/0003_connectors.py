@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Project connectors/**/v*.yaml into catalog.connector_manifests.
+"""connectors/**/v*.yaml を catalog.connector_manifests へ投影する。
 
   python3 db/seeds/0003_connectors.py
 
-The source of truth is the Git manifests. The DB is their projection, and **this is the only loading path**.
+正本は Git のマニフェスト。DB はその投影で、**この投入経路しか無い**。
 
-Always run validation before loading (scripts/validate_manifests.py). Leaving a direct load that skips
-validation would make validation "something run separately from loading", and eventually it gets forgotten.
-Re-running it here is not duplicate work: it guarantees, through the loading path itself, that **nothing that
-failed validation gets into the DB**.
+投入の前に必ず検証を通す（scripts/validate_manifests.py）。検証を経ない直接投入を
+残すと、検証は「投入とは別に走らせるもの」になり、いずれ走らせ忘れる。
+ここで再実行するのは二度手間ではなく、**検証を通っていないものが DB に入らない**
+ことを投入経路そのもので保証するため。
 
-Idempotent. The same (connector, version) is overwritten with its contents. However,
-provenance (SHA-256) is recorded **so that a change to the contents of an already-used version is detectable**.
+冪等。同じ (connector, version) は中身で上書きする。ただし
+**一度使われた版の中身が変わったら分かるように**、出所（SHA-256）を記録する。
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 
 import validate_manifests as vm  # noqa: E402
 
-# Reuse the existing implementation for provenance recording (commit / SHA produced by the same rules).
+# 出所の記録は既存の実装を使い回す（同じ規則で commit / SHA を出す）。
 sys.path.insert(0, os.path.join(ROOT, 'db', 'seeds'))
 import record_provenance as rp  # noqa: E402
 
@@ -46,7 +46,7 @@ def main() -> int:
         print('[connectors] connectors/ にマニフェストがありません', file=sys.stderr)
         return 1
 
-    # 1. Validate. If even one fails, **load nothing** (never leave a half-loaded state).
+    # 1. 検証。1 件でも落ちたら**何も投入しない**（半分だけ入った状態を作らない）。
     docs = []
     for path in paths:
         try:
@@ -60,7 +60,7 @@ def main() -> int:
         print('[connectors] (connector, version) が重複しています', file=sys.stderr)
         return 1
 
-    # 2. Load. Insert everything in one transaction.
+    # 2. 投入。1 トランザクションで全部入れる。
     stmts = ['SET ROLE schema_owner;', 'BEGIN;',
              "SELECT pg_advisory_xact_lock(hashtext('isms:seed:connectors'));"]
     for path, doc in docs:
@@ -72,9 +72,9 @@ def main() -> int:
             '   kind = EXCLUDED.kind, manifest = EXCLUDED.manifest;'
         )
 
-    # 3. Provenance. **The manifests span multiple files, so a single file's SHA cannot represent them.**
-    #    List "relative path + SHA-256" for each file and record the SHA-256 of the whole
-    #    (picking just one file would leave the record unchanged when others change).
+    # 3. 出所。**マニフェストは複数ファイルなので、1 ファイルの SHA では表せない。**
+    #    各ファイルの「相対パス + SHA-256」を並べて、その全体の SHA-256 を記録する
+    #    （1 ファイルだけ選ぶと、他が変わっても記録が動かない）。
     manifest_dir = os.path.join(ROOT, 'connectors')
     lines = []
     for path in paths:
@@ -84,8 +84,8 @@ def main() -> int:
     import hashlib
     digest = hashlib.sha256(digest_src.encode('utf-8')).hexdigest()
 
-    # Record commit only when "everything under connectors/ matches HEAD".
-    # If even one file in the working tree is dirty, NULL (do not point at a state that does not exist).
+    # commit は「connectors/ 配下が HEAD と一致しているときだけ」記録する。
+    # 1 ファイルでも作業ツリーが汚れていれば NULL（存在しない状態を指さない）。
     commit = rp.git(ROOT, 'rev-parse', 'HEAD')
     for path in paths:
         rel = os.path.relpath(os.path.abspath(str(path)), ROOT)
@@ -113,8 +113,8 @@ def main() -> int:
         '   loaded_at = EXCLUDED.loaded_at;'
     )
 
-    # 4. The number loaded must match the number of files that passed validation.
-    #    Do not stop at "it should have gone in".
+    # 4. 投入した件数が、検証を通ったファイルの数と一致すること。
+    #    「入ったつもり」で終わらせない。
     stmts.append(
         'DO $$ DECLARE n int; BEGIN'
         '  SELECT count(*) INTO n FROM catalog.connector_manifests;'

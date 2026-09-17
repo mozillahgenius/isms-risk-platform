@@ -1,6 +1,6 @@
--- 0058: work-unit requests and multi-member assignment
--- The per-record work_assignments from 0057 is kept for compatibility; the screens and new permission checks
--- treat work_items / work_item_assignees as the source of truth.
+-- 0058: 作業単位の依頼と複数メンバー割当
+-- 0057 のレコード単位 work_assignments は互換のため残し、画面と新規権限判定は
+-- work_items / work_item_assignees を正本として扱う。
 
 SET ROLE schema_owner;
 

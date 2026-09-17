@@ -1,16 +1,16 @@
--- 0041 app: receptacle for the employee-facing chatbot (screen ⑥)
+-- 0041 app: 従業員向けチャットボットの受け皿(画面⑥)
 --
--- User decision (2026-09-02): the LLM call itself is not implemented this time (same policy as
--- 0039/0040; to be implemented when a local LLM is introduced). Only the schema that stores
--- conversations and messages is prepared. RAG setup, disclosure filtering, and Slack integration are not started.
+-- ユーザー決定(2026-09-02): LLM呼び出し自体は今回実装しない(0039/0040と
+-- 同じ方針、将来ローカルLLM導入時に実装)。会話・メッセージを保存する
+-- スキーマのみ用意する。RAG構成・公開可否フィルタ・Slack連携は未着手。
 --
--- For the same reason as 0037 onward, RLS is configured individually here.
+-- 0037以降と同じ理由でRLSはここで個別設定する。
 
 CREATE TABLE app.chatbot_conversations (
   id            uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id     uuid NOT NULL,
-  -- Slack-side user ID. A separate axis from app.users (not an FK, so conversations can be
-  -- stored even without Slack integration. Slack permission management in the spec is undecided).
+  -- Slack側のユーザーID。app.usersとは別軸(Slack連携が無い状態でも会話を
+  -- 保存できるよう、FKにはしない。仕様書のSlack権限管理は未決事項)。
   slack_user_id text NOT NULL,
   channel       text NOT NULL DEFAULT '',
   started_at    timestamptz NOT NULL DEFAULT now(),
@@ -25,7 +25,7 @@ CREATE TABLE app.chatbot_messages (
   conversation_id uuid NOT NULL,
   role            text NOT NULL CHECK (role IN ('user','bot')),
   content         text NOT NULL,
-  -- Acceptance criterion C1 "answer with sources (citations)". RAG is not implemented, so an empty array for now.
+  -- 受入条件C1「根拠(引用元)付きで回答する」。RAG未実装のため当面は空配列。
   cited_sources   jsonb NOT NULL DEFAULT '[]'::jsonb
                   CHECK (jsonb_typeof(cited_sources) = 'array'),
   created_at      timestamptz NOT NULL DEFAULT now(),

@@ -1,8 +1,8 @@
 -- @run-as: admin
--- Rollback of 0068. Removes the business continuity plan/test tables and restores the permission table to 0067's version.
+-- 0068 の巻き戻し。事業継続の計画・試験の表を外し、許可の表を 0067 の版へ戻す。
 --
--- **Does not roll back when data exists** (same as 0055; A.5.29 / 5.30 records are not silently deleted by down).
--- The guard sits before SET ROLE and, per table, takes a SHARE lock and counts only if the table exists (same as 0065's down).
+-- **データがあるときは巻き戻さない**（0055 と同じ。A.5.29 / 5.30 の記録を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、表ごとに、在るときだけ SHARE ロックを取って数える（0065 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;
@@ -25,7 +25,7 @@ END $$;
 
 SET ROLE schema_owner;
 
--- Dropping the tables also drops the role policies attached to them.
+-- 表を消すと、張ってある役割ポリシーも一緒に消える。
 DROP TABLE IF EXISTS app.continuity_tests;
 DROP TABLE IF EXISTS app.continuity_plans;
 

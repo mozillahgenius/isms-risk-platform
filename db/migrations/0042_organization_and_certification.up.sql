@@ -1,13 +1,13 @@
--- 0042 app: organization initial settings and certification body information (the substance of screen ⑨ steps 1 and 2)
+-- 0042 app: 組織の初期設定・審査機関情報(画面⑨ステップ1・2の実体)
 --
--- Actual schema check (principle of reusing existing code): app.tenants already has name, but
--- has no column for the ISMS scope (scope statement). Certification body information is not in existing tables
--- either. The organization name reuses app.tenants.name; the only new needs are one scope column and
--- a table for certification body information.
+-- 実スキーマ確認(既存コード再利用の原則): app.tenants に name は既にあるが、
+-- ISMS適用範囲(スコープ声明)に相当する列が無い。審査機関情報も既存テーブルに
+-- 無い。組織名はapp.tenants.nameを流用し、新規に必要なのは適用範囲の1列と、
+-- 審査機関情報のテーブルのみ。
 --
--- Unlike other app tables, app.tenants has no tenant_id column (id itself is that), so
--- it is outside 0015's bulk RLS application, but 0005 already set RLS on it individually
--- (only a column is added, so RLS need not be reconfigured).
+-- app.tenants は他のappテーブルと違い tenant_id 列を持たない(id自身がそれ)ため、
+-- 0015のRLS一括適用の対象外だが、0005で既にRLSが個別に張られている
+-- (列追加だけなのでRLSの再設定は不要)。
 
 ALTER TABLE app.tenants
   ADD COLUMN iso_scope_statement text NOT NULL DEFAULT '';
@@ -27,9 +27,9 @@ CREATE TABLE app.certification_bodies (
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),
-  -- Date ordering. If one or both are missing there is nothing to compare, so allow it
-  -- (the same rule as the Server Action validation in organization/actions.ts is also placed
-  -- in the DB to prevent reversed order via direct SQL paths. Codex review 2026-09-03, 8th-round finding).
+  -- 日付の前後関係。片方以上が未入力なら比較しようがないので許容する
+  -- (organization/actions.tsのServer Action側の検証と同じ規則をDB側にも
+  -- 置き、直接SQL経路でも逆順を防ぐ。Codexレビュー2026-09-03 8回目指摘)。
   CHECK (initial_certified_on IS NULL OR last_audit_on IS NULL
          OR initial_certified_on <= last_audit_on),
   CHECK (last_audit_on IS NULL OR next_audit_on IS NULL

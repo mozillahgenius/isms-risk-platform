@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Replay recorded responses into the Google Workspace normalized graph.
+"""記録済みレスポンスを Google Workspace の正規化グラフへ再生する。
 
-Does not call the real API. The fixture's sidecar SHA-256 is checked first, and tampered
-responses end the run without writing a single row to the DB. Keeping real API code out of
-this script lets Phase 2 sync, normalization and negative verification be reproduced offline.
+実 API は呼ばない。fixture の sidecar SHA-256 を先に照合し、改変された応答は
+DB に一行も書かずに終了する。実 API 実装をこのスクリプトへ混ぜないことで、
+Phase 2 の同期・正規化・逆向き検証を無通信で再現できるようにする。
 """
 
 from __future__ import annotations

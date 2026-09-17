@@ -1,24 +1,24 @@
 /**
- * The stages of running an ISMS, and what this system provides for each stage.
+ * ISMS を回す段階と、この仕組みが各段階に何を持っているか。
  *
- * This holds only "the order of stages" and "the tools each stage needs"; **it holds no state at all**.
- * State is derived every time from what is actually measured in the DB (StepFacts). Baked-in progress
- * would stay green even after the DB is emptied. That would be a lie, so we don't create it.
+ * ここが持つのは「段階の並び」と「各段階が要る道具」だけで、**状態は一切持たない**。
+ * 状態は DB の実測（StepFacts）から毎回導出する。焼き込んだ進捗を置くと、
+ * DB を空にしても緑のままになる。それは嘘なので作らない。
  *
- * Key premise: **ISO/IEC 27001 does not prescribe the implementation procedure as "stages"**.
- * The standard defines requirements (clauses), not an order in which to start.
- * The 12 stages listed here are one example that orders the standard's requirements the way they are commonly done in practice,
- * and each stage lists its clause numbers so it can be cross-checked against the standard.
- * Gap analysis (understanding the current state before building) and the certification audit (third-party audit) are not
- * requirements of the standard, so they are not numbered and sit outside the stage sequence as references (PREPARATION / CERTIFICATION).
+ * 大事な前提: **ISO/IEC 27001 は導入手順を「段階」として規定していない**。
+ * 規格が定めるのは要求事項（箇条）であって、着手の順番ではない。
+ * ここに並ぶ 12 段階は、規格の要求事項を実務でよく使われる順に並べた一例で、
+ * 各段階に箇条番号を併記して規格側と突き合わせられるようにしてある。
+ * ギャップ分析（構築前の現状把握）と認証審査（第三者審査）は規格の要求事項ではないので
+ * 番号を振らず、段階列の外に参考として置く（PREPARATION / CERTIFICATION）。
  *
- * Only the clauses **held in this file** are displayed as authoritative.
- * The seed's clause_ref / clause_refs contain known errors, so they are not used as the authoritative mapping.
+ * 箇条は **このファイルが持つものだけ**を正式表示にする。
+ * seed の clause_ref / clause_refs には既知の誤りがあるため、正式な対応としては使わない。
  *
- * This file is kept as pure data + functions that do not touch server-only (so unit tests can call it directly).
+ * このファイルは server-only を踏まない純粋なデータ + 関数にしてある（単体試験から直接呼ぶため）。
  */
 
-/** Keys in counts used for status determination. catalog.ts's Counts satisfies this structurally. */
+/** counts のうち状態判定に使うキー。catalog.ts の Counts が構造的に満たす。 */
 export type StepCountKey =
   | 'controls'
   | 'risk_scenario_templates'
@@ -37,8 +37,8 @@ export type StepCountKey =
 export type StepCounts = Record<StepCountKey, number>;
 
 /**
- * The organization's own registers. They live in the `app` schema and cannot be read without a tenant context.
- * Their source differs from the catalog (the baseline shared by all tenants), so they are a separate kind from count.
+ * 自社の台帳。`app` スキーマにあり、テナント文脈が無いと読めない。
+ * カタログ（全テナント共有の下敷き）とは出所が違うので、count とは別種別にする。
  */
 export type RegisterKey =
   | 'assets'
@@ -77,55 +77,55 @@ export const ALL_ROLE_KEYS: RoleKey[] = [
 ];
 
 /**
- * Clause.
- * scope='cross' marks a cross-cutting requirement that is "not specific to this stage" (4.4, 6.1.1, 7.1, 7.4, etc.).
- * Presenting it as if it belonged exclusively to a stage would misrepresent the standard's structure.
+ * 箇条。
+ * scope='cross' は「この段階だけのものではない」横断要求（4.4・6.1.1・7.1・7.4 など）。
+ * 段階の専属であるかのように出すと、規格の構造を誤って伝える。
  */
 export type ClauseScope = 'primary' | 'cross';
 export type Clause = { ref: string; title: string; scope: ClauseScope; note?: string };
 
 /**
- * Role of a tool.
- * reference ... a baseline for rules (catalog side). It is only "available for reference" and is not evidence of operating the ISMS
- * record    ... a record of the organization operating its ISMS (operations side). This is what counts as evidence in an audit
+ * 道具の役割。
+ * reference … ルールの下敷き（カタログ側）。「参照できる」だけで、回した証拠にはならない
+ * record    … 自社が ISMS を回した記録（運用側）。審査で証拠になるのはこちら
  */
 export type ToolRole = 'reference' | 'record';
 
 /**
- * Source of the count. Fixes here, per kind, what present (= usable) means.
- * When adding a kind, add the resolveTool branch and unit tests at the same time.
+ * 件数の取得元。present（＝使える）の意味を種別ごとにここで固定する。
+ * これを増やすときは resolveTool の分岐と単体試験を同時に足すこと。
  */
 export type ToolSource =
-  /** Row count in catalog. It is definition data, so it is used only for reference */
+  /** catalog の行数。定義データなので reference にしか使わない */
   | { kind: 'count'; countKey: StepCountKey }
-  /** Among the specified policy keys, those whose body is not a placeholder */
+  /** 指定した規程キーのうち、本文が仮置きでないもの */
   | { kind: 'policies'; keys: string[] }
-  /** Among the specified annual event keys, those present in the DB */
+  /** 指定した年間行事キーのうち、DB に在るもの */
   | { kind: 'calendar'; keys: string[] }
-  /** Among the specified role keys, those present in the DB. Do not substitute the total count */
+  /** 指定したロールキーのうち、DB に在るもの。総数で代用しない */
   | { kind: 'roles'; keys: RoleKey[] }
-  /** Annex A controls of ISO/IEC 27001:2022. Checks not only the count but also the shape of the codes */
+  /** ISO/IEC 27001:2022 附属書 A の統制。件数だけでなくコードの形も見る */
   | { kind: 'annexA' }
-  /** Check results recorded after confirming they can fail. Requires a tenant context */
+  /** 落ちることを確かめた上で記録されたチェック結果。テナント文脈が要る */
   | { kind: 'verifiedCheckRuns' }
   /**
-   * Row count of the organization's own register (app schema). Requires a tenant context.
+   * 自社の台帳（app スキーマ）の行数。テナント文脈が要る。
    *
-   * What is counted is **registered rows**, not approved rows.
-   * Approval and assignment of a responsible manager are not conditions for the count (user decision on 2026-09-07).
-   * The stage screen is an ISMS lens, so it shows counts filtered by framework tag.
-   * **The actual counting logic lives in one place: the SQL in catalog.ts's getRegisterFacts**. No copy is kept here.
+   * 数えるのは**登録されている行**であって、承認済みの行ではない。
+   * 承認や管理責任者の割り当てを数の条件にしない（2026-09-07 のユーザー判断）。
+   * 段階の画面は ISMS のレンズなので、枠組みタグで絞った数を出す。
+   * **数え方の実体は catalog.ts の getRegisterFacts の SQL 1 か所**。ここには写しを置かない。
    */
   | { kind: 'register'; registerKey: RegisterKey }
-  /** The feature itself does not exist in this system. Do not issue a COUNT */
+  /** 機能そのものがこの仕組みに無い。COUNT を投げない */
   | { kind: 'unbuilt' };
 
 export type StepTool = {
   key: string;
   label: string;
-  /** Destination. null for things that do not have a screen yet */
+  /** 行き先。まだ画面が無いものは null */
   href: string | null;
-  /** What it is useful for. One line */
+  /** 何の役に立つのか。1 行 */
   note: string;
   role: ToolRole;
   required: boolean;
@@ -154,25 +154,25 @@ export type IsoStep = {
   key: string;
   ordinal: number;
   phase: StepPhase;
-  /** End with a verb. Not "assets" but "identify assets" */
+  /** 動詞で終える。「資産」ではなく「資産を洗い出す」 */
   title: string;
-  /** What gets decided at this stage */
+  /** この段階で何を決めるのか */
   purpose: string;
-  /** A caveat that this is not something the standard prescribes. Some stages have none */
+  /** 規格がそう定めているわけではない、という但し書き。無い段階もある */
   caveat?: string;
   clauses: Clause[];
-  /** What people do. Practical procedures, not screen features */
+  /** 人がやること。画面の機能ではなく実務の手順 */
   actions: string[];
   tools: StepTool[];
-  /** Policies relevant to this stage (seed keys). Unique across stages */
+  /** この段階に効く規程（seed の key）。段階間で一意 */
   policyKeys: string[];
-  /** Annual events relevant to this stage (seed keys). Unique across stages */
+  /** この段階に効く年間行事（seed の key）。段階間で一意 */
   calendarKeys: string[];
-  /** Roles involved (seed keys). May appear in multiple stages */
+  /** 関わるロール（seed の key）。複数段階に出てよい */
   roleKeys: RoleKey[];
 };
 
-/** An unnumbered reference step. Not a requirement of the standard. */
+/** 番号を振らない参考の工程。規格の要求事項ではない。 */
 export const PREPARATION = {
   title: 'ギャップ分析（現状把握）',
   detail:
@@ -229,7 +229,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'scopeStatement' },
       },
       {
-        // Do not combine description and approval into one line. What is written and what is approved are different things.
+        // 記述と承認を 1 行にまとめない。書いてあることと承認されたことは別。
         key: 'scope-approval',
         label: '適用範囲の承認記録',
         href: '/operations?mode=isms',
@@ -239,7 +239,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'scopeApprovals' },
       },
       {
-        // 4.1 requires "determining" issues but does not require documented information. Show the count only; do not make it required.
+        // 4.1 は課題を「決定する」ことを求めるが、文書化情報は求めない。件数を出すだけで必須にしない。
         key: 'context-issues',
         label: '組織の課題（外部・内部）',
         href: '/iso27001/records?mode=isms#context',
@@ -249,7 +249,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'contextIssues' },
       },
       {
-        // Same for 4.2. Determine interested parties and their requirements, and which of those the ISMS addresses.
+        // 4.2 も同じ。利害関係者と要求を決め、そのうち ISMS で扱うものを決める。
         key: 'interested-parties',
         label: '利害関係者とその要求',
         href: '/iso27001/records?mode=isms#parties',
@@ -304,7 +304,7 @@ export const ISO_STEPS: IsoStep[] = [
         note: '責任を割り当てる先の雛形。自社の役職名へ読み替えて使う',
         role: 'reference',
         required: true,
-        // Check by key, not by total. Having 5 entries is not the same as having the needed roles.
+        // 総数ではなくキーで見る。5 件あることと、要る役割が在ることは別。
         source: { kind: 'roles', keys: ALL_ROLE_KEYS },
       },
       {
@@ -652,9 +652,9 @@ export const ISO_STEPS: IsoStep[] = [
         key: 'training-records',
         label: '教育・訓練講座',
         href: '/training?mode=isms',
-        // **Write what is being counted in label and note.** Training records and effectiveness evaluations are
-        // actuals of "who took it"; they do not exist just because a course was registered.
-        // Counting them together here would make it look like records exist even with 0 attendances.
+        // **数えているものを label と note に書く。** 受講記録と有効性の評価は
+        // 「誰が受けたか」の実績で、講座を登録しただけでは存在しない。
+        // ここで一緒に数えると、受講 0 件でも記録があることになる。
         note: 'eラーニングの ISMS・リスクマネジメント講座を同期する。件数は ISO 対象として登録されている講座の数。受講記録と有効性の評価は教育の画面で入れる',
         role: 'record',
         required: true,
@@ -664,7 +664,7 @@ export const ISO_STEPS: IsoStep[] = [
         key: 'competency-records',
         label: '力量要件',
         href: '/competency?mode=isms',
-        // Per-member sufficiency evaluations are actuals, so do not count them together with the number of requirements.
+        // メンバーごとの充足評価は実績なので、要件の数と一緒に数えない。
         note: '役割ごとに要る力量。件数は登録されている力量要件の数。メンバーごとの評価は力量の画面で入れ、教育・訓練の実績を根拠として引用する',
         role: 'record',
         required: true,
@@ -734,8 +734,8 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'measures' },
       },
       {
-        // A.5.31 is an Annex A control. Whether it applies is decided by the Statement of Applicability, so show the count only and do not make it required
-        // (showing "incomplete" even for the stage of an organization that excluded it would be a wrong display. Decided 2026-09-12).
+        // A.5.31 は附属書 A の統制。適用するかは適用宣言書で決まるので、件数を出すだけで必須にしない
+        // （適用除外にした会社の段階まで「そろっていない」と出すのは誤った表示になる。2026-09-12 決定）。
         key: 'legal-requirements',
         label: '法令・規制・契約上の要求事項',
         href: '/iso27001/records?mode=isms#legal',
@@ -745,8 +745,8 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'legalRequirements' },
       },
       {
-        // A.5.29 / 5.30 are also Annex A controls. Show the count only; do not make them required (decided 2026-09-12).
-        // Keep plans and tests in separate fields. Having a plan is different from having tested it and seen it work.
+        // A.5.29 / 5.30 も附属書 A の統制。件数表示だけで必須にしない（2026-09-12 決定）。
+        // 計画と試験は別の欄にする。計画があることと、試して動いたことは別。
         key: 'continuity-plans',
         label: '事業継続の計画',
         href: '/iso27001/records?mode=isms#continuity',
@@ -765,7 +765,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'continuityTests' },
       },
       {
-        // A.8.8 is also an Annex A control. Show the count only; do not make it required (decided 2026-09-12).
+        // A.8.8 も附属書 A の統制。件数表示だけで必須にしない（2026-09-12 決定）。
         key: 'vulnerabilities',
         label: '技術的脆弱性の記録',
         href: '/iso27001/records?mode=isms#vulnerabilities',
@@ -775,7 +775,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'vulnerabilities' },
       },
       {
-        // A.8.32 is also an Annex A control. Show the count only; do not make it required (decided 2026-09-12).
+        // A.8.32 も附属書 A の統制。件数表示だけで必須にしない（2026-09-12 決定）。
         key: 'change-requests',
         label: '変更の申請と承認の記録',
         href: '/iso27001/records?mode=isms#changes',
@@ -846,7 +846,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'verifiedCheckRuns' },
       },
       {
-        // 9.1 requires not only "monitoring and measurement" but also evaluation of effectiveness. Count it separately from records of what was done (measures).
+        // 9.1 は「監視・測定」だけでなく有効性の評価を求める。実施した記録（施策）とは別に数える。
         key: 'control-effectiveness',
         label: '統制の有効性評価',
         href: '/iso27001/records?mode=isms#effectiveness',
@@ -898,7 +898,7 @@ export const ISO_STEPS: IsoStep[] = [
         note: '業務データを変更できない役割として定義されている',
         role: 'reference',
         required: true,
-        // Do not substitute the total number of roles. Even with 5 roles, independence is not ensured without an auditor.
+        // ロールの総数で代用しない。5 件あっても監査人が居なければ独立性は担保されない。
         source: { kind: 'roles', keys: ['auditor'] },
       },
       {
@@ -1007,7 +1007,7 @@ export const ISO_STEPS: IsoStep[] = [
         source: { kind: 'register', registerKey: 'auditFindings' },
       },
       {
-        // Count findings and corrective actions separately. Do not hide a state where findings exist but corrective actions are 0.
+        // 指摘と是正は別に数える。指摘だけ在って是正が 0 件という状態を隠さない。
         key: 'corrective-actions',
         label: '是正処置の台帳',
         href: '/iso27001/records?mode=isms',
@@ -1024,55 +1024,55 @@ export const ISO_STEPS: IsoStep[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Deriving status
+// 状態の導出
 // ---------------------------------------------------------------------------
 
 /**
- * Measured values. Only values read from the DB go here; no defaults are given.
- * With defaults, a failure to read would turn into "0 items".
+ * 実測。ここに入るのは DB から読んだ値だけで、既定値を持たせない。
+ * 既定値を持たせると、読めなかったときに「0 件」に化ける。
  */
 export type StepFacts = {
   counts: StepCounts;
-  /** Policy keys present in the DB -> whether the body has real content (is not a placeholder) */
+  /** DB に在る規程キー -> 本文が実質を伴うか（仮置きでないか） */
   policyBodies: Record<string, boolean>;
-  /** Annual event keys present in the DB */
+  /** DB に在る年間行事キー */
   calendarKeys: string[];
-  /** Role keys present in the DB */
+  /** DB に在るロールキー */
   roleKeys: string[];
-  /** ISO/IEC 27001:2022 controls. total is the count; wellFormed is the count in A.x.y form */
+  /** ISO/IEC 27001:2022 の統制。total は件数、wellFormed は A.x.y の形をしている件数 */
   annexA: { total: number; wellFormed: number };
-  /** Count of check results whose reverse check is complete. null when unreadable */
+  /** 逆向きの確認が済んだチェック結果の件数。読めないときは null */
   verifiedCheckRuns: number | null;
   /**
-   * Row counts of the organization's own registers. null when there is no tenant context or the DB cannot be read.
-   * **Do not mix null with "0 items".** The former means it could not be read; the latter means it was measured and was 0.
+   * 自社の台帳の行数。テナント文脈が無い・DB が読めないときは null。
+   * **null と「0 件」を混ぜない。**前者は読めていない、後者は測れて 0 だった。
    */
   registers: Record<RegisterKey, number> | null;
 };
 
 /**
- * Whether a value can be trusted as a count.
+ * 件数として信用してよい値か。
  *
- * Passing NaN, Infinity, or non-numeric values straight into comparisons makes `> 0` come out true or false,
- * turning them into either "usable" or "not populated". Treat unreadable values as unreadable.
- * Since these are counts, only **non-negative integers** pass. A value like 1.5 items means the counting is broken.
+ * NaN・Infinity・非数値をそのまま比較に流すと、`> 0` が真になったり偽になったりして
+ * 「使える」「未投入」のどちらにも化ける。読めない値は読めないものとして扱う。
+ * 件数なので**非負の整数**だけを通す。1.5 件のような値は数え方が壊れている。
  */
 function isCount(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n >= 0;
 }
 
 export type ToolState =
-  /** Usable */
+  /** 使える */
   | { kind: 'present'; count: number }
-  /** Rows exist but the content is a placeholder */
+  /** 行はあるが中身が仮置き */
   | { kind: 'placeholder'; count: number; total: number }
-  /** A count exists but it does not have the expected shape */
+  /** 件数はあるが、あるべき形をしていない */
   | { kind: 'malformed'; wellFormed: number; total: number }
-  /** The table exists but has 0 rows */
+  /** 表はあるが 0 件 */
   | { kind: 'empty' }
-  /** The feature itself does not exist */
+  /** 機能そのものが無い */
   | { kind: 'unbuilt' }
-  /** Not in a readable state (neither 0 items nor unimplemented) */
+  /** 読める状態にない（0 件でも未実装でもない） */
   | { kind: 'unreadable' };
 
 export const TOOL_STATE_LABEL: Record<ToolState['kind'], string> = {
@@ -1085,15 +1085,15 @@ export const TOOL_STATE_LABEL: Record<ToolState['kind'], string> = {
 };
 
 /**
- * The shape of Annex A control codes.
+ * 附属書 A の統制コードの形。
  *
- * The 2022 edition's Annex A has only 4 categories: A.5 (organizational), A.6 (people), A.7 (physical), A.8 (technological).
- * Loosening it to `A\.\d+\.\d+` would also accept non-existent categories like A.9.1,
- * and it would no longer serve as grounds for "Annex A controls are present".
+ * 2022 年版の附属書 A は A.5（組織的）・A.6（人的）・A.7（物理的）・A.8（技術的）の 4 区分しかない。
+ * `A\.\d+\.\d+` まで緩めると A.9.1 のような実在しない区分も通り、
+ * 「附属書 A の統制が入っている」の根拠にならなくなる。
  */
 export const ANNEX_A_CODE = /^A\.[5-8]\.\d{1,2}$/;
 
-/** Count only the keys contained in the set. Look only at own properties. */
+/** 集合に含まれるキーだけを数える。所有プロパティだけを見る。 */
 function countKnown(keys: readonly string[], known: readonly string[]): string[] {
   return keys.filter((k) => known.includes(k));
 }
@@ -1102,27 +1102,27 @@ export function resolveTool(tool: StepTool, facts: StepFacts): ToolState {
   const src = tool.source;
   switch (src.kind) {
     case 'unbuilt':
-      // Do not issue a COUNT. That the feature does not exist is known statically.
+      // COUNT を投げない。機能が無いことは静的に分かっている。
       return { kind: 'unbuilt' };
 
     case 'count': {
       const n = facts.counts[src.countKey];
-      // Mixing values unreadable as numbers with 0 turns them into "not populated". Yet it is not "feature does not exist" either.
-      // Report a failure to read as a failure to read.
+      // 数として読めない値を 0 と混ぜると「未投入」に化ける。かといって「機能が無い」でもない。
+      // 読めなかったことは、読めなかったこととして出す。
       if (!isCount(n)) return { kind: 'unreadable' };
       return n > 0 ? { kind: 'present', count: n } : { kind: 'empty' };
     }
 
     case 'policies': {
-      // `k in obj` also matches the prototype side (toString etc.), so it is not used.
-      // Just writing a policy key named 'toString' in the config would make it count as present in the DB.
+      // `k in obj` はプロトタイプ側（toString など）にも当たるので使わない。
+      // 'toString' という規程キーを設定に書いただけで、DB に在ることになってしまう。
       const known = src.keys.filter((k) =>
         Object.prototype.hasOwnProperty.call(facts.policyBodies, k),
       );
       if (known.length === 0) return { kind: 'empty' };
-      // **The denominator is "the number of required policies", not "the number present in the DB".**
-      // If only those present in the DB were the denominator, when one required policy is missing,
-      // the rest being complete would be enough for "usable". Count what is missing as insufficient.
+      // **分母は「要る規程の数」であって「DB に在る数」ではない。**
+      // DB に在るものだけを分母にすると、要る規程が 1 本抜け落ちたときに
+      // 残りがそろっているだけで「使える」になる。抜けは足りないこととして数える。
       const substantive = src.keys.filter((k) => facts.policyBodies[k] === true).length;
       if (substantive < src.keys.length) {
         return { kind: 'placeholder', count: substantive, total: src.keys.length };
@@ -1133,7 +1133,7 @@ export function resolveTool(tool: StepTool, facts: StepFacts): ToolState {
     case 'calendar': {
       const present = countKnown(src.keys, facts.calendarKeys);
       if (present.length === 0) return { kind: 'empty' };
-      // Do not call a partially present state "usable". That would mean operating with parts of the schedule missing.
+      // 一部しか無い状態を「使える」と言わない。予定が欠けたまま回すことになる。
       if (present.length < src.keys.length) {
         return { kind: 'placeholder', count: present.length, total: src.keys.length };
       }
@@ -1151,15 +1151,15 @@ export function resolveTool(tool: StepTool, facts: StepFacts): ToolState {
 
     case 'annexA': {
       const { total, wellFormed } = facts.annexA;
-      // If the aggregate itself cannot be read, say neither 0 items nor populated.
-      // If the DB itself is down, the query throws and the screen returns 500 (that is the correct behavior).
-      // What this guards against is the case where "the query returned but the value is broken as a number".
+      // 集計そのものが読めないなら、0 件とも入っているとも言わない。
+      // DB そのものが落ちている場合は問い合わせが例外になり、画面は 500 になる（そちらが正）。
+      // ここが守るのは「問い合わせは返ったが値が数として壊れている」場合。
       if (!isCount(total) || !isCount(wellFormed)) return { kind: 'unreadable' };
-      // A well-formed count exceeding the total means the aggregation is broken. Do not tip it toward usable.
+      // 形の合う件数が総数を超えるのは、集計が壊れている。使える側へ倒さない。
       if (wellFormed > total) return { kind: 'malformed', wellFormed, total };
       if (total === 0) return { kind: 'empty' };
-      // Looking only at the count, linking controls that are not from Annex A would still pass.
-      // If even one code has a different shape, do not say Annex A is present.
+      // 件数だけ見ると、附属書 A ではない統制を紐付けても通ってしまう。
+      // コードの形が 1 件でも違えば、附属書 A が入っているとは言わない。
       if (wellFormed !== total) return { kind: 'malformed', wellFormed, total };
       return { kind: 'present', count: total };
     }
@@ -1167,16 +1167,16 @@ export function resolveTool(tool: StepTool, facts: StepFacts): ToolState {
     case 'verifiedCheckRuns': {
       const n = facts.verifiedCheckRuns;
       if (n === null) return { kind: 'unreadable' };
-      // Do not let NaN turn into "not populated" like 0, or Infinity into "usable".
+      // NaN を 0 と同じ「未投入」に、Infinity を「使える」に化けさせない。
       if (!isCount(n)) return { kind: 'unreadable' };
       return n > 0 ? { kind: 'present', count: n } : { kind: 'empty' };
     }
 
     case 'register': {
-      // Failing to read a register (no tenant context, etc.) is not 0 items.
+      // 台帳が読めなかったこと（テナント文脈が無い等）は 0 件ではない。
       if (facts.registers === null) return { kind: 'unreadable' };
       const n = facts.registers[src.registerKey];
-      // Do not let NaN turn into "not populated" or Infinity into "usable".
+      // NaN を「未投入」に、Infinity を「使える」に化けさせない。
       if (!isCount(n)) return { kind: 'unreadable' };
       return n > 0 ? { kind: 'present', count: n } : { kind: 'empty' };
     }
@@ -1184,33 +1184,33 @@ export function resolveTool(tool: StepTool, facts: StepFacts): ToolState {
 }
 
 export type StepStatus =
-  /** Everything required has both its baseline and its records in place */
+  /** 要るものが下敷きも記録もそろっている */
   | 'usable'
-  /** Only part of what is required is in place */
+  /** 要るものの一部だけそろっている */
   | 'partial'
-  /** None of what is required is in place */
+  /** 要るものがひとつもそろっていない */
   | 'none';
 
 export type StepAssessment = {
   status: StepStatus;
-  /** Whether all required baselines are in place */
+  /** required な下敷きがすべてそろっているか */
   referencesReady: boolean;
-  /** Whether all required records are in place */
+  /** required な記録がすべてそろっているか */
   recordsReady: boolean;
-  /** Whether there are unreadable items. Shown alongside the status, separately (do not tip the status toward the better side) */
+  /** 読めない項目があるか。状態とは別に併記する（状態を良い方へ倒さない） */
   hasUnreadable: boolean;
   tools: { tool: StepTool; state: ToolState }[];
-  /** Tools that are required but not in place */
+  /** 要るのにそろっていない道具 */
   missingRequired: StepTool[];
 };
 
 /**
- * The wording shown in a stage's heading.
+ * 段階の見出しに出す言葉。
  *
- * After splitting status into 3, it distinguishes only the **common case** of partial
- * (baselines are in place but there is no feature to keep records).
- * Applying "baseline only" to every partial case would show that wording even for stages that have records but lack a baseline,
- * and the screen would lie.
+ * 状態を 3 つに割ったうえで、partial のうち**よくある形**
+ * （下敷きはそろっているが記録を残す機能が無い）だけを言い分ける。
+ * 「下敷きだけある」を partial 全部に当てると、記録だけあって下敷きが欠けている段階にも
+ * その言葉が出て、画面が嘘をつく。
  */
 export function statusLabel(a: StepAssessment): string {
   if (a.status === 'usable') return '記録まで残せる';
@@ -1228,7 +1228,7 @@ export function statusNote(a: StepAssessment): string {
   return '要るものの一部しかそろっていない。足りないものは各段階に挙げる';
 }
 
-/** The list of headings used for aggregation. Wording not listed here never comes out of statusLabel. */
+/** 集計に使う見出しの並び。ここに無い言葉は statusLabel から出ない。 */
 export const STATUS_BUCKETS: readonly string[] = [
   '記録まで残せる',
   '下敷きだけある',
@@ -1237,13 +1237,13 @@ export const STATUS_BUCKETS: readonly string[] = [
 ];
 
 /**
- * Derives a stage's status from measured values.
+ * 段階の状態を実測から導出する。
  *
- * Only present is counted as present. placeholder, malformed, empty, unbuilt, and unreadable
- * are all counted on the "unusable" side. The moment unusable things are mixed into the usable side, this screen starts lying.
+ * present に数えるのは present だけ。placeholder・malformed・empty・unbuilt・unreadable は
+ * どれも「使えない」側に数える。使えないものを使える側に混ぜた瞬間、この画面は嘘をつき始める。
  *
- * The evaluation order is fixed. If required is empty, every() is true and turns into usable, so
- * "every stage has at least one required reference and record" is enforced by unit tests.
+ * 評価の順番は固定する。required が空だと every() が真になって usable に化けるので、
+ * 「どの段階も required の reference と record を 1 つ以上持つ」ことは単体試験で強制する。
  */
 export function assessStep(step: IsoStep, facts: StepFacts): StepAssessment {
   const tools = step.tools.map((tool) => ({ tool, state: resolveTool(tool, facts) }));
@@ -1253,8 +1253,8 @@ export function assessStep(step: IsoStep, facts: StepFacts): StepAssessment {
   const requiredRefs = required.filter((t) => t.tool.role === 'reference');
   const requiredRecs = required.filter((t) => t.tool.role === 'record');
 
-  // An empty every() is true. To avoid reading a stage with no required items as "complete",
-  // the length is included in the condition (the invariant itself is enforced by unit tests).
+  // 空の every() は真になる。required を持たない段階を「そろっている」と読ませないため、
+  // 長さを条件に含める（不変条件そのものは単体試験で強制する）。
   const referencesReady = requiredRefs.length > 0 && requiredRefs.every(isPresent);
   const recordsReady = requiredRecs.length > 0 && requiredRecs.every(isPresent);
 
@@ -1281,7 +1281,7 @@ export function getStep(key: string): IsoStep | null {
   return ISO_STEPS.find((s) => s.key === key) ?? null;
 }
 
-/** The previous and next stages. Returns null at the ends. */
+/** 前後の段階。端では null を返す。 */
 export function stepNeighbors(key: string): { prev: IsoStep | null; next: IsoStep | null } {
   const i = ISO_STEPS.findIndex((s) => s.key === key);
   if (i < 0) return { prev: null, next: null };
@@ -1292,8 +1292,8 @@ export function stepNeighbors(key: string): { prev: IsoStep | null; next: IsoSte
 }
 
 /**
- * Status of a single policy's body. Re-deriving this on each screen produces different wording per screen.
- * missing ... in the assignment table but not in the DB
+ * 規程 1 本の本文の状態。画面でこれを判定し直すと、画面ごとに違う言い方が生まれる。
+ * missing … 割り当て表には在るが DB に無い
  */
 export type PolicyBodyState = 'substantive' | 'placeholder' | 'missing';
 
@@ -1302,32 +1302,32 @@ export function policyBodyState(facts: StepFacts, key: string): PolicyBodyState 
   return facts.policyBodies[key] === true ? 'substantive' : 'placeholder';
 }
 
-/** All role keys assigned to stages (including duplicates; a role may appear in multiple stages). */
+/** 段階に割り当てたロールキーの全体（重複を含む。ロールは複数段階に出てよい）。 */
 export function assignedRoleKeys(): string[] {
   return Array.from(new Set(ISO_STEPS.flatMap((s) => s.roleKeys)));
 }
 
-/** All policy keys assigned to stages. */
+/** 段階に割り当てた規程キーの全体。 */
 export function assignedPolicyKeys(): string[] {
   return ISO_STEPS.flatMap((s) => s.policyKeys);
 }
 
-/** All annual event keys assigned to stages. */
+/** 段階に割り当てた年間行事キーの全体。 */
 export function assignedCalendarKeys(): string[] {
   return ISO_STEPS.flatMap((s) => s.calendarKeys);
 }
 
 /**
- * Checks for gaps in assignments **in both directions**.
+ * 割り当ての取りこぼしを**双方向**で見る。
  *
- * One direction only (in the DB but not in the config) cannot catch typos or non-existent keys on the config side.
- * Both the case of adding a row to the seed and forgetting to assign it, and the case of writing a fictitious key in the config,
- * are shown on screen (the external check verifies both are 0).
+ * 片方向（DB にあって設定に無い）だけだと、設定側のタイポや存在しないキーを拾えない。
+ * seed に行を足して割り当てを忘れた場合と、設定に架空のキーを書いた場合の
+ * どちらも画面に出す（外形検査は両方 0 件であることを見る）。
  */
 export type Unassigned = {
-  /** Present in the DB but not assigned to any stage */
+  /** DB に在るのに、どの段階にも割り当てていない */
   inDbOnly: string[];
-  /** Listed in a stage but not in the DB */
+  /** 段階に書いてあるのに、DB に無い */
   inConfigOnly: string[];
 };
 

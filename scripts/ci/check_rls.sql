@@ -1,8 +1,8 @@
--- Quality gate from design doc 11.5: "RLS coverage" + role attributes + effective privileges.
--- Fails via RAISE EXCEPTION on even a single violation (use with psql -v ON_ERROR_STOP=1).
+-- 設計書 11.5 の品質ゲート「RLS 網羅」＋ロール属性＋実効権限の検査。
+-- 1 件でも違反があれば RAISE EXCEPTION で落ちる（psql -v ON_ERROR_STOP=1 で使う）。
 --
--- ALTER DEFAULT PRIVILEGES is not retroactive to existing objects, so rather than relying on it
--- we inspect "the privileges that exist right now" directly with aclexplode.
+-- ALTER DEFAULT PRIVILEGES は既存オブジェクトに遡及しないので、これに依存せず
+-- aclexplode で「今そこにある権限」を直接見る。
 
 \set ON_ERROR_STOP on
 
@@ -12,8 +12,9 @@ DECLARE
   n int;
   k text;
   v_expect_qual constant text := '(tenant_id = app.current_tenant())';
-  -- Definer-only tables (tables for which app_rw / app_ro get no table privileges)
+  -- 定義者専用（app_rw / app_ro にテーブル権限を与えない表）
   definer_only constant text[] := ARRAY['sessions','tenant_context_keys','verification_receipts',
+    'device_login_requests','device_login_request_nonces',
     'internal_management_service_principals','internal_management_acceptance_approvals'];
   management_append_only constant text[] := ARRAY['risk_acceptances','framework_relation_events','internal_management_operations','internal_management_audit_events'];
   management_frameworks constant text[] := ARRAY['asset_frameworks','risk_scenario_frameworks','measure_frameworks'];
@@ -21,7 +22,7 @@ DECLARE
     'internal_management_service_principals','internal_management_acceptance_approvals','approvals'];
 BEGIN
   ---------------------------------------------------------------- 1
-  -- app tables with tenant_id must have both ENABLE and FORCE RLS
+  -- tenant_id を持つ app の表に ENABLE + FORCE RLS が揃っていること
   SELECT string_agg(c.relname, ', ') INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -33,7 +34,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 2
-  -- app.tenants has no tenant_id column, so it slips through the net above. Check it separately.
+  -- app.tenants は tenant_id 列を持たないので上の網から漏れる。個別に見る。
   IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                   WHERE n.nspname='app' AND c.relname='tenants'
                     AND c.relrowsecurity AND c.relforcerowsecurity) THEN
@@ -41,8 +42,8 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3
-  -- Both policies must exist. Check not just the names but also cmd, target roles, qual,
-  -- and with_check (don't pass a wrong policy that merely shares the name).
+  -- ポリシーが 2 本揃っていること。名前だけでなく cmd・対象ロール・qual・
+  -- with_check まで期待どおりか見る（同名なだけの誤ったポリシーを通さない）。
   SELECT string_agg(format('%s(%s)', t.relname, reason), ', ') INTO v_bad
   FROM (
     SELECT c.relname,
@@ -94,19 +95,19 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3b
-  -- No unexpected policies have been added.
-  -- Checking only that "the correct policies exist" would still pass if a permissive
-  -- USING (true) policy were added alongside (policies are OR-combined, so it becomes a hole).
+  -- 想定外のポリシーが増えていないこと。
+  -- 「正しいポリシーが在る」だけを見ると、横に USING (true) の permissive な
+  -- ポリシーを足されても通ってしまう（ポリシーは OR で合成されるので穴になる）。
   SELECT string_agg(format('%s.%s', tablename, policyname), ', ') INTO v_bad
     FROM pg_policies
    WHERE schemaname = 'app'
      AND policyname NOT IN ('tenant_isolation','tenant_read',
                             'ctx_session_lookup','ctx_membership_lookup',
                             'ctx_user_lookup','ctx_user_lock','ctx_tenant_lookup','ctx_deviation_lookup',
-                            -- For tenant creation, added in 0021 (definer only; only the one tenant being created)
+                            -- 0021 で足したテナント作成用（定義者のみ・作成中の 1 テナントだけ）
                             'prov_tenant_insert','prov_user_insert','prov_membership_insert',
                             'prov_policy_insert','prov_policy_version_insert',
-                            -- The agent intake path from 0026. Used only by schema_owner's no-login function.
+                            -- 0026 の agent 受入経路。schema_owner の no-login 関数だけが使う。
                             'agent_device_definer_read','agent_device_definer_insert',
                             'agent_device_definer_update','agent_snapshot_definer_read',
                             'agent_snapshot_definer_insert',
@@ -117,19 +118,19 @@ BEGIN
                             'hr_projection_account_update','hr_projection_device_update',
                             'management_definer_access','management_service_principal_read',
                             'management_service_principal_provision',
-                            -- For the definer and send worker in 0057-0061. They were missing from the allowlist, so
-                            -- the agent acceptance test on a fresh DB failed here (same at 970c42a; measured 2026-09-12).
+                            -- 0057〜0061 の定義者・送信ワーカー向け。許可リストへの追記が漏れていて、
+                            -- 新規 DB の agent 受入試験がここで落ちていた（970c42a でも同じ。2026-09-12 実測）。
                             'tenant_security_definer','tenant_security_definer_read','tenant_worker_read',
-                            -- 0067's records role policies (RESTRICTIVE; shape and target tables are pinned below).
+                            -- 0067 の記録の役割ポリシー（RESTRICTIVE。形と対象表は下で固定する）。
                             'records_role_insert','records_role_update','records_role_delete');
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION '想定外のポリシーがある: %', v_bad;
   END IF;
 
-  -- Shape of the 0057-0062 definer / send-worker policies. Merely adding names to the allowlist would
-  -- still pass if one were rewritten to USING (true) under the same name (Codex review 2026-09-12 finding).
-  -- Only the two ways of writing "restrict by tenant context" are accepted (0062's (SELECT ...) form and the earlier direct-call form).
-  -- Rows where the CASE returns NULL (NULL condition) are also rejected, so coalesce to false.
+  -- 0057〜0062 の定義者・送信ワーカー向けポリシーの形。名前を許可リストに足すだけだと、
+  -- 同じ名前のまま USING (true) へ書き換えても通ってしまう（Codex レビュー 2026-09-12 指摘）。
+  -- 条件は「テナント文脈で絞る」2 つの書き方だけを認める（0062 の (SELECT ...) 形と、それ以前の直呼び形）。
+  -- CASE が NULL を返す（条件が NULL の）行も落とすため coalesce で偽に倒す。
   SELECT string_agg(format('%s.%s(roles=%s cmd=%s qual=%s check=%s)', tablename, policyname, roles::text, cmd,
                            coalesce(qual, '(null)'), coalesce(with_check, '(null)')), ', ') INTO v_bad
     FROM pg_policies
@@ -153,25 +154,25 @@ BEGIN
     RAISE EXCEPTION '定義者・送信ワーカー向けポリシーの形が想定外: %', v_bad;
   END IF;
 
-  -- Pin not only the shape but also which tables they are attached to (both directions).
-  -- Fail if one goes missing from a target table, or if one with the same name and shape appears on another table (Codex review 2026-09-12, round 2 finding).
-  -- When adding a table, adding it here is the record of the decision to "open a definer path to that table".
+  -- 形だけでなく、どの表に張られているかも固定する（両方向）。
+  -- 対象表から欠けても、別の表に同名・同形のものが増えても落とす（Codex レビュー 2026-09-12 2 巡目指摘）。
+  -- 表を足すときは、ここへ足すことが「その表に定義者の口を開ける」判断の記録になる。
   SELECT string_agg(coalesce(e.pol || '.' || e.tbl || '(欠落)', a.pol || '.' || a.tbl || '(想定外)'), ', ') INTO v_bad
     FROM (VALUES
       ('tenant_security_definer', 'application_catalog'),
-      -- 0070: because the approve/reject function for change requests (decide_change_request) reads and writes requests.
+      -- 0070: 変更の申請の承認・却下の関数（decide_change_request）が申請を読み書きするため。
       ('tenant_security_definer', 'change_requests'),
       ('tenant_security_definer', 'department_systems'),
       ('tenant_security_definer', 'external_questionnaires'),
       ('tenant_security_definer', 'mail_outbox'),
       ('tenant_security_definer', 'questionnaire_template_questions'),
       ('tenant_security_definer', 'questionnaire_templates'),
-      -- 0075: because the trigger function (record_row_transition) writes the transition records.
+      -- 0075: 変化の記録を、トリガの関数（record_row_transition）が書くため。
       ('tenant_security_definer', 'row_transitions'),
       ('tenant_security_definer', 'work_item_assignees'),
       ('tenant_security_definer', 'work_items'),
       ('tenant_security_definer_read', 'assets'),
-      -- 0063: because the management review approval function (approve_management_review) reads the minutes.
+      -- 0063: マネジメントレビューの承認関数（approve_management_review）が議事を読むため。
       ('tenant_security_definer_read', 'management_reviews'),
       ('tenant_worker_read', 'mail_outbox')
     ) AS e(pol, tbl)
@@ -186,15 +187,15 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3c2
-  -- 0067's records role policies. Pin not only the names but also the tables they are attached to (both directions) and the shape.
-  -- Shape: app_rw, RESTRICTIVE, command as the name says, condition is only (SELECT app.records_role_allows('<that table's kind>')).
-  -- If rewritten to PERMISSIVE, OR-combination removes the restriction; if the condition is made true, anyone can write. Fail both.
-  -- When adding a table, adding it here is the record of the decision to "restrict that table by role".
-  -- Also check the permission function itself. When the caller is unknown (no session), it must not return "allow" for any kind.
-  -- Without a session current_session_user() fails with insufficient_privilege, so false or that exception is acceptable
-  -- (2026-09-12 Codex review: calling it without catching the exception made this check itself fail on a plain connection).
-  -- If the body were rewritten to RETURN true, anyone could write even with correctly shaped policies. Check every kind in the permission table
-  -- (fail even if only the branch for a kind with no attached table is rewritten). Per-role allow/deny is verified with real writes by tests/isms_registers.sh.
+  -- 0067 の記録の役割ポリシー。名前だけでなく、張る表（両方向）と形を固定する。
+  -- 形: app_rw・RESTRICTIVE・コマンドは名前どおり・条件は (SELECT app.records_role_allows('<その表の種類>')) だけ。
+  -- PERMISSIVE へ書き換えられると OR で合成されて絞りが消え、条件を true にされると誰でも書ける。どちらも落とす。
+  -- 表を足すときは、ここへ足すことが「その表を役割で絞る」判断の記録になる。
+  -- 許可の関数そのものも確かめる。本人が分からない（セッションが無い）ときに、どの種類も「許す」を返してはならない。
+  -- セッションが無いと current_session_user() が insufficient_privilege で落ちるので、偽か、その例外なら可
+  -- （2026-09-12 Codex レビュー: 例外を捕まえずに呼ぶと、素の接続ではこの検査そのものが落ちていた）。
+  -- 本体を RETURN true に書き換えられると、ポリシーの形が正しくても誰でも書ける。許可の表にある種類をすべて見る
+  -- （表を張っていない種類の分岐だけを書き換えられても落とす）。役割ごとの許否は tests/isms_registers.sh が実際の書き込みで確かめる。
   v_bad := NULL;
   FOREACH k IN ARRAY ARRAY['audit','corrective','effectiveness','management_review','objective','evidence',
                            'exception','context','legal','continuity','vulnerability','change','import'] LOOP
@@ -203,27 +204,27 @@ BEGIN
         v_bad := concat_ws(', ', v_bad, k);
       END IF;
     EXCEPTION WHEN insufficient_privilege THEN
-      -- Failing because the caller is unknown means "not allowed", so it is acceptable. An unknown kind (unknown record kind) is not caught here; the whole check fails.
+      -- 本人不明で落ちるのは「許していない」ので可。知らない種類（unknown record kind）はここで捕まえず、検査ごと落とす。
       NULL;
     END;
   END LOOP;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION '記録の許可関数が、本人不明でも許している: %', v_bad;
   END IF;
-  -- Don't use a same-named temp table created earlier in the same session (always recreate it so the expected values can't be swapped).
+  -- 同じセッションに同名の一時表が先に作られていても使わない（期待値を差し替えられないよう、必ず作り直す）。
   DROP TABLE IF EXISTS pg_temp.records_role_expected;
   CREATE TEMP TABLE pg_temp.records_role_expected ON COMMIT DROP AS
     SELECT v.tbl, p.pol, p.cmd,
            format('( SELECT app.records_role_allows(%L::text) AS records_role_allows)', v.kind) AS cond
       FROM (VALUES ('control_effectiveness', 'effectiveness'), ('context_issues', 'context'),
                    ('interested_parties', 'context'), ('legal_requirements', 'legal'),
-                   -- 0068: business continuity plans and tests
+                   -- 0068: 事業継続の計画・試験
                    ('continuity_plans', 'continuity'), ('continuity_tests', 'continuity'),
-                   -- 0069: vulnerabilities
+                   -- 0069: 脆弱性
                    ('vulnerabilities', 'vulnerability'),
-                   -- 0070: change requests (DELETE is not granted, but the policy is attached anyway for a consistent shape)
+                   -- 0070: 変更の申請（DELETE は権限を渡していないが、形はそろえて張る）
                    ('change_requests', 'change'),
-                   -- 0071: import records (no UPDATE / DELETE privileges, but the policy is attached anyway for a consistent shape)
+                   -- 0071: 取り込みの記録（UPDATE / DELETE は権限が無いが、形はそろえて張る）
                    ('import_batches', 'import'), ('import_batch_items', 'import'), ('import_undos', 'import')) AS v(tbl, kind)
      CROSS JOIN (VALUES ('records_role_insert', 'INSERT'), ('records_role_update', 'UPDATE'),
                         ('records_role_delete', 'DELETE')) AS p(pol, cmd);
@@ -255,10 +256,10 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3c3
-  -- Privilege boundary of 0070 change requests. The safeguards against forged approvals must not have been removed (Codex review 2026-09-12).
-  --   app_rw has no DELETE (requests and approval records can't be deleted; a request can only be withdrawn)
-  --   the decision function is owned by schema_owner, SECURITY DEFINER, with no EXECUTE for PUBLIC
-  --   the triggers protecting the transition and decision columns are enabled
+  -- 0070 の変更の申請の権限境界。承認の偽造を防ぐ仕組みが外されていないこと（Codex レビュー 2026-09-12）。
+  --   app_rw に DELETE が無い（申請と承認の記録を消させない。申請は取りやめるだけ）
+  --   判断の関数は schema_owner 所有・SECURITY DEFINER・PUBLIC に実行権限なし
+  --   遷移と判断の欄を守るトリガが有効
   IF has_table_privilege('app_rw', 'app.change_requests', 'DELETE') THEN
     RAISE EXCEPTION 'app_rw が change_requests を DELETE できる（申請は取りやめるだけのはず）';
   END IF;
@@ -274,9 +275,9 @@ BEGIN
                   AND tgname = 'change_requests_guard' AND tgenabled = 'O' AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'change_requests_guard トリガが無いか無効';
   END IF;
-  -- Guard triggers of 0070-0072. Pin not only names but also enabled state, called function, and timing/event (tgtype)
-  -- (changing BEFORE INSERT to BEFORE UPDATE keeps the name but stops filling in the actor and timestamp. Codex review 2026-09-12).
-  -- tgtype bits: ROW=1 BEFORE=2 INSERT=4 DELETE=8 UPDATE=16.
+  -- 0070〜0072 の守りのトリガ。名前だけでなく、有効・呼ぶ関数・時点と事象（tgtype）まで固定する
+  -- （BEFORE INSERT を BEFORE UPDATE に変えると、名前は同じでも本人・日時を埋めなくなる。Codex レビュー 2026-09-12）。
+  -- tgtype のビット: ROW=1 BEFORE=2 INSERT=4 DELETE=8 UPDATE=16。
   SELECT string_agg(e.tbl || '.' || e.tg, ', ') INTO v_bad
     FROM (VALUES ('import_batches',     'import_batches_stamp',           'app.import_log_stamp()',       7),
                  ('import_undos',       'import_undos_stamp',             'app.import_log_stamp()',       7),
@@ -285,14 +286,14 @@ BEGIN
                  ('assets',             'assets_keep_created_at',         'app.keep_created_at()',       19),
                  ('risk_scenarios',     'risk_scenarios_keep_created_at', 'app.keep_created_at()',       19),
                  ('departments',        'departments_keep_created_at',    'app.keep_created_at()',       19),
-                 -- 0076: policies and versions (so the import detail's "created in this transaction" judgment can't be falsified)
+                 -- 0076: 規程と版（取り込みの明細の「このトランザクションで作った」の判定を偽らせない）
                  ('policies',           'policies_keep_created_at',        'app.keep_created_at()',      19),
                  ('policy_versions',    'policy_versions_keep_created_at', 'app.keep_created_at()',      19),
-                 -- 0075: transition records (AFTER UPDATE row trigger. If removed, the detail and undo counts lose their basis and fall to the rejecting side)
+                 -- 0075: 変化の記録（AFTER UPDATE の行トリガ。外されると明細と取り消しの件数が根拠を失い、拒否側に倒れる）
                  ('assets',             'assets_status_transition',          'app.record_row_transition()', 17),
                  ('risk_scenarios',     'risk_scenarios_status_transition',  'app.record_row_transition()', 17),
                  ('memberships',        'memberships_department_transition', 'app.record_row_transition()', 17),
-                 -- 0077: created-row records (AFTER INSERT row trigger. The basis for the detail's "created in this transaction")
+                 -- 0077: 作った行の記録（AFTER INSERT の行トリガ。明細の「このトランザクションで作った」の根拠）
                  ('assets',             'assets_created_transition',          'app.record_row_transition()', 5),
                  ('risk_scenarios',     'risk_scenarios_created_transition',  'app.record_row_transition()', 5),
                  ('departments',        'departments_created_transition',     'app.record_row_transition()', 5),
@@ -306,8 +307,8 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION '取り込みの記録のトリガが無いか無効: %', v_bad;
   END IF;
-  -- 0075: transition records are written only by the trigger function (owned by schema_owner, SECURITY DEFINER). app_rw / app_ro can only read
-  -- (if they could write, they could forge "original department" or "retired" records).
+  -- 0075: 変化の記録は、トリガの関数（schema_owner 所有・SECURITY DEFINER）だけが書く。app_rw / app_ro は読むだけ
+  -- （書けると偽の「元の部署」「退役にした」を作れる）。
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_roles o ON o.oid = p.proowner
                   WHERE p.oid = 'app.record_row_transition()'::regprocedure
                     AND p.prosecdef AND o.rolname = 'schema_owner') THEN
@@ -319,8 +320,8 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3d
-  -- Phase 3a definer policies. Rather than just adding names to the allowlist,
-  -- pin and check target roles, command, and USING / WITH CHECK.
+  -- Phase 3a の定義者ポリシー。許可リストに名前を足すだけではなく、
+  -- 対象ロール・コマンド・USING / WITH CHECK を固定して検査する。
   SELECT count(*) INTO n FROM pg_policies
    WHERE schemaname = 'app'
      AND policyname = ANY (ARRAY[
@@ -360,9 +361,9 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 3c
-  -- Shape of the tenant-creation policy. If this loosens, we regress to "a definer can create rows for other tenants too".
-  -- Three things are checked: target role is only schema_owner / INSERT only / WITH CHECK is
-  -- bound to provisioning_target().
+  -- テナント作成用ポリシーの形。ここが緩むと「定義者なら他テナントの行も作れる」に戻る。
+  -- 見るのは 3 つ: 対象ロールが schema_owner だけ / INSERT だけ / WITH CHECK が
+  -- provisioning_target() に縛られていること。
   SELECT string_agg(format('%s.%s(cmd=%s roles=%s check=%s)',
                            tablename, policyname, cmd, roles::text, coalesce(with_check,'(null)')),
                     ', ') INTO v_bad
@@ -373,12 +374,12 @@ BEGIN
        OR cmd <> 'INSERT'
        OR with_check IS NULL
        OR with_check NOT LIKE '%provisioning_target()%'
-       OR qual IS NOT NULL);  -- must not have spread to the read side
+       OR qual IS NOT NULL);  -- 読み取り側へ波及していないこと
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'テナント作成用ポリシーの形が想定外: %', v_bad;
   END IF;
 
-  -- Pin the target table too (it must not have spread to new tables on its own)
+  -- 対象表も決め打ちにする（新しい表へ勝手に広がっていないこと）
   SELECT string_agg(format('%s.%s', tablename, policyname), ', ') INTO v_bad
     FROM pg_policies
    WHERE schemaname = 'app' AND policyname LIKE 'prov\_%'
@@ -387,7 +388,7 @@ BEGIN
     RAISE EXCEPTION 'テナント作成用ポリシーが想定外の表にある: %', v_bad;
   END IF;
 
-  -- The two definer policies must have fixed target tables and target roles
+  -- 定義者向けの 2 本は、対象表と対象ロールが決め打ちであること
   SELECT string_agg(format('%s.%s(%s)', tablename, policyname, roles::text), ', ') INTO v_bad
     FROM pg_policies
    WHERE schemaname = 'app'
@@ -400,7 +401,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 4
-  -- Role attributes. Having BYPASSRLS / SUPERUSER breaks the RLS guarantee.
+  -- ロール属性。BYPASSRLS / SUPERUSER を持っていたら RLS の保証が崩れる。
   SELECT string_agg(rolname, ', ') INTO v_bad FROM pg_roles
    WHERE rolname IN ('schema_owner','app_rw','app_ro','auth_svc','auditlogd','audit_verifier')
      AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication);
@@ -409,13 +410,13 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 5
-  -- Transitive closure of role membership. app_rw / app_ro must not be able to reach schema_owner
-  -- (if they could, SET ROLE would make them the owner and let them swap policies).
+  -- ロール継承の推移閉包。app_rw / app_ro が schema_owner へ到達できてはならない
+  -- （到達できると SET ROLE で所有者になり、ポリシーを付け替えられる）。
   SELECT string_agg(format('%s -> %s', m.member::regrole, m.roleid::regrole), ', ')
     INTO v_bad
     FROM pg_auth_members m
-   -- Include auth_svc too. Even with NOINHERIT, a member of schema_owner
-   -- can become the owner via SET ROLE.
+   -- auth_svc も含める。NOINHERIT でも schema_owner のメンバーなら
+   -- SET ROLE で所有者になれてしまう。
    WHERE m.member::regrole::text
          IN ('app_rw','app_ro','auth_svc','auditlogd','audit_verifier');
   IF v_bad IS NOT NULL THEN
@@ -423,7 +424,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 6
-  -- app_rw / app_ro must not own tables in app / catalog / audit
+  -- app_rw / app_ro が app / catalog / audit の表を所有していないこと
   SELECT string_agg(format('%s.%s', n.nspname, c.relname), ', ') INTO v_bad
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname IN ('app','catalog','audit')
@@ -434,14 +435,14 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 7
-  -- Effective privileges. Nothing equivalent to GRANT ALL (TRUNCATE / REFERENCES / TRIGGER) is granted
+  -- 実効権限。GRANT ALL 相当（TRUNCATE / REFERENCES / TRIGGER）が付いていないこと
   SELECT string_agg(format('%s.%s:%s:%s', n.nspname, c.relname,
                            g.grantee::regrole, g.privilege_type), ', ') INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     CROSS JOIN LATERAL aclexplode(c.relacl) g
    WHERE n.nspname IN ('app','catalog','audit')
-     -- Also check privileges via PUBLIC (grantee=0 is PUBLIC; filtering only by role name misses it)
+     -- PUBLIC 経由の権限も見る（grantee=0 が PUBLIC。ロール名だけで絞ると見落とす）
      AND (g.grantee = 0 OR g.grantee::regrole::text IN ('app_rw','app_ro'))
      AND g.privilege_type IN ('TRUNCATE','REFERENCES','TRIGGER');
   IF v_bad IS NOT NULL THEN
@@ -449,14 +450,14 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 8
-  -- catalog is read-only for tenant roles
+  -- catalog はテナントロールから読み取り専用
   SELECT string_agg(format('%s:%s:%s', c.relname, g.grantee::regrole, g.privilege_type), ', ')
     INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     CROSS JOIN LATERAL aclexplode(c.relacl) g
    WHERE n.nspname = 'catalog' AND c.relkind = 'r'
-     -- Also check privileges via PUBLIC (grantee=0 is PUBLIC; filtering only by role name misses it)
+     -- PUBLIC 経由の権限も見る（grantee=0 が PUBLIC。ロール名だけで絞ると見落とす）
      AND (g.grantee = 0 OR g.grantee::regrole::text IN ('app_rw','app_ro'))
      AND g.privilege_type <> 'SELECT';
   IF v_bad IS NOT NULL THEN
@@ -464,7 +465,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 9
-  -- No privileges leak to definer-only tables
+  -- 定義者専用テーブルへ権限が漏れていないこと
   SELECT string_agg(format('%s:%s:%s', c.relname, g.grantee::regrole, g.privilege_type), ', ')
     INTO v_bad
     FROM pg_class c
@@ -477,15 +478,15 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 9b
-  -- audit.audit_log. It is outside the app schema net, so check it separately.
+  -- audit.audit_log。app スキーマの網に入らないので個別に検査する。
   IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                   WHERE n.nspname='audit' AND c.relname='audit_log'
                     AND c.relrowsecurity AND c.relforcerowsecurity) THEN
     RAISE EXCEPTION 'audit.audit_log に ENABLE+FORCE ROW LEVEL SECURITY が無い';
   END IF;
 
-  -- Appends go only through audit.append(). If auditlogd retained direct privileges
-  -- it could bypass the chain and write forged rows.
+  -- 追記は audit.append() 経由のみ。auditlogd に直接の権限が残っていたら
+  -- チェーンを迂回して偽の行を書ける。
   SELECT string_agg(format('%s:%s', g.grantee::regrole, g.privilege_type), ', ') INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -497,7 +498,7 @@ BEGIN
     RAISE EXCEPTION 'audit_log に SELECT 以外の権限が付いている（append を迂回できる）: %', v_bad;
   END IF;
 
-  -- SELECT for app_rw / app_ro / auditlogd must be tenant-scoped
+  -- app_rw / app_ro / auditlogd の SELECT はテナント限定でなければならない
   SELECT string_agg(format('%s(%s)', policyname, roles::text), ', ') INTO v_bad
     FROM pg_policies
    WHERE schemaname='audit' AND tablename='audit_log'
@@ -511,7 +512,7 @@ BEGIN
                     AND qual = '(tenant_id = app.current_tenant())') THEN
     RAISE EXCEPTION 'audit_log の audit_read がテナント限定になっていない';
   END IF;
-  -- No UPDATE / DELETE policies even for the owner (definer) = past rows cannot be rewritten
+  -- 所有者（定義者）にも UPDATE / DELETE のポリシーを作らない＝過去行を書き換えられない
   IF EXISTS (SELECT 1 FROM pg_policies
               WHERE schemaname='audit' AND tablename='audit_log'
                 AND cmd IN ('UPDATE','DELETE','ALL')) THEN
@@ -519,7 +520,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 10
-  -- Tenant-facing views must not bypass RLS (security_invoker required)
+  -- テナント向け view が RLS を迂回しないこと（security_invoker 必須）
   SELECT string_agg(c.relname, ', ') INTO v_bad
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'app' AND c.relkind = 'v'
@@ -531,7 +532,7 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 11
-  -- SECURITY DEFINER functions must have a fixed search_path
+  -- SECURITY DEFINER 関数は search_path が固定されていること
   SELECT string_agg(p.proname, ', ') INTO v_bad
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('app','audit','catalog') AND p.prosecdef
@@ -542,15 +543,15 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 12
-  -- Signing functions must not be callable from app roles (if they were, signatures for any tenant could be made)
+  -- 署名関数はアプリロールから呼べてはならない（呼べると任意テナントの署名を作れる）
   IF has_function_privilege('app_rw', 'app.tenant_context_signature(uuid)', 'EXECUTE')
      OR has_function_privilege('app_ro', 'app.tenant_context_signature(uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'app.tenant_context_signature がアプリロールから実行できる';
   END IF;
 
   ---------------------------------------------------------------- 13
-  -- Only auth_svc issues sessions. If app_rw could call it, it could create a session for any
-  -- tenant and establish context with that token, completely defeating isolation.
+  -- セッション発行は auth_svc だけ。app_rw が呼べると、任意テナント向けの
+  -- セッションを作ってそのトークンで文脈を確立でき、分離が丸ごと無効になる。
   IF has_function_privilege('app_rw', 'app.create_session(uuid,uuid,text,interval)', 'EXECUTE')
      OR has_function_privilege('app_ro', 'app.create_session(uuid,uuid,text,interval)', 'EXECUTE') THEN
     RAISE EXCEPTION 'app.create_session が app_rw / app_ro から実行できる';
@@ -558,7 +559,7 @@ BEGIN
   IF NOT has_function_privilege('auth_svc', 'app.create_session(uuid,uuid,text,interval)', 'EXECUTE') THEN
     RAISE EXCEPTION 'auth_svc が app.create_session を実行できない';
   END IF;
-  -- auth_svc's only job is issuing sessions. It does not touch business data.
+  -- auth_svc はセッション発行だけの役。業務データへは触れない。
   IF EXISTS (
     SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname IN ('app','catalog','audit') AND c.relkind = 'r'
@@ -567,15 +568,15 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 14
-  -- Append-only tables must not have UPDATE / DELETE
+  -- 追記のみの表に UPDATE / DELETE が付いていないこと
   SELECT string_agg(format('%s:%s', c.relname, g.privilege_type), ', ') INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     CROSS JOIN LATERAL aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) g
    WHERE n.nspname = 'app' AND c.relname IN ('device_snapshots','graph_events','raw_events','integration_resource_runs',
-                                             -- 0071: import records (audit records, so append-only)
+                                             -- 0071: 取り込みの記録（監査の記録なので追記だけ）
                                              'import_batches','import_batch_items','import_undos',
-                                             -- 0075: transition records (only the trigger appends)
+                                             -- 0075: 変化の記録（トリガだけが追記する）
                                              'row_transitions')
      AND (g.grantee = 0 OR g.grantee::regrole::text IN ('app_rw','app_ro'))
      AND g.privilege_type IN ('UPDATE','DELETE');
@@ -584,8 +585,8 @@ BEGIN
   END IF;
 
   ---------------------------------------------------------------- 15
-  -- M1: app_rw cannot directly rewrite framework relation / acceptance / internal receipt.
-  -- Only the canonical fixed RPCs write them, as schema_owner.
+  -- M1: app_rw は framework relation / acceptance / internal receipt を直接
+  -- 書き換えられない。正規の固定 RPC だけが schema_owner として書く。
   SELECT string_agg(format('%s:%s', c.relname, g.privilege_type), ', ') INTO v_bad
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace

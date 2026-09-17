@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAgentDb } from '@/lib/agent-db';
+import { lookupAgentInstallation, markAgentInstallation } from '@/lib/agentDistributionServer';
 
 type EnrollmentBody = {
   token?: unknown;
@@ -41,6 +42,12 @@ export async function POST(request: Request) {
         )
     `;
     if (rows.length !== 1) return NextResponse.json({ error: 'enrollment rejected' }, { status: 401 });
+    if (await lookupAgentInstallation(token)) {
+      const delivery = await markAgentInstallation(token, 'active', externalId, rows[0].device_id);
+      if (delivery.ok !== true) {
+        return NextResponse.json({ error: 'ENROLLMENT_INCONSISTENT' }, { status: 409, headers: { 'Cache-Control': 'no-store' } });
+      }
+    }
     return NextResponse.json({ device_id: rows[0].device_id });
   } catch (error) {
     console.error('[agent/enroll] rejected', error instanceof Error ? error.message : error);

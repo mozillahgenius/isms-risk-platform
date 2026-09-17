@@ -1,13 +1,13 @@
--- 0012 app: integrations (design doc 2.11)
+-- 0012 app: 連携（設計書 2.11）
 CREATE TABLE app.integrations (
   id          uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id   uuid NOT NULL,
   connector   text NOT NULL, manifest_version int NOT NULL,
   kind        text NOT NULL CHECK (kind IN ('reader','elevated_reader','writer')),
   status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','error','revoked')),
-  secret_ref  text NOT NULL,                    -- reference to encrypted credentials (does not hold the value)
-  approved_by uuid, approved_at timestamptz,    -- required for elevated_reader / writer
-  cursors     jsonb NOT NULL DEFAULT '{}',      -- per-scope incremental cursors
+  secret_ref  text NOT NULL,                    -- 暗号化された資格情報の参照（値は持たない）
+  approved_by uuid, approved_at timestamptz,    -- elevated_reader / writer では必須
+  cursors     jsonb NOT NULL DEFAULT '{}',      -- スコープ別の差分カーソル
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),

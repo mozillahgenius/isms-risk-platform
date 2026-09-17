@@ -5,11 +5,11 @@ import { withTenant, withTenantActor, type TenantReadResult } from './tenant';
 export const DEFAULT_FRAMEWORK = 'RISK-MANAGEMENT';
 
 /**
- * Frameworks the register can be switched to.
+ * 台帳を切り替えられる枠組み。
  *
- * Only current frameworks are used as register tags. Keys not listed here fall back to the default.
- * Falling back shows the default register, so to **avoid it being misread as 0 items for the
- * specified framework**, callers display the normalized key on screen.
+ * 台帳のタグとしては現行枠組みだけを使う。ここに無いキーを受け取ったら既定へ落とす。
+ * 落とすときは既定の台帳が出るので、**指定した枠組みの 0 件と読み違えられない**
+ * ように、呼び出し側は正規化後のキーを画面に表示する。
  */
 export const REGISTER_FRAMEWORK_KEYS = ['RISK-MANAGEMENT', 'ISO27001:2022', 'IPO-KARTE'] as const;
 
@@ -38,16 +38,16 @@ export type AssetRow = {
   status: 'active' | 'retired';
   tags: string[];
   linked_risks: number;
-  /** Managing department. The column has existed since 0027 but was not shown on screen. */
+  /** 管理部門。列は 0027 からあったが画面に出ていなかった。 */
   owner_department_id: string | null;
   owner_department_name: string | null;
-  /** Location (0061). Either something representable as a system, or not. */
+  /** 所在場所（0061）。システムで表せるものと、そうでないもの。 */
   location_system_id: string | null;
   location_system_name: string | null;
   location_note: string;
 };
 
-/** Candidates offered in the asset registration form. */
+/** 資産の登録フォームで選ばせる候補。 */
 export type DepartmentOption = { id: string; name: string };
 export type SystemOption = { id: string; name: string; provider: string };
 
@@ -60,8 +60,8 @@ export type MeasureRow = {
   status: 'planned' | 'in_progress' | 'done' | 'retired';
   tags: string[];
   linked_risks: number;
-  // postgres.js returns numeric as strings. Do not cast to number
-  // (added 2026-09-02; convert with Number() only right before display).
+  // postgres.js は numeric を文字列で返す。number にキャストしない
+  // （2026-09-02 追加。表示直前でのみ Number() 変換する）。
   budget_amount: string | null;
   resource_fte: string | null;
 };
@@ -89,9 +89,9 @@ export type SnapshotRow = {
   id: string;
   sha256: string;
   stage: SnapshotStage;
-  // Fetched explicitly as a string with ::text (see the SELECT below). If postgres.js's
-  // date parser returns a Date, a local-midnight Date becomes the previous day via toISOString(),
-  // which can skew current/target decisions in JST (Codex review 2026-09-02).
+  // ::text で明示的に文字列として取得する(下のSELECT参照)。postgres.jsの
+  // date型パーサーがDateを返すと、ローカル午前0時のDateがtoISOString()で
+  // 前日扱いになりJSTでの現状/目標判定がずれうる(Codexレビュー2026-09-02指摘)。
   assessed_on: string;
   probability: number;
   impact: number;
@@ -108,7 +108,7 @@ export type RiskWorkspaceData = {
   assets: AssetRow[];
   measures: MeasureRow[];
   risks: RiskRow[];
-  /** Choices for managing department and location (0061). */
+  /** 管理部門・所在場所の選択肢（0061）。 */
   departments: DepartmentOption[];
   systems: SystemOption[];
 };
@@ -272,8 +272,8 @@ export async function getRiskWorkspace(
     const departments = await sql<DepartmentOption[]>`
       SELECT id, name FROM app.departments
        WHERE tenant_id = app.current_tenant() ORDER BY name`;
-    // Only active systems can be chosen as a location. Allowing retired ones yields
-    // a register where "information lives in a place that no longer exists".
+    // 所在場所に選べるのは稼働中のシステムだけ。廃止済みを選ばせると
+    // 「もう無い場所に情報がある」台帳ができる。
     const systems = await sql<SystemOption[]>`
       SELECT id, name, provider FROM app.application_catalog
        WHERE tenant_id = app.current_tenant() AND status <> 'retired'

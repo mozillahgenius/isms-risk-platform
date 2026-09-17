@@ -1,15 +1,15 @@
 -- @run-as: admin
--- 0068: storage for business continuity plans and tests (A.5.29 / A.5.30) (the 3rd item of design doc 2026-09-11 §4).
+-- 0068: 事業継続の計画と試験（A.5.29 / A.5.30）の受け皿（設計書 2026-09-11 §4 の 3 本目）。
 --
--- A.5.29 requires maintaining information security during disruption; A.5.30 requires ICT continuity readiness and its planning and testing.
--- These are Annex A controls, so whether they apply is decided by the Statement of Applicability. The stage screen only shows counts and does not make them mandatory
--- (2026-09-12 design decision).
+-- A.5.29 は中断・障害のときの情報セキュリティの維持を、A.5.30 は ICT の継続の備えと、その計画・試験を求める統制。
+-- 附属書 A の統制なので、適用するかは適用宣言書で決まる。段階の画面では件数を出すだけで必須にしない
+-- （2026-09-12 goto-twin 決定）。
 --
--- Plans (continuity_plans) and tests (continuity_tests) are separate. Having written a plan and having tested that it works are different things.
--- As with audits, only tests dated up to today count as "performed" (§4.4 "do not count a plan as performed").
--- The plan text itself is not stored. Where it is (its location) is mandatory (same idea as evidence).
--- No approval (the standard's text does not require it). No version table either. Withdraw rather than delete. No content data is loaded.
--- Formatting, RLS, and down policy are the same as 0065-0067. Only the records screen writes these tables, so 0067's role policies are applied too.
+-- 計画（continuity_plans）と試験（continuity_tests）を分ける。計画を作ったことと、試して動いたことは別。
+-- 試験は監査と同じく、実施日が今日までのものだけを「実施済み」として数える（§4.4「計画を実施と数えない」）。
+-- 計画の本文そのものは置かない。どこにあるか（所在）を必須にする（証跡と同じ考え方）。
+-- 承認は付けない（規格の本文が求めていない）。版の表も作らない。消さずに取り下げる。中身のデータは入れない。
+-- 書式・RLS・down の方針は 0065〜0067 と同じ。記録の画面だけが書く表なので、0067 の役割ポリシーも張る。
 
 SET ROLE schema_owner;
 
@@ -17,15 +17,15 @@ CREATE TABLE app.continuity_plans (
   id                  uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id           uuid NOT NULL,
   title               text NOT NULL,
-  -- What the plan protects (business process / system). Empty plans are not allowed.
+  -- 何を守る計画か（業務・システム）。空の計画を作らせない。
   scope               text NOT NULL,
-  -- Recovery time objective (hours) / recovery point objective (hours). Empty if not decided.
+  -- 目標復旧時間（時間）・目標復旧時点（時間）。決めていなければ空。
   rto_hours           integer CHECK (rto_hours > 0),
   rpo_hours           integer CHECK (rpo_hours >= 0),
-  -- Where the plan text is (storage location / URL). Mandatory.
+  -- 計画の本文がどこにあるか（保管場所・URL）。必須。
   procedure_location  text NOT NULL,
   owner_user_id       uuid,
-  -- Deadline for the next test.
+  -- 次に試験する期限。
   next_test_due       date,
   status              text NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
   created_at          timestamptz NOT NULL DEFAULT now(),
@@ -40,7 +40,7 @@ CREATE TABLE app.continuity_plans (
   CHECK (procedure_location ~ '[^[:space:]]')
 );
 
--- Test records. When, how it was tested, what the result was, and who did it are mandatory.
+-- 試験の記録。いつ・どう試し・結果どうだったか・誰がやったかは必須。
 CREATE TABLE app.continuity_tests (
   id              uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id       uuid NOT NULL,
@@ -48,7 +48,7 @@ CREATE TABLE app.continuity_tests (
   tested_on       date NOT NULL,
   method          text NOT NULL CHECK (method IN ('tabletop','walkthrough','simulation','full_interruption')),
   result          text NOT NULL CHECK (result IN ('passed','partially_passed','failed')),
-  -- Whether the recovery time objective was met. Empty if not measured.
+  -- 目標復旧時間を守れたか。測っていなければ空。
   rto_met         boolean,
   findings_note   text NOT NULL DEFAULT '',
   performed_by    uuid NOT NULL,
@@ -75,7 +75,7 @@ BEGIN
     EXECUTE format('REVOKE ALL ON app.%I FROM PUBLIC',t);
     EXECUTE format('GRANT SELECT ON app.%I TO app_ro',t);
     EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON app.%I TO app_rw',t);
-    -- Same role policies as 0067 (name, shape, and target tables are fixed by check_rls.sql).
+    -- 0067 と同じ役割ポリシー（名前・形・対象表は check_rls.sql が固定する）。
     EXECUTE format('CREATE POLICY records_role_insert ON app.%I AS RESTRICTIVE FOR INSERT TO app_rw '
                    'WITH CHECK ((SELECT app.records_role_allows(%L)))', t, 'continuity');
     EXECUTE format('CREATE POLICY records_role_update ON app.%I AS RESTRICTIVE FOR UPDATE TO app_rw '
@@ -91,8 +91,8 @@ COMMENT ON TABLE app.continuity_plans IS
 COMMENT ON TABLE app.continuity_tests IS
   '事業継続の試験。tested_on が今日までのものだけを実施済みとして数える。実施者（performed_by）と結果は必須。';
 
--- Add continuity to the permission table: owner / admin / manager (records of business operations). Auditors cannot write.
--- Only adds one kind to 0067's version (down reverts to 0067's version).
+-- 許可の表に continuity を足す: owner / admin / manager（業務の運用の記録）。監査人には書かせない。
+-- 0067 の版に種類を 1 つ足しただけ（down で 0067 の版へ戻す）。
 CREATE OR REPLACE FUNCTION app.records_role_allows(p_kind text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE

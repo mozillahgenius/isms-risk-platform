@@ -1,4 +1,4 @@
--- Rollback of 0017. Restores the 0016 state (one trigger, no valid_to check).
+-- 0017 の巻き戻し。0016 の状態（トリガ 1 本・valid_to 無検査）へ戻す。
 DROP TRIGGER IF EXISTS trg_risk_criteria_no_delete ON app.risk_criteria;
 DROP FUNCTION IF EXISTS app.risk_criteria_no_delete();
 GRANT DELETE ON app.risk_criteria TO app_rw;
@@ -15,7 +15,7 @@ CREATE TRIGGER trg_validate_deviation_override
   BEFORE INSERT OR UPDATE ON app.deviations
   FOR EACH ROW EXECUTE FUNCTION app.validate_deviation_override();
 
--- Restore the 0016 version without the one-way valid_to check
+-- valid_to の一方向検査を外した 0016 版へ戻す
 CREATE OR REPLACE FUNCTION app.risk_criteria_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -33,9 +33,9 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- Restore validate_deviation_override() to 0016's form "containing the check body", then
--- drop the helper added in 0017. In the reverse order, the trigger would be left in a broken state calling a
--- nonexistent function. Leaving the helper makes 0001's DROP SCHEMA app fail.
+-- validate_deviation_override() を 0016 の「検査本体を内包した」形へ戻してから、
+-- 0017 で足したヘルパを落とす。順序を逆にすると、トリガが存在しない関数を
+-- 呼ぶ壊れた状態になる。ヘルパを残すと 0001 の DROP SCHEMA app が失敗する。
 CREATE OR REPLACE FUNCTION app.validate_deviation_override() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE

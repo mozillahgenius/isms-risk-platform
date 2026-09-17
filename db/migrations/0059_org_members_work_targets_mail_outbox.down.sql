@@ -7,7 +7,7 @@ DROP FUNCTION IF EXISTS app.claim_mail_batch(integer,boolean,boolean);
 DROP FUNCTION IF EXISTS app.require_mail_worker();
 DROP POLICY IF EXISTS tenant_security_definer ON app.external_questionnaires;
 DROP FUNCTION IF EXISTS app.current_tenant_or_null();
--- Keep the roles (other DBs may be using them). They own nothing, so no harm.
+-- ロールは残す（他のDBで使っているかもしれないため）。所有物が無いので害は無い。
 REVOKE ALL ON SCHEMA app FROM mail_worker;
 
 DROP TRIGGER IF EXISTS trg_guard_mail_outbox_update ON app.mail_outbox;
@@ -38,7 +38,7 @@ DROP TRIGGER IF EXISTS trg_guard_org_user ON app.users;
 DROP FUNCTION IF EXISTS app.guard_org_user();
 DROP FUNCTION IF EXISTS app.has_actor_context();
 
--- Restore 0057's body (drop the member_manage / department_manage / notify branches).
+-- 0057 の本体へ戻す（member_manage / department_manage / notify の分岐を落とす）。
 CREATE OR REPLACE FUNCTION app.require_management_permission(
   p_resource_type text,
   p_resource_id uuid,

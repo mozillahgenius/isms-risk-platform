@@ -1,31 +1,31 @@
--- 0014 audit: operation audit log (design doc 8.3)
--- chain_seq is assigned at a single serialization point by the append service (auditlogd).
--- DB sequences are not used (rollbacks and concurrency cause gaps and reordering).
+-- 0014 audit: 操作監査ログ（設計書 8.3）
+-- chain_seq は追記サービス（auditlogd）が単一直列点で採番する。
+-- DB のシーケンスは使わない（ロールバック・並行実行で欠番・逆転が起きるため）。
 
 CREATE TABLE audit.audit_log (
   chain_seq      bigint      NOT NULL,
   tenant_id      uuid        NOT NULL,
-  occurred_at    timestamptz NOT NULL,   -- business occurrence time
-  appended_at    timestamptz NOT NULL,   -- time of numbering and signing
+  occurred_at    timestamptz NOT NULL,   -- 業務上の発生時刻
+  appended_at    timestamptz NOT NULL,   -- 採番・署名した時刻
   actor_id       uuid, actor_type text
                    CHECK (actor_type IN ('user','agent','connector','system','platform_admin')),
   action         text NOT NULL,
   target_type    text, target_id uuid,
-  changed_fields jsonb,                  -- only the diff that passed the field allowlist
+  changed_fields jsonb,                  -- 項目許可リストを通した差分のみ
   reason         text,
   source_ip      inet, user_agent text, session_id uuid,
   prev_hash      bytea,
   hash           bytea NOT NULL,
   signature      bytea NOT NULL,
-  PRIMARY KEY (chain_seq)                -- structurally rules out gaps and duplicates
+  PRIMARY KEY (chain_seq)                -- 欠番・重複を構造的に排除
 );
 
 ALTER TABLE audit.audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit.audit_log FORCE ROW LEVEL SECURITY;
 
--- Do not grant auditlogd direct INSERT. Doing so would bypass audit.append() and
--- allow writing arbitrary chain_seq, prev_hash, and hash, forging rows that pass chain verification.
--- Appends always go through audit.append() (SECURITY DEFINER).
+-- auditlogd に直接 INSERT を与えない。与えると audit.append() を迂回して
+-- 任意の chain_seq・prev_hash・hash を書き込め、チェーン検証を通る偽の行を作れる。
+-- 追記は必ず audit.append()（SECURITY DEFINER）経由にする。
 REVOKE ALL ON audit.audit_log FROM auditlogd, app_rw, app_ro, PUBLIC;
 
 GRANT SELECT ON audit.audit_log TO app_rw, app_ro;
@@ -36,24 +36,24 @@ GRANT SELECT ON audit.audit_log TO audit_verifier;
 CREATE POLICY audit_verify ON audit.audit_log FOR SELECT TO audit_verifier USING (true);
 GRANT EXECUTE ON FUNCTION app.current_tenant() TO auditlogd;
 
--- The append helper (audit.append below) is SECURITY DEFINER, so the actual INSERT
--- is done by the owner schema_owner. FORCE RLS applies to the owner too, so without explicit
--- policies it cannot append.
--- Only INSERT and SELECT are allowed; no UPDATE / DELETE policies are created.
--- = even the owner cannot rewrite past rows at the RLS level (enforces design doc 8.3 invariant 6
---   more strongly than REVOKE).
+-- 追記ヘルパ（下の audit.append）は SECURITY DEFINER なので、実際に INSERT する
+-- のは所有者 schema_owner になる。FORCE RLS は所有者にも効くため、明示的に
+-- ポリシーを張らないと追記できない。
+-- INSERT と SELECT だけを許し、UPDATE / DELETE のポリシーは作らない。
+-- ＝所有者であっても RLS の段階で過去行を書き換えられない（設計書 8.3 不変条件 6 を
+--   REVOKE より強く担保する）。
 CREATE POLICY audit_definer_insert ON audit.audit_log FOR INSERT TO schema_owner
   WITH CHECK (true);
 CREATE POLICY audit_definer_read   ON audit.audit_log FOR SELECT TO schema_owner
   USING (true);
 
 -- ------------------------------------------------------------------
--- Hash chain verification (acceptance #5). Implements invariant 4 of design doc 8.3.
--- Returns false if even one row has been tampered with.
+-- ハッシュチェーンの検証（受入 #5）。設計書 8.3 の不変条件 4 を実装する。
+-- 1 行でも改ざんされていれば false を返す。
 -- hash = sha256(prev_hash || chain_seq || tenant_id || occurred_at || action
 --                || coalesce(target_type,'') || coalesce(target_id,'') || changed_fields)
--- The signature is attached by auditlogd with a separate key, so it is not verified here
--- (verification is the responsibility of the independent process side. Design doc 8.3 invariant 4).
+-- 署名（signature）は auditlogd が別鍵で付けるため、ここでは検証しない
+-- （検証は独立プロセス side の責務。設計書 8.3 不変条件 4）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION audit.chain_payload(r audit.audit_log) RETURNS bytea
 LANGUAGE sql IMMUTABLE SET search_path = pg_catalog AS $$
@@ -90,8 +90,8 @@ ALTER FUNCTION audit.verify_chain() OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION audit.verify_chain() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION audit.verify_chain() TO audit_verifier, app_rw, app_ro;
 
--- Append helper. Only auditlogd can call it. chain_seq and prev_hash / hash are
--- assigned and computed here, so callers cannot break the chain.
+-- 追記ヘルパ。auditlogd だけが呼べる。chain_seq と prev_hash / hash を
+-- ここで採番・計算するので、呼出側がチェーンを壊せない。
 CREATE OR REPLACE FUNCTION audit.append(
   p_tenant uuid, p_occurred timestamptz, p_actor uuid, p_actor_type text,
   p_action text, p_target_type text, p_target_id uuid,
@@ -101,7 +101,7 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog AS $$
 DECLARE v_seq bigint; v_prev bytea; r audit.audit_log;
 BEGIN
-  -- Single serialization point. Serialize with a lock so concurrent appends cause no gaps or reordering.
+  -- 単一直列点。並行追記でも欠番・逆転が起きないようにロックで直列化する。
   PERFORM pg_advisory_xact_lock(8891234502);
   SELECT coalesce(max(chain_seq), 0) + 1 INTO v_seq FROM audit.audit_log;
   SELECT hash INTO v_prev FROM audit.audit_log ORDER BY chain_seq DESC LIMIT 1;

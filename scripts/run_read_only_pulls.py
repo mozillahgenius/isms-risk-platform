@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "connectors" / "read_only_sources.contract.json"
 PROBE = ROOT / "scripts" / "read_only_role_probe.py"
 SQLITE_PROBE = ROOT / "scripts" / "sqlite_read_only_probe.py"
-SOURCES = ("mkt", "ops", "backoffice", "knowledge", "automation", "el")
+SOURCES = ("mkt", "ops", "ssi", "kaname", "codzilla", "el")
 
 
 def event(

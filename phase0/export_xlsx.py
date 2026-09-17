@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""DB -> CSV -> re-export the xlsx with the existing build_risk_map.py (second half of Phase 0).
+"""DB → CSV → 既存 build_risk_map.py で xlsx を再出力する（Phase 0 の後半）。
 
   python3 phase0/export_xlsx.py --tenant <uuid> --scale biz --out out.xlsx
 
-As per design doc 7.2, **the existing asset is called unmodified**. This only builds the CSV and hands it over,
-never touching the xlsx assembly. The location comes from the environment variable RISK_MAP_SCRIPTS_DIR
-(required; the generator is not included in this repository).
+設計書 7.2 のとおり **既存資産を無改変で呼ぶ**。ここでは CSV を作って渡すだけで、
+xlsx の組み立てには一切手を出さない。参照先は環境変数 RISK_MAP_SCRIPTS_DIR
+（外部の生成器はこのリポジトリには含めない）。
 
---scale is required. The existing CSV has only one Impact column, so which of impact_sec and impact_biz
-to feed must be stated explicitly every time (design doc 7.2 "no defaults").
+--scale は必須。既存 CSV の Impact 列は 1 つしか無いので、impact_sec と impact_biz の
+どちらを流すかを毎回明示する（設計書 7.2「既定値を持たせない」）。
 """
 from __future__ import annotations
 
@@ -28,15 +28,11 @@ def db_url():
 
 def builder_path():
     d = os.environ.get('RISK_MAP_SCRIPTS_DIR', '')
-    if not d:
-        raise SystemExit(
-            'RISK_MAP_SCRIPTS_DIR が未設定です。外部のレポート生成器 build_risk_map.py を置いた'
-            'ディレクトリを指定してください（このリポジトリには含まれません）。')
     p = os.path.join(d, 'build_risk_map.py')
     if not os.path.isfile(p):
         raise SystemExit(
-            f'build_risk_map.py が見つかりません: {p}\n'
-            'RISK_MAP_SCRIPTS_DIR で build_risk_map.py のあるディレクトリを指してください。')
+            'RISK_MAP_SCRIPTS_DIR が未設定です。外部のレポート生成器 build_risk_map.py を置いた'
+            'ディレクトリを指定してください（このリポジトリには含まれません）。')
     return p
 
 
@@ -48,7 +44,7 @@ def main():
     ap.add_argument('--out', required=True)
     args = ap.parse_args()
 
-    # Strictly validate as a uuid before embedding in SQL (closes the string-interpolation entry point)
+    # SQL へ埋める前に uuid として厳密に検証する（文字列補間の入口を塞ぐ）
     try:
         tenant = str(_uuid.UUID(args.tenant))
     except (ValueError, AttributeError, TypeError):
@@ -57,7 +53,7 @@ def main():
     impact_col = 'impact_sec' if args.scale == 'sec' else 'impact_biz'
     after_col = 'impact_sec_after' if args.scale == 'sec' else 'impact_biz_after'
 
-    # Specify COLLATE "C" (code point order) explicitly so ordering matches the Python-side normalization.
+    # 並び順は Python 側の正規化と揃えるため COLLATE "C"（コードポイント順）を明示する。
     query = f"""
 COPY (
   SELECT CASE WHEN s.phase BETWEEN 1 AND 5
@@ -92,8 +88,8 @@ COPY (
     if p.returncode != 0:
         sys.stderr.write(p.stdout + p.stderr)
         raise SystemExit('DB からの抽出に失敗しました')
-    # COPY ... HEADER true returns a header row even for 0 rows. Checking for an empty string
-    # cannot detect "the tenant has no data". Count the data rows.
+    # COPY ... HEADER true は 0 件でもヘッダ行を返す。空文字かどうかでは
+    # 「そのテナントにデータが無い」を検知できない。データ行を数える。
     lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
     if len(lines) < 2:
         raise SystemExit(f'抽出結果が 0 件です（テナント {tenant}）')

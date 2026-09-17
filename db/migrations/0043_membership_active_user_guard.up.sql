@@ -1,71 +1,71 @@
--- 0043: Harden membership and department-owner assignment on the DB side as well
+-- 0043: メンバーシップ・部門責任者への付与をDB側でも堅牢化する
 --
--- Background (Codex review 2026-09-03): the app layer in organization/actions.ts
--- was fixed to lock the target user row FOR UPDATE and reject role assignment to
--- retired/suspended users, but that only covers the web app's Server Action path.
--- If another path holding the app_rw role (direct SQL, a future separate app or batch, etc.)
--- INSERTs directly into app.memberships / app.departments, then:
---   1) the auditor mutual-exclusion trigger (0005 check_auditor_exclusivity) misses
---      uncommitted rows from concurrent INSERTs, so both can commit in a conflicting state
---   2) nothing stops assigning roles to, or naming as department owner, a retired/suspended user
--- These two holes remain with the app-layer fix alone. 0005 is already deployed to production
--- and cannot be edited directly (frozen), so the trigger bodies are replaced here
--- with CREATE OR REPLACE FUNCTION.
+-- 背景(Codexレビュー2026-09-03指摘): organization/actions.ts のアプリ層で
+-- 対象ユーザー行をFOR UPDATEでロックし、退職・停止済みユーザーへの役割付与を
+-- 拒否するよう直したが、これはWebアプリのServer Action経路にしか効かない。
+-- app_rw ロールを持つ別経路(直接SQL、将来の別アプリ・バッチ等)から
+-- app.memberships / app.departments へ直接INSERTされると、
+--   1) 監査人の兼任禁止トリガー(0005 check_auditor_exclusivity)は同時INSERTの
+--      未コミット行を見落とし、兼任状態のまま両方コミットされ得る
+--   2) 退職・停止済みユーザーへの役割付与・部門責任者指定を止める仕組みが無い
+-- という2つの穴がアプリ層の修正だけでは残る。0005は本番デプロイ済みで
+-- 直接編集できない(frozen)ため、CREATE OR REPLACE FUNCTION でトリガー本体を
+-- ここで差し替える。
 --
--- Note: no BEGIN/COMMIT here. scripts/migrate.sh already wraps the whole file
--- in a single transaction (for atomicity of DDL + ledger update).
+-- 注: BEGIN/COMMITはここには書かない。scripts/migrate.shがファイル全体を
+-- 既に1トランザクションで包んでいる(DDL+台帳更新のアトミック性のため)。
 --
--- Note (Codex review 2026-09-03, 5th round; confirmed by measurement): app.provision_tenant()
--- (0021, SECURITY DEFINER, owned by schema_owner) INSERTs the initial admin membership
--- when creating a new tenant, which also fires the triggers in this file.
--- However, schema_owner's RLS policies on app.users are only 0005's
--- ctx_user_lookup (SELECT only, USING(true)) and prov_user_insert (INSERT only);
--- there is no policy covering UPDATE/ALL. By PostgreSQL's rules,
--- SELECT ... FOR UPDATE is subject to the policies for the UPDATE command, so
--- even when the target row is visible to SELECT, FOR UPDATE filters it to 0 rows and the lock
--- silently misses (no error; confirmed by measurement: SET ROLE schema_owner;
--- SELECT ... FOR UPDATE returned 0 rows for an existing row). To make the lock effective
--- for schema_owner, add a narrowly scoped UPDATE-only policy
--- (following the same principle as 0005's ctx_user_lookup: "the definer sees only the minimum
--- needed to establish context and provision". schema_owner already has arbitrary INSERT into
--- app.users via prov_user_insert and is a trusted definer role, so adding UPDATE visibility
--- for locking does not materially change the trust boundary).
+-- 注(Codexレビュー2026-09-03 5回目指摘、実測で確認): app.provision_tenant()
+-- (0021, SECURITY DEFINER・所有者schema_owner)はテナント新規作成時に
+-- 初期の管理者membershipをINSERTし、その際このファイルのトリガーも発火する。
+-- ところがschema_ownerのapp.usersに対するRLSポリシーは0005の
+-- ctx_user_lookup(SELECT専用, USING(true))とprov_user_insert(INSERT専用)
+-- のみで、UPDATE/ALLに該当するポリシーが無い。PostgreSQLの仕様上、
+-- SELECT ... FOR UPDATEはUPDATEコマンド相当のポリシー適用を受けるため、
+-- 対象行がSELECTでは見えていてもFOR UPDATEでは0行に絞り込まれ、ロックが
+-- 静かに空振りする(エラーにはならず、実測で確認: SET ROLE schema_owner;
+-- SELECT ... FOR UPDATE が既存行に対して0件を返した)。schema_ownerでの
+-- ロックを実効化するため、契約の狭いUPDATE専用ポリシーを追加する
+-- (0005のctx_user_lookupと同じ「定義者が文脈確立・プロビジョニングのために
+-- 必要な最小限だけ見える」方針を踏襲。schema_ownerは既にprov_user_insertで
+-- app.usersへの任意INSERTを持つ信頼された定義者ロールであり、ロック目的の
+-- UPDATE可視性を追加しても信頼境界は実質的に変わらない)。
 --
--- Note (Codex review 2026-09-03, 6th round; considered and rejected): the following two options
--- were considered and neither was adopted.
---   (a) Replacing it with an advisory lock (pg_advisory_xact_lock):
---       an approach already tested and rejected in this repository in 0018 -> 0019. An advisory lock
---       does not refresh the READ COMMITTED snapshot after the lock wait ends, so
---       even after waiting the other side's committed result is not visible and it does not
---       actually serialize (see the explanation in 0019_tenant_row_lock.up.sql). A row lock
---       is the correct approach.
---   (b) The idea that using FOR SHARE instead of FOR UPDATE would make an UPDATE-type policy
---       unnecessary: disproved by measurement. With ctx_user_lock removed,
---       running SET ROLE schema_owner; SELECT ... FOR SHARE against an existing row
---       returned 0 rows, just like FOR UPDATE. PostgreSQL RLS does not distinguish
---       FOR SHARE from FOR UPDATE; both require an UPDATE-type policy to be satisfied,
---       so this alternative does not avoid the problem.
--- Conclusion: as long as schema_owner takes row locks under RLS, granting UPDATE visibility
--- (ctx_user_lock) is the only option.
+-- 注(Codexレビュー2026-09-03 6回目指摘、検討・棄却): 以下2案を検討し
+-- いずれも採らなかった。
+--   (a) advisory lock (pg_advisory_xact_lock) への置き換え:
+--       このリポジトリの0018→0019で既に検証・却下済みの手法。advisory lock
+--       はロック待ちが終わってもREAD COMMITTEDのスナップショットを更新
+--       しないため、待った後も相手のコミット結果が見えず、直列化の体を
+--       成さない(0019_tenant_row_lock.up.sqlの解説を参照)。行ロックの
+--       方が正しい。
+--   (b) FOR UPDATEの代わりにFOR SHAREを使えばUPDATE系ポリシーが不要になる
+--       のでは、という案: 実測で否定した。ctx_user_lockを外した状態で
+--       SET ROLE schema_owner; SELECT ... FOR SHARE を既存行に対して実行
+--       すると、FOR UPDATEと同じく0件になった。PostgreSQLのRLSは
+--       FOR SHARE/FOR UPDATEを区別せずどちらもUPDATE系ポリシーの充足を
+--       要求するため、この代替では回避できない。
+-- 結論: RLS配下でschema_ownerに行ロックを取らせる以上、UPDATE可視性の
+-- 付与(ctx_user_lock)以外に選択肢が無い。
 --
--- Note (Codex review 2026-09-03, 8th round; addressed): the grant did not need to extend to all tenants
--- and all rows, though. app.provisioning_target() (a STABLE function reading the SET LOCAL GUC
--- 'app.provisioning'), already used by 0021's prov_user_insert and others,
--- returns the ID of the tenant being created only while provision_tenant() is running
--- (in both the 0021 and 0022 redefinitions it is set_config'd before the INSERT into memberships).
--- The same narrowing is applied to ctx_user_lock's
--- USING/WITH CHECK, restricting it from "schema_owner can lock/update any row of any tenant"
--- to "only rows of the tenant currently being created"
--- (the same trust boundary as prov_user_insert).
+-- 注(Codexレビュー2026-09-03 8回目指摘、対応): ただし付与範囲は全テナント・
+-- 全行に広げる必要は無かった。0021のprov_user_insert等が既に使っている
+-- app.provisioning_target()(SET LOCALのGUC 'app.provisioning'を読む
+-- STABLE関数)は、provision_tenant()(0021/0022どちらの再定義でも
+-- membershipsへのINSERTの前にset_configされている)実行中だけ、
+-- いま作成中のテナントIDを返す。これと同じ絞り込みをctx_user_lockの
+-- USING/WITH CHECKにも適用し、「schema_ownerが任意テナントの任意行を
+-- ロック・更新できる」ではなく「いま作っているテナントの行だけ」に
+-- 狭める(prov_user_insertと同じ信頼境界)。
 CREATE POLICY ctx_user_lock ON app.users FOR UPDATE TO schema_owner
   USING (tenant_id = app.provisioning_target())
   WITH CHECK (tenant_id = app.provisioning_target());
 
--- (1) Close the concurrency race in the auditor mutual-exclusion check (0005).
--- Lock the target user row (app.users) FOR UPDATE before checking exclusivity.
--- Concurrent INSERT/UPDATE for the same user are serialized by this lock, so the later
--- transaction always sees the earlier transaction's committed result before
--- deciding (without the lock, each misses the other's uncommitted rows).
+-- (1) 監査人の兼任禁止(0005)の同時実行raceを閉じる。
+-- 対象ユーザー行(app.users)をFOR UPDATEでロックしてから兼任チェックする。
+-- 同一ユーザーへの同時INSERT/UPDATEはこのロックで直列化され、後続の
+-- トランザクションは先行トランザクションのコミット結果を必ず見てから
+-- 判定できるようになる(ロックが無いと互いの未コミット行を見落とす)。
 CREATE OR REPLACE FUNCTION app.check_auditor_exclusivity() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -81,13 +81,13 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- (2) Reject role assignment to retired/suspended users on the DB side as well.
--- This trigger also locks FOR UPDATE on its own. Relying on trg_auditor_exclusivity
--- (which fires first by trigger-name order and locks the same user row)
--- would close the gap by accident, but that depends on the implicit assumption of firing order
--- and is fragile. Keep the function self-contained (Codex review 2026-09-03
--- 4th round: the comment "unified on the lock pattern" contradicted the
--- implementation).
+-- (2) 退職・停止済みユーザーへの役割付与をDB側でも拒否する。
+-- このトリガー単体でもFOR UPDATEでロックする。trg_auditor_exclusivity
+-- (トリガー名の辞書順で先に発火し、同じユーザー行をロックする)に
+-- 依存すれば偶然closeされるが、それは発火順という暗黙の前提に頼ることに
+-- なり壊れやすい。関数単体で自己完結させる(Codexレビュー2026-09-03
+-- 4回目指摘: 「ロックパターンに統一」というコメントと実装が食い違って
+-- いた)。
 CREATE OR REPLACE FUNCTION app.check_membership_active_user() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -103,11 +103,11 @@ CREATE TRIGGER trg_membership_active_user BEFORE INSERT OR UPDATE ON app.members
   FOR EACH ROW WHEN (NEW.revoked_at IS NULL)
   EXECUTE FUNCTION app.check_membership_active_user();
 
--- (3) Likewise, department owners (owner_user_id) cannot be set to inactive users.
--- Lock the target user row FOR UPDATE before checking. Without the lock,
--- "transaction A checks active -> transaction B updates the same user to
--- suspended and commits -> A commits the department" -- a TOCTOU that would
--- remain in this DB-side trigger itself (Codex review 2026-09-03, 3rd round).
+-- (3) 部門責任者(owner_user_id)も同様に、非活性ユーザーを指定できないようにする。
+-- FOR UPDATEで対象ユーザー行をロックしてから確認する。ロックが無いと、
+-- 「トランザクションAがactiveを確認→トランザクションBが同じユーザーを
+-- suspendedへ更新してコミット→Aが部門登録をコミット」というTOCTOUが
+-- DB側のこのトリガー自体に残る(Codexレビュー2026-09-03 3回目指摘)。
 CREATE OR REPLACE FUNCTION app.check_department_owner_active() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN

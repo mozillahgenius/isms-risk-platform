@@ -16,7 +16,7 @@ function StatusBadge({ approvedAt, effectiveFrom, isPlaceholder }: {
     return <span className="badge badge-lead">仮置き本文</span>;
   }
   if (!approvedAt) {
-    // Activation requires approval (DB constraint), so this branch is normally not reached. Shown just in case.
+    // 有効化は承認必須（DB 制約）のため、通常この分岐には来ない。念のための表示。
     return <span className="badge badge-danger">未承認のまま有効</span>;
   }
   return <span className="badge badge-done">承認・有効</span>;
@@ -78,10 +78,10 @@ export default async function PoliciesPage({ searchParams }: { searchParams: Pro
                     />
                   </td>
                   <td className="px-4 py-3 text-[12px] text-[var(--muted)]">
-                    {/* current_effective_from is a YYYY-MM-DD string from a date column cast with ::text.
-                        Converting to Date makes toLocaleDateString() depend on the runtime's timezone
-                        and the displayed date could shift, so display it as is
-                        (Codex review 2026-09-02 finding). */}
+                    {/* current_effective_from は date型を::textしたYYYY-MM-DD文字列。
+                        Dateへ変換するとtoLocaleDateString()が実行環境のtimezoneに
+                        依存し表示日がずれうるため、そのまま表示する
+                        (Codexレビュー2026-09-02指摘)。 */}
                     {p.current_effective_from ?? '—'}
                   </td>
                   <td className="px-4 py-3">{p.draft_count > 0 ? <span className="badge badge-active">{p.draft_count} 件</span> : '0 件'}</td>

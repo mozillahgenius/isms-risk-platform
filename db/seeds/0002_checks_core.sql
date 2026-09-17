@@ -1,18 +1,18 @@
--- Standard checks (core). Only **what can be judged from actual data today** goes in.
+-- 標準チェック（core）。**いま実体から判定できるものだけ**を入れる。
 --
--- The design doc envisions 66 standard checks, but only 4 have query_sql and negative_fixture
--- written, and all 4 presuppose results fetched by external connectors (Google Workspace etc.).
--- Connectors are Phase 2 and not started yet, so they would not work even if added.
--- Listing checks that do not run only inflates the catalog count and makes it look like "there are checks".
--- Here we restrict to **what can be judged from app.* data without connectors** (4 checks).
+-- 設計書は標準チェック 66 本を想定しているが、query_sql と negative_fixture が
+-- 書かれているのは 4 本だけで、その 4 本はいずれも外部コネクタ（Google Workspace 等）の
+-- 取得結果を前提にしている。コネクタは Phase 2 で未着手なので、入れても動かない。
+-- 動かないチェックを並べると、カタログの件数だけが増えて「検査がある」ように見える。
+-- ここでは **コネクタ無しで app.* の実体から判定できるもの**に絞る（4 本）。
 --
--- Contract (decided in this implementation; docs/DECISIONS.md D-22):
---   query_sql        ... a SELECT returning **violating rows**. Passes if it returns no rows.
---                      Run over a read-only connection with the tenant context established.
---   expect           ... {"max_violations": N}. Up to N rows counts as a pass.
---   negative_fixture ... SQL that deliberately creates one violation. Run in an isolated DB and
---                      used to confirm **that a previously passing check fails**.
---                      A check that could not be confirmed cannot be recorded as pass (0021's constraint).
+-- 契約（この実装で決めたこと。docs/DECISIONS.md D-22）:
+--   query_sql        … **違反している行**を返す SELECT。1 行も返さなければ合格。
+--                      テナント文脈を確立した読み取り専用の接続で実行する。
+--   expect           … {"max_violations": N} 。N 行までは合格とみなす。
+--   negative_fixture … 違反を 1 件わざと作る SQL。隔離した DB で流し、
+--                      **合格していた検査が落ちること**を確かめるために使う。
+--                      確かめられなかったチェックは pass として記録できない（0021 の制約）。
 
 BEGIN;
 SELECT pg_advisory_xact_lock(8891234502);
@@ -35,7 +35,7 @@ SELECT x.key, d.id, x.title_ja, x.severity, x.cadence, x.connectors,
          WHERE NOT EXISTS (
                  SELECT 1 FROM app.policies p WHERE p.catalog_key = d.key)$q$,
      '{"max_violations": 0}'::jsonb, 1.00, 'attach_rows', 30, 'secretariat',
-     -- detach one expanded policy from its standard = create the same state as a missed expansion
+     -- 展開済みの 1 本から標準への結び付きを外す＝展開漏れと同じ状態を作る
      $f$UPDATE app.policies SET catalog_key = NULL
          WHERE catalog_key = (SELECT catalog_key FROM app.policies
                                WHERE catalog_key IS NOT NULL ORDER BY catalog_key LIMIT 1)$f$),
@@ -55,7 +55,7 @@ SELECT x.key, d.id, x.title_ja, x.severity, x.cadence, x.connectors,
     ('CHK-CORE-ROLE-001',
      '経営責任者が 1 人以上いる',
      'critical', 'monthly', '{}'::text[],
-     -- Absence is the violation. Return one row when absent.
+     -- 居ないことが違反。居ない時に 1 行返す形にする。
      $q$SELECT 'ciso' AS missing_role
          WHERE NOT EXISTS (
                  SELECT 1 FROM app.memberships m
@@ -64,10 +64,10 @@ SELECT x.key, d.id, x.title_ja, x.severity, x.cadence, x.connectors,
      $f$UPDATE app.memberships SET revoked_at = now()
          WHERE role_key = 'ciso' AND revoked_at IS NULL$f$),
 
-    -- Has the policy body drifted from the standard?
-    -- Design doc 1.6 states "differences from the standard are recorded as deviations".
-    -- If only the body is rewritten without registering a deviation, it looks compliant with the standard but the content differs.
-    -- Note: matching against deviations (app.deviations) is not in yet. This only detects the difference.
+    -- 規程の本文が標準から動いていないか。
+    -- 設計書 1.6 は「標準からの差分は逸脱として記録される」と定めている。
+    -- 逸脱として登録されないまま本文だけ書き換わると、標準に従っているように見えて中身が違う。
+    -- ※ 逸脱（app.deviations）との突き合わせはまだ入れていない。ここは差分の検出まで。
     ('CHK-CORE-POLICY-003',
      '展開した規程の本文が標準と一致している',
      'high', 'monthly', '{}'::text[],
@@ -100,8 +100,8 @@ ON CONFLICT (key) DO UPDATE SET
   assign_to         = EXCLUDED.assign_to,
   negative_fixture  = EXCLUDED.negative_fixture;
 
--- Link to related controls. The control catalog is IPO-KARTE only, so
--- link only those whose corresponding requirement can be identified (do not force-link everything).
+-- 関連する統制への結び付け。統制カタログは IPO-KARTE のみなので、
+-- 対応する要請事項が特定できるものだけを結ぶ（無理に全件結ばない）。
 INSERT INTO catalog.check_controls (check_key, control_id)
 SELECT 'CHK-CORE-POLICY-001', c.id
   FROM catalog.controls c
@@ -109,7 +109,7 @@ SELECT 'CHK-CORE-POLICY-001', c.id
  LIMIT 1
 ON CONFLICT DO NOTHING;
 
--- Verify the number inserted. Pinned here so any increase or decrease is noticed.
+-- 入れた数を確かめる。増減に気づけるように、ここで固定する。
 DO $$
 DECLARE n int;
 BEGIN

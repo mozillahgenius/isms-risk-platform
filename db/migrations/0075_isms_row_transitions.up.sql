@@ -1,19 +1,19 @@
 -- @run-as: admin
--- 0075: determine an import's "previous department" and the undo counts from changes the DB actually saw (Codex review 2026-09-12 r11).
+-- 0075: 取り込みの「元の部署」と取り消しの件数を、DB が実際に見た変化から決める（Codex レビュー 2026-09-12 r11）。
 --
--- 0073 accepted the previous department (prev_department_id) of membership items as declared by the writer (you could change A->B and then claim the original was C;
--- undoing back to C would corrupt the original data). 0074 also counted undos by updated_at = now(), so a row that was already retired
--- and had only another field fixed in the same transaction was counted as "retired". Both stem from the DB not knowing "what changed
--- from what to what in this transaction".
+-- 0073 は所属の明細の元の部署（prev_department_id）を書き手の申告のまま受けていた（A→B と直してから元を C と書ける。
+-- 取り消しで C へ戻すと元のデータを壊す）。0074 は取り消しの件数を updated_at = now() でも数え、既に退役していた行を
+-- 同じトランザクションで別の欄だけ直すと「退役にした」と数えていた。どちらも「このトランザクションで何が何から何へ
+-- 変わったか」を DB が知らないのが原因。
 --
--- row_transitions: each time an asset/risk status or a membership's department changes, a trigger records one row: "in which transaction, from what, to what".
---   Only the trigger function (owned by schema_owner, SECURITY DEFINER) writes; app_rw only gets read access (so fake changes cannot be written).
---   The transaction ID is pg_current_xact_id() (the top-level ID even inside a savepoint).
---   Changes without a tenant context (maintenance/sync processes) are not recorded (imports always write in a tenant context; if nothing is recorded, the item is rejected).
--- Item guard: for memberships, "the department before the first change in this transaction" must equal the previous department, and the current department must be the one assigned.
---   A row not changed in this transaction (already in the target department) is accepted only when previous = assigned = current department.
--- Undo counts: for assets/risks, rows changed to retired in this transaction; for memberships, rows changed back to the previous department in this transaction
---   and still in it; for departments, rows that no longer exist (same as 0073).
+-- row_transitions: 資産・リスクの状態、所属の部署が変わるたびに、トリガが「どのトランザクションで・何から・何へ」を 1 行残す。
+--   書くのはトリガの関数（schema_owner 所有・SECURITY DEFINER）だけで、app_rw には読むことしか渡さない（偽の変化を書かせない）。
+--   トランザクションの ID は pg_current_xact_id()（セーブポイントの中でもトップの ID）。
+--   テナントの文脈が無い変更（保守・同期の処理）は残さない（取り込みはいつもテナントの文脈で書く。残らなければ明細は拒否になる）。
+-- 明細の守り: 所属は「このトランザクションで最初に変わる前の部署」が元の部署と一致し、今の部署が入れた部署であること。
+--   このトランザクションで変わっていない（もともと入れる部署だった）行は、元の部署 = 入れた部署 = 今の部署のときだけ受ける。
+-- 取り消しの件数: 資産・リスクはこのトランザクションで退役に変わった行、所属はこのトランザクションで元の部署へ変わり
+--   今も元の部署の行、部署は行が無くなったもの（0073 と同じ）。
 
 SET ROLE schema_owner;
 
@@ -60,13 +60,13 @@ ALTER TABLE app.row_transitions FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON app.row_transitions FOR ALL TO app_rw
   USING (tenant_id = app.current_tenant()) WITH CHECK (tenant_id = app.current_tenant());
 CREATE POLICY tenant_read ON app.row_transitions FOR SELECT TO app_ro USING (tenant_id = app.current_tenant());
--- Entry point for the trigger function (schema_owner) to write (same style as 0062; nothing can be written without context).
+-- トリガの関数（schema_owner）が書くための口（0062 と同じ書き方。文脈が無いと何も書けない）。
 CREATE POLICY tenant_security_definer ON app.row_transitions FOR ALL TO schema_owner
   USING (tenant_id = (SELECT app.current_tenant_or_null())) WITH CHECK (tenant_id = (SELECT app.current_tenant_or_null()));
 REVOKE ALL ON app.row_transitions FROM PUBLIC;
 GRANT SELECT ON app.row_transitions TO app_ro, app_rw;
 
--- Item guard (0073's version, with the membership check now decided from the change records; otherwise the same).
+-- 明細の守り（0073 の版の所属の判定を、変化の記録で決めるようにした。他は同じ）。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -127,7 +127,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- Who/when and undo counts (0074's version, with the counting now decided from the change records).
+-- 誰がいつ・取り消しの件数（0074 の版の数え方を、変化の記録で決めるようにした）。
 CREATE OR REPLACE FUNCTION app.import_log_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -180,7 +180,7 @@ END $$;
 
 RESET ROLE;
 
--- Record only on actual change (an update to the same value is not a change).
+-- 変わったときだけ残す（同じ値への更新は変化ではない）。
 CREATE TRIGGER assets_status_transition AFTER UPDATE ON app.assets
   FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION app.record_row_transition();
 CREATE TRIGGER risk_scenarios_status_transition AFTER UPDATE ON app.risk_scenarios

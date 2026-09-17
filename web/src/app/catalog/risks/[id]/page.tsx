@@ -5,7 +5,7 @@ import { ProvenanceTable } from '@/components/Provenance';
 
 export const dynamic = 'force-dynamic';
 
-// Show the same domain and Phase as the list. Phase is not embedded in the title but shown as a separate value.
+// 一覧と同じ領域・Phaseを出す。Phaseはタイトルへ埋め込まず、独立した値として表示する。
 export const metadata = { title: 'リスクシナリオ雛形' };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,7 +33,7 @@ export default async function RiskDetail({ params }: { params: Promise<{ id: str
         <h1 className="mt-1 text-[20px] font-semibold tracking-tight">{risk.summary}</h1>
         <p className="mt-1 text-[12px] text-[var(--muted)]">
           {risk.theme} / {risk.measure}
-          {risk.retired_at && <span className="ms-2 text-[var(--danger)]">（廃止済み）</span>}
+          {risk.retired_at && <span className="ml-2 text-[var(--danger)]">（廃止済み）</span>}
         </p>
       </div>
 
@@ -69,7 +69,7 @@ export default async function RiskDetail({ params }: { params: Promise<{ id: str
         <p className="text-[13px]">
           <b className={controlCount === 0 ? 'text-[var(--danger)]' : ''}>{controlCount}</b> 件
           {controlCount === 0 && (
-            <span className="ms-2 text-[12px] text-[var(--muted)]">
+            <span className="ml-2 text-[12px] text-[var(--muted)]">
               （catalog.risk_template_controls が未投入。雛形と統制の対応はまだ作られていない）
             </span>
           )}

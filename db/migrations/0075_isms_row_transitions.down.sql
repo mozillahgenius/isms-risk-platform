@@ -1,9 +1,9 @@
 -- @run-as: admin
--- Rollback of 0075. Removes the transition records and restores the item guard to 0073's version and undo counting to 0074's.
+-- 0075 の巻き戻し。変化の記録を外し、明細の守りを 0073 の版、取り消しの件数を 0074 の版へ戻す。
 --
--- Roll back even if transition records remain. The guard and counting read only rows of "the current transaction"; past rows are not used for decisions
--- (the import records themselves = import_batches / items / undos are protected by the downs of 0071 and 0073).
--- A row is created on every asset retirement or department change, so rejecting when rows exist would make a DB in normal use impossible to roll back.
+-- 変化の記録は残っていても巻き戻す。守りと件数が読むのは「今のトランザクション」の行だけで、過去の行は判定に使わない
+-- （取り込みの記録そのもの＝import_batches / items / undos は 0071・0073 の down が守る）。
+-- 資産の退役・所属の部署の変更のたびに行ができるので、行があれば拒否にすると、ふだん使っている DB は二度と戻せなくなる。
 SET LOCAL lock_timeout = '10s';
 
 DROP TRIGGER IF EXISTS assets_status_transition ON app.assets;
@@ -12,7 +12,7 @@ DROP TRIGGER IF EXISTS memberships_department_transition ON app.memberships;
 
 SET ROLE schema_owner;
 
--- Restore 0073's version.
+-- 0073 の版へ戻す。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -63,7 +63,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- Restore 0074's version.
+-- 0074 の版へ戻す。
 CREATE OR REPLACE FUNCTION app.import_log_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE

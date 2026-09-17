@@ -1,6 +1,6 @@
 -- @run-as: admin
--- Rollback of 0077. Stop recording created rows; restore the transition-record function to 0075's version and the detail guard to 0076's version.
--- Created-row records are judged using only rows of the current transaction, so delete them before restoring constraints (same idea as 0075's down).
+-- 0077 の巻き戻し。作った行の記録をやめ、変化の記録の関数を 0075 の版、明細の守りを 0076 の版へ戻す。
+-- 作った行の記録は判定に今のトランザクションの行しか使わないので、消してから制約を戻す（0075 の down と同じ考え）。
 SET LOCAL lock_timeout = '10s';
 
 DROP TRIGGER IF EXISTS assets_created_transition ON app.assets;
@@ -18,7 +18,7 @@ ALTER TABLE app.row_transitions DROP CONSTRAINT row_transitions_target_type_chec
 ALTER TABLE app.row_transitions ADD CONSTRAINT row_transitions_target_type_check
   CHECK (target_type IN ('asset','risk','membership'));
 
--- Restore to 0075's version.
+-- 0075 の版へ戻す。
 CREATE OR REPLACE FUNCTION app.record_row_transition() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -43,7 +43,7 @@ BEGIN
   RETURN NULL;
 END $$;
 
--- Restore to 0076's version.
+-- 0076 の版へ戻す。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE

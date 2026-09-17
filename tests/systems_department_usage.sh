@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Acceptance for 0061: members can edit systems in use and auditors cannot;
-# department usage records; asset location (system FK + free text); department view aggregation.
+# 0061 の受入: 利用システムを member が編集できること、監査人が編集できないこと、
+# 部門の利用記録、資産の所在場所（システムFK＋自由記述）、部門ビューの集計。
 #
-# Verify not only "passes" but also "fails for the intended reason".
+# 「通ること」だけでなく「狙った理由で落ちること」を確かめる。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,12 +62,12 @@ call_as() {
     -c "BEGIN; SELECT app.set_tenant_context('$1'); $2 COMMIT;"
 }
 
-# --- 0045's controls are not removed (direct DML is still disallowed) -------------------------
-# Keep 0045's design of "write only after adding dedicated RPCs" as is.
+# --- 0045 の統制は外していない（直接DMLは今も不可） -------------------------
+# 「専用RPCを追加してからだけ書き込む」という 0045 の設計をそのまま守る。
 expect_fail_because 'permission denied for table application_catalog' call_as "$CISO_T" \
   "INSERT INTO app.application_catalog(tenant_id,app_key,name,provider) VALUES(app.current_tenant(),'direct','直接','x');"
 
-# --- Systems in use are editable by members (the request's "each member edits") -------
+# --- 利用システムは member が編集できる（依頼の「各メンバーが編集」） -------
 SYS_ID="$(call_as "$MEM_T" "SELECT app.create_system('google-workspace','Google Workspace','google','active');" | tail -1 | tr -d ' ')"
 [ -n "$SYS_ID" ] || die "member could not register a system"
 [ "$(sql -At -c "SELECT name FROM app.application_catalog WHERE app_key='google-workspace'")" = 'Google Workspace' ] \
@@ -76,17 +76,17 @@ call_as "$MEM_T" "SELECT app.update_system('$SYS_ID'::uuid,'Google Workspace (�
 [ "$(sql -At -c "SELECT name FROM app.application_catalog WHERE app_key='google-workspace'")" = 'Google Workspace (社内)' ] \
   || die "member could not edit a system"
 
-# created_by is filled with the submitter themselves.
+# created_by は申告した本人で埋まる。
 [ "$(sql -At -c "SELECT created_by FROM app.application_catalog WHERE app_key='google-workspace'")" \
   = 10000000-0000-4000-8000-000000000014 ] || die "created_by was not stamped with the actor"
 
-# Auditors do not change business data.
+# 監査人は業務データを変更しない。
 expect_fail_because 'system edit permission required' call_as "$AUD_T" \
   "SELECT app.create_system('nope','だめ','x','active');"
 expect_fail_because 'system edit permission required' call_as "$AUD_T" \
   "SELECT app.update_system('$SYS_ID'::uuid,'書き換え','x','active');"
 
-# --- Department usage records ---------------------------------------------------------
+# --- 部門の利用記録 ---------------------------------------------------------
 call_as "$CISO_T" "INSERT INTO app.departments(tenant_id,id,name) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000031','営業部'),(app.current_tenant(),'10000000-0000-4000-8000-000000000032','管理部');" >/dev/null
 call_as "$MEM_T" "INSERT INTO app.department_systems(tenant_id,department_id,application_id,usage_note) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000031','$SYS_ID','顧客の連絡先と見積の共有');" >/dev/null
 [ "$(sql -At -c "SELECT usage_note FROM app.department_systems")" = '顧客の連絡先と見積の共有' ] \
@@ -94,36 +94,36 @@ call_as "$MEM_T" "INSERT INTO app.department_systems(tenant_id,department_id,app
 expect_fail_because 'system edit permission required' call_as "$AUD_T" \
   "DELETE FROM app.department_systems WHERE department_id='10000000-0000-4000-8000-000000000031';"
 
-# The submitter can't be spoofed (even if the caller specifies created_by, it is overwritten with the actual user).
+# 申告者を偽装できない（呼び出し側が created_by を指定しても本人で上書きされる）。
 call_as "$MEM_T" "INSERT INTO app.department_systems(tenant_id,department_id,application_id,usage_note,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000032','$SYS_ID','偽装の試み','10000000-0000-4000-8000-000000000011','10000000-0000-4000-8000-000000000011');" >/dev/null
 [ "$(sql -At -c "SELECT created_by FROM app.department_systems WHERE department_id='10000000-0000-4000-8000-000000000032'")" \
   = 10000000-0000-4000-8000-000000000014 ] || die "created_by was forgeable on insert"
-# created_by can't be changed on update either.
+# 更新でも created_by は動かせない。
 call_as "$CISO_T" "UPDATE app.department_systems SET usage_note='上書き', created_by='10000000-0000-4000-8000-000000000011' WHERE department_id='10000000-0000-4000-8000-000000000032';" >/dev/null
 [ "$(sql -At -c "SELECT created_by FROM app.department_systems WHERE department_id='10000000-0000-4000-8000-000000000032'")" \
   = 10000000-0000-4000-8000-000000000014 ] || die "created_by was forgeable on update"
 
-# --- Asset location ---------------------------------------------------------
-# Asset write permissions are not loosened. Members can't create assets (as in 0058).
+# --- 資産の所在場所 ---------------------------------------------------------
+# 資産の書き込み権限は緩めていない。member は資産を作れない（0058 のまま）。
 expect_fail_because 'active work assignment required' call_as "$MEM_T" \
   "SELECT app.require_work_permission('asset', NULL::uuid, 'create');"
 
 call_as "$CISO_T" "INSERT INTO app.assets(tenant_id,id,asset_key,name,asset_type,classification,owner_department_id,location_system_id,location_note) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000051','AST-001','顧客連絡先','customer_data','internal','10000000-0000-4000-8000-000000000031','$SYS_ID',''); SELECT app.set_management_frameworks_human('asset','10000000-0000-4000-8000-000000000051',ARRAY['RISK-MANAGEMENT']);" >/dev/null
 call_as "$CISO_T" "INSERT INTO app.assets(tenant_id,id,asset_key,name,asset_type,classification,owner_department_id,location_note) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000052','AST-002','契約書原本','legal_corporate','internal','10000000-0000-4000-8000-000000000031','本社 施錠書庫'); SELECT app.set_management_frameworks_human('asset','10000000-0000-4000-8000-000000000052',ARRAY['RISK-MANAGEMENT']);" >/dev/null
 
-# A nonexistent system can't be the location (FK).
+# 実在しないシステムを所在にはできない（FK）。
 expect_fail_because 'violates foreign key constraint' call_as "$CISO_T" \
   "INSERT INTO app.assets(tenant_id,asset_key,name,asset_type,classification,location_system_id) VALUES(app.current_tenant(),'AST-999','幽霊','data','internal','10000000-0000-4000-8000-000000000199');"
 
-# --- Retirement protection -------------------------------------------------------------
-# A system referenced as a location is blocked from retirement by the app (the DB doesn't drop the column).
+# --- 廃止の保護 -------------------------------------------------------------
+# 所在として参照されているシステムは、アプリ側が廃止を止める（DBは列を消さない）。
 [ "$(sql -At -c "SELECT count(*) FROM app.assets WHERE location_system_id='$SYS_ID' AND status='active'")" = 1 ] \
   || die "asset location link missing"
-# It can't be retired while used as a location (backstop on the RPC side).
+# 所在として使われている間は廃止にできない（RPC 側のバックストップ）。
 expect_fail_because 'still used as an asset location' call_as "$CISO_T" \
   "SELECT app.update_system('$SYS_ID'::uuid,'Google Workspace (社内)','google','retired');"
 
-# --- Department view aggregation -------------------------------------------------------
+# --- 部門ビューの集計 -------------------------------------------------------
 ROWS="$(sql -At -c "
   SELECT d.name || '|' || coalesce(s.name,'-') || '|' || a.location_note || '|' || count(*)
     FROM app.assets a
@@ -134,20 +134,20 @@ ROWS="$(sql -At -c "
 printf '%s' "$ROWS" | grep -q '営業部|Google Workspace (社内)||1' || die "system location rollup missing: $ROWS"
 printf '%s' "$ROWS" | grep -q '営業部|-|本社 施錠書庫|1' || die "non-system location rollup missing: $ROWS"
 
-# --- Tenant isolation -----------------------------------------------------------
+# --- テナント分離 -----------------------------------------------------------
 [ "$(call_as "$OTHER_T" "SELECT count(*) FROM app.application_catalog;" | tail -1)" = 0 ] \
   || die "application catalog leaked across tenants"
 [ "$(call_as "$OTHER_T" "SELECT count(*) FROM app.department_systems;" | tail -1)" = 0 ] \
   || die "department systems leaked across tenants"
 
-# --- Rollback --------------------------------------------------------------
-# Derive the number of steps to roll back from the version count (don't hard-code it).
+# --- 巻き戻し --------------------------------------------------------------
+# 巻き戻す本数は版数から出す（本数決め打ちにしない）。
 DOWN_N="$(sql -At -c "SELECT count(*) FROM public.schema_migrations WHERE version >= '0061'")"
 "$ROOT/scripts/migrate.sh" down "$DOWN_N" >/dev/null
 [ "$(sql -At -c "SELECT to_regclass('app.department_systems') IS NULL")" = t ] || die "0061 down left department_systems"
 [ "$(sql -At -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='app' AND table_name='assets' AND column_name LIKE 'location%'")" = 0 ] \
   || die "0061 down left the location columns"
-# The assets themselves remain (only the column is dropped; the register isn't broken).
+# 資産そのものは残る（列を落としただけで台帳は壊さない）。
 [ "$(sql -At -c "SELECT count(*) FROM app.assets")" = 2 ] || die "0061 down destroyed assets"
 
 printf '[systems] ok\n'

@@ -16,15 +16,15 @@ const COLUMNS = {
   policies: POLICY_COLUMNS,
 } as const;
 
-/** Two-step import: verify the contents (writes nothing) -> import exactly the verified contents. */
+/** 取り込みの 2 段: 内容を確かめる（何も書かない）→ 確かめた中身をそのまま取り込む。 */
 export function ImportForm() {
   const [kind, setKind] = useState<ImportKind>('assets');
   const [checked, check, checking] = useActionState(previewImport, EMPTY);
   const [applied, apply, applying] = useActionState(applyImport, EMPTY);
   const columns: readonly { name: string; required: boolean }[] = COLUMNS[kind];
-  // After importing, do not show the import control for the same verified contents (prevent double submission).
+  // 取り込んだ後は、同じ確かめた中身では取り込みの欄を出さない（二重に押させない）。
   const alreadyApplied = applied.stage === 'imported' && applied.sha256 === checked.sha256;
-  // If the type changes after verification, do not allow importing with that result (keep the on-screen type and the imported type consistent).
+  // 確かめた後に種類を変えたら、その結果では取り込ませない（画面の種類と取り込む種類を食い違わせない）。
   const kindChanged = checked.stage !== 'idle' && checked.kind !== kind;
   const canApply = checked.stage === 'checked' && checked.issues.length === 0 && checked.plan.length > 0 && !alreadyApplied
     && !kindChanged;

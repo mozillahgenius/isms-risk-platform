@@ -6,15 +6,15 @@ import { splitTheme } from '@/lib/graphModel';
 
 export const dynamic = 'force-dynamic';
 
-// Show the same category name as the list. Using an individual name would require
-// another DB query just for the detail (the rows already fetched for the main render can't be reused).
+// 一覧と同じ区分名を出す。個別の名前にすると詳細を出すためだけに
+// もう 1 度 DB を引くことになる（本体の描画で既に引いている行を再利用できない）。
 export const metadata = { title: '統制' };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function ControlDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  // Passing a non-uuid value to the DB causes a type error and a 500. Translate it to a 404 here.
+  // uuid でない値を DB へ渡すと型エラーで 500 になる。ここで 404 に翻訳する。
   if (!UUID_RE.test(id)) notFound();
 
   const control = await getControl(id);
@@ -27,8 +27,8 @@ export default async function ControlDetail({ params }: { params: Promise<{ id: 
   ]);
   const framework = frameworks.find((f) => f.key === control.framework_key);
   const parts = splitTheme(control.theme);
-  // The list filter queries by the raw theme. Passing a normalized string here could leave
-  // the "view controls in the same category (N)" link with an empty destination.
+  // 一覧の絞り込みは素の theme で引く。ここで正規化した文字列を渡すと、
+  // 「同じ分類の統制を見る（N 件）」の遷移先が空になり得る。
   const themeRaw = parts.length > 0 ? control.theme : null;
 
   const links: { label: string; count: number }[] = [
@@ -48,7 +48,7 @@ export default async function ControlDetail({ params }: { params: Promise<{ id: 
           </Link>
           {' / '}
           {parts.length === 0 ? (
-            // Don't silently omit a missing category (the breadcrumb would just look cut off).
+            // 分類が無いことを黙って省かない（パンくずが途切れて見えるだけになる）。
             <span className="italic">分類なし</span>
           ) : (
             parts.map((p, i) => (
@@ -67,7 +67,7 @@ export default async function ControlDetail({ params }: { params: Promise<{ id: 
         </h1>
         <p className="mt-1 text-[12px] text-[var(--muted)]">
           フレームワーク: {framework ? `${framework.name_ja}（${framework.key}）` : control.framework_key}
-          {control.retired_at && <span className="ms-2 text-[var(--danger)]">（廃止済み）</span>}
+          {control.retired_at && <span className="ml-2 text-[var(--danger)]">（廃止済み）</span>}
         </p>
       </div>
 
@@ -91,7 +91,7 @@ export default async function ControlDetail({ params }: { params: Promise<{ id: 
             </li>
           ))}
         </ul>
-        {/* Controls without a category have no destination. same_theme is also 0, so this isn't shown. */}
+        {/* 分類なしの統制には遷移先が無い。same_theme も 0 なので、ここは出さない。 */}
         {back.same_theme > 0 && themeRaw !== null && (
           <Link
             className="btn mt-4"

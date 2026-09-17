@@ -47,7 +47,7 @@ function uuidList(form: FormData, key: string): string[] {
     .map((item) => safeUuid(item, key));
 }
 
-/** The target record arrives as a single value "<type>:<uuid>". Because swapping only the type would be a problem. */
+/** 対象レコードは "<type>:<uuid>" の 1 値で来る。種別だけ差し替えられると困るため。 */
 function parseTarget(form: FormData, workType: string): { type: string; id: string } | null {
   const raw = String(form.get('target') ?? '').trim();
   if (!raw) return null;
@@ -58,11 +58,11 @@ function parseTarget(form: FormData, workType: string): { type: string; id: stri
 }
 
 /**
- * Create a work item and hand it out to assignees.
+ * 作業を作り、担当者へ配る。
  *
- * Assignees are gathered from both "pick individuals" and "pick departments". When a department is picked,
- * it is expanded to the members currently belonging to it and fixed at that point (so that later changes in the
- * department's makeup do not silently add or remove assignees of an already-requested item).
+ * 担当者は「個人を選ぶ」と「部門を選ぶ」の両方から集める。部門を選んだ場合は
+ * その時点で在籍している所属メンバーへ展開して固定する（後から部門の構成が
+ * 変わっても、依頼済みの担当が勝手に増減しないようにする）。
  */
 export async function saveAssignment(form: FormData) {
   const workType = value(form, 'work_type', 40);
@@ -169,7 +169,7 @@ async function notifyAssignees(
   }
 }
 
-/** Turn "<type>:<uuid>" into a human-readable name. If not found, drop it from the notification body. */
+/** "<type>:<uuid>" を人が読める名前へ。見つからなければ通知本文から落とす。 */
 async function resourceLabelFor(
   sql: Parameters<Parameters<typeof withTenantWrite>[0]>[0],
   target: string | null,
@@ -198,7 +198,7 @@ async function resourceLabelFor(
   return rows[0]?.label ?? null;
 }
 
-/** Add assignees after a work item has been created. Department selections are also expanded here. */
+/** 作業を作ったあとで担当者を足す。部門指定もここで展開する。 */
 export async function addAssignees(form: FormData) {
   const workItemId = safeUuid(value(form, 'work_item_id', 80), 'work_item_id');
   const pickedUsers = uuidList(form, 'assignee_user_id');
@@ -237,8 +237,8 @@ export async function addAssignees(form: FormData) {
 
     const added: string[] = [];
     for (const assignee of wanted) {
-      // If already assigned, only change the assignment type. To avoid sending request emails twice,
-      // only the newly added people are notified.
+      // 既に担当なら担当区分だけ変える。二重に依頼メールを送らないよう、
+      // 新しく足りた人だけを通知対象にする。
       const rows = await sql<{ user_id: string }[]>`
         INSERT INTO app.work_item_assignees
           (tenant_id, work_item_id, user_id, assignment_role, created_by, updated_by)
@@ -275,8 +275,8 @@ export async function removeAssignee(form: FormData) {
   const assignee = safeUuid(value(form, 'assignee_user_id', 80), 'assignee_user_id');
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'assign')`;
-    // Do not leave a work item with 0 assignees. With 0 people nobody can move it forward,
-    // and it sits in the list as "requested" forever.
+    // 担当が 0 人の作業を残さない。0 人になると誰も進められず、
+    // 一覧には「依頼中」のまま居座る。
     const remaining = await sql<{ n: number }[]>`
       SELECT count(*)::int AS n FROM app.work_item_assignees
        WHERE tenant_id=app.current_tenant() AND work_item_id=${workItemId}::uuid
@@ -358,10 +358,10 @@ export async function updateAssignment(form: FormData) {
 }
 
 /**
- * Role change from the access management screen (/operations/access).
+ * 権限管理画面（/operations/access）からのロール変更。
  *
- * Works by the same rules as saveMemberRole on the organization screen. Likewise, the last owner
- * cannot be demoted (the 0059 constraint trigger is the last line of defense).
+ * 組織画面の saveMemberRole と同じ規則で動かす。最後のオーナーを降ろせない
+ * のも同じ（0059 の制約トリガーが最後の砦）。
  */
 export async function saveManagementRole(form: FormData) {
   const userId = safeUuid(value(form, 'user_id', 80), 'user_id');
@@ -375,8 +375,8 @@ export async function saveManagementRole(form: FormData) {
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'role_manage')`;
     if (role !== 'owner') {
-      // Serialized per tenant for the same reason as on the organization screen (the 0059 constraint trigger is
-      // the last line of defense, but it is DEFERRED, so it only fails at COMMIT and cannot give a reason).
+      // 組織画面側と同じ理由でテナント単位に直列化する（0059 の制約トリガーが
+      // 最後の砦だが、DEFERRED なので COMMIT 時にしか落ちず理由を出せない）。
       await sql`SELECT app.lock_owner_guard(app.current_tenant())`;
       const owners = await sql<{ n: number }[]>`
         SELECT count(*)::int AS n

@@ -1,18 +1,18 @@
--- 0008 Additional standard policies (p13-p28) and completion of the policy framework tags
+-- 0008 標準規程の追加（p13〜p28）と、規程の枠組みタグの完成
 --
--- DOM 2026.1 had only 12 policies and lacked ones needed to actually run an ISMS.
--- Missing were those defining "how to run it" (documents/records, training, monitoring, internal audit,
--- management review, corrective action) and policies per technology / usage pattern (change, cryptography, logging,
--- vulnerabilities, development, cloud, telework, personal information, legal compliance, AI use).
+-- DOM 2026.1 の規程は 12 本しか無く、ISMS を実際に回すのに必要な規程が抜けていた。
+-- 抜けていたのは「回し方」を定める側（文書・記録、教育、監視、内部監査、
+-- マネジメントレビュー、是正）と、技術・利用形態ごとの規程（変更、暗号、ログ、
+-- 脆弱性、開発、クラウド、テレワーク、個人情報、法令順守、AI 利用）。
 --
--- Source: like 0007, **standard policy templates this project distributes as DOM 2026.1**.
---         Not a transcription of the standard's text. clause_refs are a rough guide for association.
+-- 出所: 0007 と同じく **当社が DOM 2026.1 として配る標準規程のひな形**。
+--       規格本文の転記ではない。clause_refs は関連づけの目安。
 --
--- Framework tags (catalog.policy_frameworks) were only populated for p01-p07 in 0027.
--- Populate all 28 here, and also attach IPO-KARTE to policies always examined in IPO-readiness reviews.
--- Note: as of 2026-08-15 no screen reads policy_frameworks. This keeps the data consistent.
+-- 枠組みタグ（catalog.policy_frameworks）は 0027 で p01〜p07 にしか入っていなかった。
+-- ここで 28 本すべてに入れ、上場準備の審査で必ず見られる規程には IPO-KARTE も付ける。
+-- ※ 2026-08-15 時点で policy_frameworks を読む画面は無い。データとしての整合を取る。
 --
--- Idempotent. ON CONFLICT replaces everything including the body.
+-- 冪等。ON CONFLICT で本文ごと入れ替える。
 
 \set ON_ERROR_STOP on
 
@@ -596,15 +596,15 @@ ON CONFLICT (key) DO UPDATE
       clause_refs    = EXCLUDED.clause_refs,
       sort_order     = EXCLUDED.sort_order;
 
--- Framework tags. 0027 only populated p01-p07. Fill in all 28.
+-- 枠組みタグ。0027 は p01〜p07 にしか入れていなかった。28 本すべてを埋める。
 INSERT INTO catalog.policy_frameworks (policy_key, framework_key)
 SELECT p.key, f.framework_key
   FROM catalog.policies_default p
  CROSS JOIN (VALUES ('RISK-MANAGEMENT'::text), ('ISO27001:2022'::text)) f(framework_key)
 ON CONFLICT DO NOTHING;
 
--- Attach IPO-KARTE to policies always examined in IPO-readiness reviews.
--- Corresponds to areas examined for "are operational records kept", not "does the policy exist".
+-- 上場準備の審査で必ず見られる規程には IPO-KARTE も付ける。
+-- 「規程が在るか」ではなく「運用の記録が残るか」を見られる領域に対応する。
 INSERT INTO catalog.policy_frameworks (policy_key, framework_key)
 SELECT key, 'IPO-KARTE'
   FROM catalog.policies_default
@@ -612,16 +612,16 @@ SELECT key, 'IPO-KARTE'
                'p17_review','p18_nc','p26_privacy','p27_legal')
 ON CONFLICT DO NOTHING;
 
--- Verify on the spot that this seed took effect as intended.
+-- この seed が意図どおり効いたことを、その場で確かめる。
 DO $$
 DECLARE n int; v_bad text;
 BEGIN
   SELECT count(*) INTO n FROM catalog.policies_default;
   IF n <> 28 THEN RAISE EXCEPTION '標準規程が % 本（28 本でなければならない）', n; END IF;
 
-  -- Limit the body check to **the 16 inserted by this seed**.
-  -- Checking all 28 would fail here on a DB without 0007 (check_web.sh's STEP_DB for mutation tests
-  -- deliberately leaves 12 as placeholders). Checking the whole set is check_seeds.sql's job.
+  -- 本文の検査は **この seed が入れた 16 本** に限る。
+  -- 全 28 本を見ると 0007 を流していない DB（check_web.sh の変異試験用 STEP_DB は
+  -- わざと 12 本を仮置きのまま残す）でここが落ちる。全体の検査は check_seeds.sql の役目。
   SELECT string_agg(key, ', ' ORDER BY key) INTO v_bad
     FROM catalog.policies_default
    WHERE key IN ('p13_docs','p14_awareness','p15_monitor','p16_audit','p17_review',
@@ -633,12 +633,12 @@ BEGIN
     RAISE EXCEPTION '本文・題名・箇条参照が整っていない規程がある: %', v_bad;
   END IF;
 
-  -- Duplicate sort orders would make the on-screen order change on every run.
+  -- 並び順が重複していると、画面の順序が実行のたびに変わる。
   IF (SELECT count(DISTINCT sort_order) FROM catalog.policies_default) <> 28 THEN
     RAISE EXCEPTION '規程の並び順に重複がある';
   END IF;
 
-  -- Not a single framework tag is missing.
+  -- 枠組みタグが 1 本でも欠けていないこと。
   SELECT string_agg(key, ', ' ORDER BY key) INTO v_bad
     FROM catalog.policies_default p
    WHERE NOT EXISTS (SELECT 1 FROM catalog.policy_frameworks f

@@ -1,26 +1,26 @@
--- 0022 Raise the check pass gate from "shape check" to "content verification".
+-- 0022 チェックの合格ゲートを「形の検査」から「中身の照合」へ上げる。
 --
--- 0021's constraint only required negative_verified and a 64-char verified_digest for result='pass'.
--- In other words, **any principal able to write could get a pass by entering true and an arbitrary 64 chars**.
--- The shape was right but the content was never checked, so as a gate it was almost a pass-through.
+-- 0021 の制約は result='pass' に negative_verified と 64 桁の verified_digest を
+-- 求めるだけだった。つまり **書ける主体が true と適当な 64 桁を入れれば pass にできた**。
+-- 形は合っているが中身を見ていないので、ゲートとしては素通しに近い。
 --
--- What this adds:
---   (A) catalog.check_digest() -- builds a fingerprint from a check's content. **The DB is the single source of computation**.
---       The executor (scripts/checker.py) also calls this function, so the same formula is not written in two places
---       (if it were, one would inevitably drift, and the drifted side would pass silently).
---   (B) a trigger on app.check_runs -- if negative_verified is set, verified_digest must
---       **match the current catalog content**.
---       A check whose content has been rewritten cannot be recorded as "verified".
+-- ここで足すもの:
+--   (A) catalog.check_digest() — チェックの中身から指紋を作る。**DB を唯一の計算元にする**。
+--       実行側（scripts/checker.py）もこの関数を呼ぶので、2 か所で同じ式を書かない
+--       （書くと必ずどちらかがずれて、ずれた側が黙って通る）。
+--   (B) app.check_runs のトリガ — negative_verified を立てるなら、verified_digest が
+--       **いまのカタログの中身と一致していること**を求める。
+--       中身が書き換わったチェックを「確認済み」として記録できない。
 --
--- What this prevents: faking with an arbitrary 64 chars; rewriting a check after verification to pass it.
--- What this does not prevent: "whether the fixture was really run" itself.
---   That is the executor's job and is invisible to the DB (docs/DECISIONS.md D-27).
+-- これで防げること: 適当な 64 桁での偽装、確認後にチェックを書き換えて通すこと。
+-- これで防げないこと: 「fixture を本当に流したか」そのもの。
+--   それは実行側の仕事で、DB からは見えない（docs/DECISIONS.md D-27）。
 
 SET ROLE schema_owner;
 
--- ------------------------------------------------------------------ (A) fingerprint
--- Include everything that affects how pass/fail is decided. Loosening expect yields a different fingerprint.
--- jsonb ::text normalizes key order, so variations in writing do not change the fingerprint.
+-- ------------------------------------------------------------------ (A) 指紋
+-- 合否の決め方に関わるものを全部入れる。expect を緩めれば別の指紋になる。
+-- jsonb の ::text は鍵順が正規化されるので、書き方の揺れで指紋が動かない。
 CREATE OR REPLACE FUNCTION catalog.check_digest(p_key text) RETURNS text
 LANGUAGE sql STABLE SET search_path = pg_catalog AS $$
   SELECT pg_catalog.encode(
@@ -40,13 +40,13 @@ GRANT EXECUTE ON FUNCTION catalog.check_digest(text) TO app_rw, app_ro;
 COMMENT ON FUNCTION catalog.check_digest(text) IS
   'チェックの中身の指紋。実行側もトリガもこの関数だけを使う（式を二重に書かない）。';
 
--- ------------------------------------------------------------------ (B) verification
+-- ------------------------------------------------------------------ (B) 照合
 CREATE OR REPLACE FUNCTION app.enforce_check_digest() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 DECLARE v_expected text;
 BEGIN
   IF NOT NEW.negative_verified THEN
-    -- If it says not verified, it must not carry a fingerprint (having one would be confusing).
+    -- 確認していないと言っているなら、指紋は持たせない（持てば紛らわしい）。
     IF NEW.verified_digest IS NOT NULL THEN
       RAISE EXCEPTION '確認していない実行に verified_digest は付けられません'
         USING ERRCODE = 'check_violation';
@@ -71,11 +71,11 @@ CREATE TRIGGER trg_check_runs_digest
   BEFORE INSERT OR UPDATE ON app.check_runs
   FOR EACH ROW EXECUTE FUNCTION app.enforce_check_digest();
 
--- ------------------------------------------------------------------ hijack protection
--- 0021's provision_tenant referenced public.gen_random_uuid() by name.
--- Even with search_path pinned, any principal able to create functions in public could replace it.
--- This DB has CREATE revoked from PUBLIC, but do not depend on that.
--- gen_random_uuid is built in (pg_catalog) since PostgreSQL 13.
+-- ------------------------------------------------------------------ 乗っ取り対策
+-- 0021 の provision_tenant は public.gen_random_uuid() を名指ししていた。
+-- search_path を固定していても、public に関数を作れる主体が居れば差し替えられる。
+-- この DB では PUBLIC から CREATE を剥がしてあるが、依存しない形にしておく。
+-- gen_random_uuid は PostgreSQL 13 以降は組み込み（pg_catalog）。
 CREATE OR REPLACE FUNCTION app.provision_tenant(
   p_name text, p_domain text, p_admin_email text, p_admin_name text,
   p_fiscal_start_month smallint DEFAULT 4, p_industry_preset text DEFAULT 'general'

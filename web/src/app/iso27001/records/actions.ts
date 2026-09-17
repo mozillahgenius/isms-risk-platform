@@ -6,9 +6,9 @@ import type { TransactionSql } from 'postgres';
 import { FINDING_FROM, FINDING_STEPS, type FindingStep } from '@/lib/findingFlow';
 import { withTenantWrite } from '@/lib/tenant';
 
-// Write ISMS operational records from the UI (design doc 2026-09-11 §5; backed by migrations 0063 / 0064).
-// The final say on roles belongs to the DB's app.require_records_role(kind) (supplier evaluations use app.require_work_permission).
-// Here we read the same check first and return the rejection reason in words the user understands (a DB exception can only be shown as a generic "failure").
+// ISMS の運用記録を画面から書く（設計書 2026-09-11 §5。受け皿は migration 0063 / 0064）。
+// 役割の確認は DB の app.require_records_role(kind)（委託先評価は app.require_work_permission）が最終判断。
+// ここでは同じ判定を先に読み、拒否の理由を利用者に分かる言葉で返す（DB の例外は一律「失敗」としか出せないため）。
 
 type RecordKind =
   | 'audit' | 'corrective' | 'effectiveness' | 'management_review'
@@ -23,17 +23,17 @@ const ROLES_FOR: Record<RecordKind, readonly string[]> = {
   objective: ['owner', 'admin'],
   evidence: ['owner', 'admin', 'manager'],
   exception: ['owner'],
-  // Organizational issues (4.1) and interested parties (4.2) determine the context of the organization, so they sit at the same tier as objectives (0065).
+  // 組織の課題（4.1）・利害関係者（4.2）は組織の状況の決定なので、目的と同じ段（0065）。
   context: ['owner', 'admin'],
-  // Legal and contractual requirements are records of business operations, so they sit at the same tier as corrective actions and evidence (0066).
+  // 法令・契約上の要求事項は業務の運用の記録なので、是正処置・証跡と同じ段（0066）。
   legal: ['owner', 'admin', 'manager'],
-  // Business continuity plans and tests are also records of business operations (0068).
+  // 事業継続の計画と試験も業務の運用の記録（0068）。
   continuity: ['owner', 'admin', 'manager'],
-  // Vulnerability records are also records of business operations (0069).
+  // 脆弱性の記録も業務の運用の記録（0069）。
   vulnerability: ['owner', 'admin', 'manager'],
-  // Anyone can submit a change request (0070). Only top management can approve or reject (checked separately in decideChangeRequest, and the DB function also refuses).
+  // 変更の申請は誰でも出せる（0070）。承認・却下は経営層だけ（decideChangeRequest で別に確かめ、DB の関数も拒否する）。
   change: ['owner', 'admin', 'manager', 'member'],
-  // Supplier evaluations follow work assignments (members assigned to the task can also write). The DB has the final say.
+  // 委託先評価は作業の割り振りに従う（担当に割り当てられたメンバーも書ける）。最終判断は DB。
   vendor: ['owner', 'admin', 'manager', 'member'],
 };
 
@@ -63,7 +63,7 @@ const optionalUuid = (form: FormData, key: string): string | null => {
   if (!UUID_RE.test(value)) throw new InputError(key);
   return value;
 };
-/** Not just the format: is it a date that exists on the calendar (so a day like 2026-02-31 doesn't become a DB exception)? */
+/** 形だけでなく、暦に在る日付か（2026-02-31 のような日を DB の例外にしない）。 */
 const isCalendarDate = (value: string): boolean => {
   if (!DATE_RE.test(value)) return false;
   const [y, m, d] = value.split('-').map(Number);
@@ -93,11 +93,11 @@ const intIn = (form: FormData, key: string, min: number, max: number): number =>
 };
 const fiscalYear = (form: FormData): number => intIn(form, 'fiscal_year', 2000, 2100);
 
-/** Today (JST). Used for comparisons so a future date isn't recorded as "performed". */
+/** 今日（JST）。先の日付を「実施した」ことにしないための比較に使う。 */
 function todayJst(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 }
-/** `days` days after today (JST). */
+/** 今日（JST）から days 日後。 */
 function daysFromTodayJst(days: number): string {
   return new Date(Date.now() + 9 * 3600_000 + days * 86_400_000).toISOString().slice(0, 10);
 }
@@ -110,8 +110,8 @@ function back(form: FormData, anchor: string, query: Record<string, string>): st
 }
 
 /**
- * Validates input, checks the role, then runs fn in a single transaction.
- * If fn returns a string, it is returned as the user-facing rejection reason (error=...).
+ * 入力を検査し、役割を確かめてから fn を 1 トランザクションで走らせる。
+ * fn が文字列を返したら、それを利用者向けの拒否理由（error=...）として戻す。
  */
 async function run(
   form: FormData,
@@ -129,9 +129,9 @@ async function run(
   const result = await withTenantWrite(async (sql) => {
     const [{ role }] = await sql<{ role: string }[]>`SELECT app.current_management_role() AS role`;
     if (!ROLES_FOR[kind].includes(role)) return 'forbidden';
-    // For supplier evaluations, app.require_work_permission checks inside fn (so members with an assignment are let through).
+    // 委託先評価は fn の中で app.require_work_permission が確かめる（割り当てのあるメンバーを通すため）。
     if (kind !== 'vendor') await sql`SELECT app.require_records_role(${kind})`;
-    // Only active users belonging to this tenant can be chosen as owner or chair (don't rely solely on the UI's candidate list).
+    // 担当・議長に選べるのは、このテナントに所属する有効な利用者だけ（画面の候補だけに頼らない）。
     for (const key of PERSON_FIELDS) {
       const value = String(form.get(key) ?? '').trim();
       if (value && UUID_RE.test(value) && !(await isActiveMember(sql, value))) return 'inactive_user';
@@ -147,8 +147,8 @@ async function run(
 }
 
 /**
- * Returns false on a unique-constraint violation (so concurrent submissions that slip past the duplicate check don't become unhandled exceptions).
- * Wrapped in a savepoint, so the transaction can continue even after a violation.
+ * 一意制約に当たったら false を返す（同時の送信が重複確認をすり抜けても、未処理の例外にしない）。
+ * セーブポイントで包むので、当たってもトランザクションは続けられる。
  */
 async function unlessDuplicate(sql: TransactionSql, fn: (sp: TransactionSql) => Promise<void>): Promise<boolean> {
   try {
@@ -160,10 +160,10 @@ async function unlessDuplicate(sql: TransactionSql, fn: (sp: TransactionSql) => 
   }
 }
 
-/** A field that points to a person as owner or chair (in every record, only active members are accepted). */
+/** 担当・議長として人を指す欄（どの記録でも、有効な所属者だけを受け付ける）。 */
 const PERSON_FIELDS = ['owner_user_id', 'assigned_to', 'chaired_by'] as const;
 
-/** Is this an active user who belongs to this tenant (and has not been removed from it)? */
+/** このテナントに所属する（所属を外されていない）有効な利用者か。 */
 async function isActiveMember(sql: TransactionSql, userId: string): Promise<boolean> {
   const [r] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM app.users u
@@ -173,7 +173,7 @@ async function isActiveMember(sql: TransactionSql, userId: string): Promise<bool
   return r.n > 0;
 }
 
-// ---- Internal audit (9.2) ----------------------------------------------------------
+// ---- 内部監査（9.2） ----------------------------------------------------------
 export async function saveAudit(form: FormData) {
   let id: string | null = null, year = 0, scope = '', criteria = '', auditor = '';
   let plannedOn: string | null = null, performedOn: string | null = null;
@@ -186,9 +186,9 @@ export async function saveAudit(form: FormData) {
     plannedOn = optionalDate(form, 'planned_on');
     performedOn = optionalDate(form, 'performed_on');
   }, async (sql) => {
-    // The performed date must be today or earlier. Don't mark a future date as performed (plans go in planned_on).
+    // 実施日は今日まで。先の日付を実施済みにしない（予定は planned_on に入れる）。
     if (performedOn && performedOn > todayJst()) return 'future_performed';
-    // Auditors are limited to active users holding the auditor role (don't rely solely on the UI's candidate list).
+    // 監査人は、監査人ロールを持つ有効な利用者に限る（画面の候補だけに頼らない）。
     const [auditorOk] = await sql<{ n: number }[]>`
       SELECT count(*)::int AS n
         FROM app.users u
@@ -219,12 +219,12 @@ export async function saveAudit(form: FormData) {
   });
 }
 
-// ---- Findings and nonconformities (10.2) ------------------------------------------------------
+// ---- 指摘・不適合（10.2） ------------------------------------------------------
 const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 
 export async function saveFinding(form: FormData) {
   const auditId = String(form.get('audit_id') ?? '').trim() || null;
-  // Findings raised in an audit are audit records (auditors can also write them). Nonconformities outside audits are written by the corrective-action owner.
+  // 監査で出た指摘は監査の記録（監査人も書ける）。監査以外の不適合は是正の担当が書く。
   const kind: RecordKind = auditId ? 'audit' : 'corrective';
   let title = '', detail: string | null = null, severity: (typeof SEVERITIES)[number] = 'medium';
   let dueDate: string | null = null, assignedTo: string | null = null, audit: string | null = null;
@@ -243,7 +243,7 @@ export async function saveFinding(form: FormData) {
   });
 }
 
-/** Advances a finding's status. Verification (verified) and completion (closed) are done by the evaluating role, not by the person who made the correction. */
+/** 指摘の状態を進める。検証（verified）と完了（closed）は是正した人とは別の、評価の役割が行う。 */
 export async function advanceFinding(form: FormData) {
   const to = String(form.get('status') ?? '');
   const kind: RecordKind = to === 'verified' || to === 'closed' ? 'effectiveness' : 'corrective';
@@ -252,7 +252,7 @@ export async function advanceFinding(form: FormData) {
     id = uuid(form, 'id');
     status = oneOf(form, 'status', FINDING_STEPS);
   }, async (sql) => {
-    // Read the current status under a row lock and confirm the transition order is allowed before writing (so concurrent updates don't skip steps).
+    // 今の状態を行ロックの下で読み、進めてよい順序かを確かめてから書く（同時の更新で順序を飛ばさない）。
     const [row] = await sql<{ status: string; verified_by: string | null }[]>`
       SELECT status, verified_by FROM app.findings
        WHERE tenant_id = app.current_tenant() AND id = ${id}::uuid FOR UPDATE`;
@@ -271,7 +271,7 @@ export async function advanceFinding(form: FormData) {
   });
 }
 
-// ---- Corrective actions (10.2) ----------------------------------------------------------
+// ---- 是正処置（10.2） ----------------------------------------------------------
 export async function saveCorrective(form: FormData) {
   let findingId = '', rootCause = '', action = '', owner: string | null = null, dueDate: string | null = null;
   await run(form, 'corrective', 'corrective', () => {
@@ -298,7 +298,7 @@ export async function completeCorrective(form: FormData) {
   });
 }
 
-/** Verifies that a corrective action was effective. Done after the action is completed, by someone other than the owner (the DB CHECK also refuses). */
+/** 是正処置が効いたかを確かめる。処置の完了後に、担当者とは別の人が行う（DB の CHECK でも拒否する）。 */
 export async function reviewCorrective(form: FormData) {
   let id = '', result: 'effective' | 'not_effective' = 'effective';
   await run(form, 'corrective', 'effectiveness', () => {
@@ -319,7 +319,7 @@ export async function reviewCorrective(form: FormData) {
   });
 }
 
-// ---- Management review (9.3) ------------------------------------------------
+// ---- マネジメントレビュー（9.3） ------------------------------------------------
 export async function saveReview(form: FormData) {
   let id: string | null = null, year = 0, heldOn: string | null = null, chair: string | null = null, minutes = '';
   await run(form, 'reviews', 'management_review', () => {
@@ -329,7 +329,7 @@ export async function saveReview(form: FormData) {
     chair = optionalUuid(form, 'chaired_by');
     minutes = optionalText(form, 'minutes_md', 100_000) ?? '';
   }, async (sql) => {
-    // Duplicate fiscal years are detected by the DB unique constraint (tenant_id, fiscal_year). Merely counting first lets concurrent submissions slip through.
+    // 年度の重複は DB の一意制約（tenant_id, fiscal_year）で判定する。先に数えるだけだと同時の送信がすり抜ける。
     if (id) {
       let count = 0;
       const unique = await unlessDuplicate(sql, async (sp) => {
@@ -369,7 +369,7 @@ export async function addReviewOutput(form: FormData) {
   });
 }
 
-/** Approves the minutes. Only top management (ciso) can do this (checked by the DB's app.approve_management_review). */
+/** 議事の承認。経営層（ciso）だけができる（DB の app.approve_management_review が確かめる）。 */
 export async function approveReview(form: FormData) {
   let reviewId = '', comment: string | null = null;
   await run(form, 'reviews', 'management_review', () => {
@@ -393,7 +393,7 @@ export async function approveReview(form: FormData) {
   });
 }
 
-// ---- Control effectiveness evaluation (9.1) ----------------------------------------------------
+// ---- 統制の有効性評価（9.1） ----------------------------------------------------
 export async function saveEffectiveness(form: FormData) {
   let measureId = '', criteria = '', evaluatedOn = '', evidence = '';
   let result: 'effective' | 'partially_effective' | 'not_effective' = 'effective';
@@ -413,8 +413,8 @@ export async function saveEffectiveness(form: FormData) {
   });
 }
 
-// ---- Information security objectives (6.2) -------------------------------------------------
-// The measurement method (measure_how) is required. An achievement evaluation is only valid once all three of "measured value, evaluation date, evaluator" are present (CHECK in 0055).
+// ---- 情報セキュリティ目的（6.2） -------------------------------------------------
+// 測り方（measure_how）は必須。達成の評価は「実測値・評価日・評価者」が 3 つそろって初めて成立する（0055 の CHECK）。
 export async function saveObjective(form: FormData) {
   let year = 0, title = '', description = '', measureHow = '', target = '';
   let owner: string | null = null, dueDate: string | null = null;
@@ -427,7 +427,7 @@ export async function saveObjective(form: FormData) {
     owner = optionalUuid(form, 'owner_user_id');
     dueDate = optionalDate(form, 'due_date');
   }, async (sql) => {
-    // Duplicate titles within the same fiscal year are detected by the DB unique constraint (tenant_id, fiscal_year, title).
+    // 同じ年度の同名は DB の一意制約（tenant_id, fiscal_year, title）で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.security_objectives
@@ -455,7 +455,7 @@ export async function evaluateObjective(form: FormData) {
   });
 }
 
-// ---- Supplier evaluation (A.5.19-5.22) --------------------------------------------------
+// ---- 委託先評価（A.5.19〜5.22） --------------------------------------------------
 const VENDOR_RESULTS = ['acceptable', 'conditional', 'unacceptable'] as const;
 
 export async function saveVendorAssessment(form: FormData) {
@@ -477,9 +477,9 @@ export async function saveVendorAssessment(form: FormData) {
   });
 }
 
-// ---- Evidence (manual) -----------------------------------------------------------
-// Automatic (auto) evidence is created by check runs. Only manual evidence is entered from the UI.
-// The file itself is not stored. We record where it is (its location).
+// ---- 証跡（手作業） -----------------------------------------------------------
+// 自動（auto）の証跡はチェックの実行が作る。画面から入れるのは手作業（manual）だけ。
+// ファイルそのものは置かない。どこにあるか（所在）を記録する。
 export async function saveEvidence(form: FormData) {
   let title = '', location = '', collectedOn = '', freshness = 365;
   await run(form, 'evidences', 'evidence', () => {
@@ -497,8 +497,8 @@ export async function saveEvidence(form: FormData) {
   });
 }
 
-// ---- Finding exceptions (accepted as a risk instead of corrected) ----------------------------------
-// Only top management can approve. To avoid open-ended acceptance, the expiry must be after today and within 1 year.
+// ---- 指摘の例外（是正せずリスクとして受け入れる） ----------------------------------
+// 経営層だけが承認できる。期限のない受容にしないよう、期限は今日より後・1 年以内に限る。
 export async function approveException(form: FormData) {
   let findingId = '', reason = '', compensating = '', expiresOn = '';
   await run(form, 'exceptions', 'exception', () => {
@@ -509,15 +509,15 @@ export async function approveException(form: FormData) {
   }, async (sql) => {
     if (expiresOn <= todayJst()) return 'expiry_not_future';
     if (expiresOn > daysFromTodayJst(366)) return 'expiry_too_far';
-    // Read the finding under a row lock, so concurrent approvals don't create 2 exceptions and a finding closed after the check isn't turned back into an exception.
+    // 指摘を行ロックの下で読む。同時の承認で例外が 2 件になったり、確認後に完了した指摘を例外へ戻したりしない。
     const [finding] = await sql<{ status: string }[]>`
       SELECT status FROM app.findings WHERE tenant_id = app.current_tenant() AND id = ${findingId}::uuid FOR UPDATE`;
     if (!finding) return 'not_found';
     if (finding.status === 'closed') return 'finding_closed';
-    // Verified means the correction is done. Turning it into an exception would mark it "accepted" while the verification record remains.
+    // 検証済みは是正が済んだもの。例外にすると検証の記録が残ったまま「受け入れた」ことになる。
     if (finding.status === 'verified') return 'finding_verified';
     if (finding.status === 'risk_accepted') return 'already_exception';
-    // Renewing an expired exception is allowed. If an unexpired exception still exists, don't stack another.
+    // 期限の切れた例外の更新は認める。期限内の例外がまだあるなら重ねない。
     if (finding.status === 'exception') {
       const [live] = await sql<{ n: number }[]>`
         SELECT count(*)::int AS n FROM app.exceptions
@@ -536,9 +536,9 @@ export async function approveException(form: FormData) {
   });
 }
 
-// ---- Organizational issues (4.1) and interested parties (4.2) ------------------------------------------
-// The standard requires that these be "determined". Record what was decided and the date it was last reviewed. No approval is attached (the standard does not require one).
-// Withdraw instead of deleting (what was treated as an issue, and until when, is part of the history behind scope and risk decisions).
+// ---- 組織の課題（4.1）・利害関係者（4.2） ------------------------------------------
+// 規格は「決定する」ことを求める。決めた内容と、最後に見直した日を残す。承認は付けない（規格が求めていない）。
+// 消さずに取り下げる（何をいつまで課題としていたかは、範囲やリスクの判断の経緯になる）。
 const CONTEXT_KINDS = ['internal', 'external'] as const;
 const PARTY_CATEGORIES = ['customer', 'regulator', 'employee', 'shareholder', 'supplier', 'partner', 'other'] as const;
 
@@ -552,7 +552,7 @@ export async function saveContextIssue(form: FormData) {
     impact = text(form, 'isms_impact');
     owner = optionalUuid(form, 'owner_user_id');
   }, async (sql) => {
-    // Duplicates of the same kind and title are detected by the DB unique constraint (tenant_id, kind, title).
+    // 同じ種類・同じ名前は DB の一意制約（tenant_id, kind, title）で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.context_issues (tenant_id, kind, title, description, isms_impact, owner_user_id, created_by, updated_by)
@@ -573,7 +573,7 @@ export async function saveInterestedParty(form: FormData) {
     addressed = optionalText(form, 'addressed_in_isms') ?? '';
     owner = optionalUuid(form, 'owner_user_id');
   }, async (sql) => {
-    // Duplicate names are detected by the DB unique constraint (tenant_id, name).
+    // 同じ名前は DB の一意制約（tenant_id, name）で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.interested_parties
@@ -585,7 +585,7 @@ export async function saveInterestedParty(form: FormData) {
   });
 }
 
-/** Records that issues/interested parties were reviewed (content confirmed as of today's date). Withdrawn ones are excluded. */
+/** 課題・利害関係者を見直した（今日の日付で内容を確かめた）ことを残す。取り下げたものは対象外。 */
 export async function reviewContext(form: FormData) {
   const anchor = form.get('target') === 'party' ? 'parties' : 'context';
   let target: 'issue' | 'party' = 'issue', id = '';
@@ -606,7 +606,7 @@ export async function reviewContext(form: FormData) {
   });
 }
 
-/** Withdraws an issue/interested party (does not delete it). */
+/** 課題・利害関係者を取り下げる（消さない）。 */
 export async function retireContext(form: FormData) {
   const anchor = form.get('target') === 'party' ? 'parties' : 'context';
   let target: 'issue' | 'party' = 'issue', id = '';
@@ -625,18 +625,18 @@ export async function retireContext(form: FormData) {
   });
 }
 
-// ---- Legal, regulatory, and contractual requirements (A.5.31) ------------------------------------------
-// Identify, link to the responding controls/evidence, evaluate compliance, and keep it current. Evaluations are recorded together with "when and by whom" (the DB CHECK also refuses otherwise).
+// ---- 法令・規制・契約上の要求事項（A.5.31） ------------------------------------------
+// 特定し、応える統制・証跡へ結び、適合を評価して最新に保つ。評価は「いつ誰が」と一緒に残す（DB の CHECK でも拒否）。
 const LEGAL_KINDS = ['law', 'regulation', 'contract', 'standard', 'other'] as const;
 const COMPLIANCE_RESULTS = ['compliant', 'partially_compliant', 'non_compliant'] as const;
 
 /**
- * Whether the new link targets (control/evidence) exist in this tenant and are usable (so FK violations don't become unhandled exceptions).
- * Don't create new links to withdrawn controls or deleted evidence (same conditions as the UI's candidates). Callers pass null for links that aren't changing.
+ * 新しく結ぶ先（統制・証跡）が、自テナントに在って使える状態か（FK 違反を未処理の例外にしない）。
+ * 取り下げた統制・削除した証跡には新しく結ばない（画面の候補と同じ条件）。変えない結び付きは呼び出し側で null にして渡す。
  */
 async function legalRefsExist(sql: TransactionSql, measure: string | null, evidence: string | null): Promise<boolean> {
-  // Read the target rows with a share lock. Even if another process withdraws or deletes them right after the check, it has to wait until this one finishes
-  // (prevents something slipping in between the check and the link, leaving a link to a withdrawn control or deleted evidence).
+  // 結ぶ先の行を共有ロックで読む。確かめた直後に別の処理が取り下げ・削除しても、この処理が終わるまで待たせる
+  // （確認と結び付けの間に割り込まれて、取り下げた統制・削除した証跡へ結ばれるのを防ぐ）。
   if (measure) {
     const m = await sql`
       SELECT 1 FROM app.measures
@@ -666,7 +666,7 @@ export async function saveLegalRequirement(form: FormData) {
     evidence = optionalUuid(form, 'evidence_id');
   }, async (sql) => {
     if (!(await legalRefsExist(sql, measure, evidence))) return 'ref_unavailable';
-    // Duplicates of the same kind and title are detected by the DB unique constraint (tenant_id, kind, title).
+    // 同じ種類・同じ名前は DB の一意制約（tenant_id, kind, title）で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.legal_requirements
@@ -678,7 +678,7 @@ export async function saveLegalRequirement(form: FormData) {
   });
 }
 
-/** Evaluates compliance. Evaluation date is today (JST), the evaluator is the current user. The next review date must be after today. */
+/** 適合を評価する。評価日は今日（JST）、評価者は本人。次の見直し日は今日より後。 */
 export async function assessLegalRequirement(form: FormData) {
   let id = '', result: (typeof COMPLIANCE_RESULTS)[number] = 'compliant', nextReview: string | null = null;
   await run(form, 'legal', 'legal', () => {
@@ -697,7 +697,7 @@ export async function assessLegalRequirement(form: FormData) {
   });
 }
 
-/** Withdraws a requirement (does not delete it; what was treated as a requirement, and until when, is part of the history). */
+/** 要求事項を取り下げる（消さない。何をいつまで要求として扱っていたかは経緯になる）。 */
 export async function retireLegalRequirement(form: FormData) {
   let id = '';
   await run(form, 'legal', 'legal', () => { id = uuid(form, 'id'); }, async (sql) => {
@@ -708,11 +708,11 @@ export async function retireLegalRequirement(form: FormData) {
   });
 }
 
-// ---- Edit / restore (issues, interested parties, requirements) ----------------------------------------
-// Edit when a review changes the content. Withdrawn items can be restored (recreating one with the same name would hit the unique constraint).
-// Only active items can be edited (withdrawn items must be restored first, then edited).
+// ---- 直す・戻す（課題・利害関係者・要求事項） ----------------------------------------
+// 見直しで内容が変わったら直す。取り下げたものは戻せる（同じ名前で作り直すと一意制約に当たるため）。
+// 直せるのは有効なものだけ（取り下げたものは、戻してから直す）。
 
-/** Edits the content of an issue. */
+/** 課題の内容を直す。 */
 export async function updateContextIssue(form: FormData) {
   let id = '', kind: (typeof CONTEXT_KINDS)[number] = 'external';
   let title = '', description = '', impact = '', owner: string | null = null;
@@ -742,7 +742,7 @@ export async function updateContextIssue(form: FormData) {
   });
 }
 
-/** Edits the content of an interested party. */
+/** 利害関係者の内容を直す。 */
 export async function updateInterestedParty(form: FormData) {
   let id = '', category: (typeof PARTY_CATEGORIES)[number] = 'customer';
   let name = '', requirements = '', addressed = '', owner: string | null = null;
@@ -772,7 +772,7 @@ export async function updateInterestedParty(form: FormData) {
   });
 }
 
-/** Restores a withdrawn issue/interested party. */
+/** 取り下げた課題・利害関係者を戻す。 */
 export async function reactivateContext(form: FormData) {
   const anchor = form.get('target') === 'party' ? 'parties' : 'context';
   let target: 'issue' | 'party' = 'issue', id = '';
@@ -791,7 +791,7 @@ export async function reactivateContext(form: FormData) {
   });
 }
 
-/** Edits the content of a requirement (the compliance evaluation is kept as is; to re-evaluate, use the "evaluate" action). */
+/** 要求事項の内容を直す（適合の評価はそのまま残る。評価し直すときは「評価する」を使う）。 */
 export async function updateLegalRequirement(form: FormData) {
   let id = '', kind: (typeof LEGAL_KINDS)[number] = 'law';
   let title = '', requirement = '', sourceRef = '';
@@ -810,14 +810,14 @@ export async function updateLegalRequirement(form: FormData) {
       SELECT measure_id, evidence_id FROM app.legal_requirements
        WHERE tenant_id = app.current_tenant() AND id = ${id}::uuid AND status = 'active' FOR UPDATE`;
     if (!cur) return 'not_found';
-    // Links that aren't changing are not checked (so other fields can still be edited even if a linked control was withdrawn afterward).
+    // 変えない結び付きは確かめない（結んだ後に統制を取り下げても、他の欄を直せるように）。
     const newMeasure = measure === cur.measure_id ? null : measure;
     const newEvidence = evidence === cur.evidence_id ? null : evidence;
     if (!(await legalRefsExist(sql, newMeasure, newEvidence))) return 'ref_unavailable';
     let count = 0;
     const unique = await unlessDuplicate(sql, async (sp) => {
-      // If the substance (what is required, link targets, etc.) changes, the previous compliance evaluation no longer applies to the new substance, so reset it to unevaluated.
-      // A change of owner alone does not reset it. The right-hand side of SET sees the pre-update values.
+      // 求めていること・結ぶ先などの中身が変わったら、前の適合評価は新しい中身に対するものではないので未評価へ戻す。
+      // 担当だけの変更では戻さない。SET の右辺は更新前の値を見る。
       const rows = await sp`
         UPDATE app.legal_requirements
            SET compliance_status = CASE WHEN (kind, title, requirement, source_ref, measure_id, evidence_id)
@@ -843,7 +843,7 @@ export async function updateLegalRequirement(form: FormData) {
   });
 }
 
-/** Restores a withdrawn requirement. */
+/** 取り下げた要求事項を戻す。 */
 export async function reactivateLegalRequirement(form: FormData) {
   let id = '';
   await run(form, 'legal', 'legal', () => { id = uuid(form, 'id'); }, async (sql) => {
@@ -854,13 +854,13 @@ export async function reactivateLegalRequirement(form: FormData) {
   });
 }
 
-// ---- Business continuity plans and tests (A.5.29 / A.5.30) ------------------------------------------
-// Having written a plan and having tested that it works are different things. A test is accepted as a record only if its performed date is today or earlier
-// (a future date is a plan, so it goes into the plan's "next test due date"). The tester is the person who records it.
+// ---- 事業継続の計画と試験（A.5.29 / A.5.30） ------------------------------------------
+// 計画を作ったことと、試して動いたことは別。試験は実施日が今日までのものだけを記録として受け付ける
+// （先の日付は予定なので、計画の「次の試験期限」に入れる）。試験の実施者は記録した本人。
 const CONTINUITY_METHODS = ['tabletop', 'walkthrough', 'simulation', 'full_interruption'] as const;
 const CONTINUITY_RESULTS = ['passed', 'partially_passed', 'failed'] as const;
 
-/** Number of hours (optional). null if blank. Capped at 1 year (8760 hours). */
+/** 時間数（任意）。空なら null。1 年（8760 時間）を上限にする。 */
 const optionalHours = (form: FormData, key: string, min: number): number | null => {
   const raw = String(form.get(key) ?? '').trim();
   if (!raw) return null;
@@ -887,7 +887,7 @@ export async function saveContinuityPlan(form: FormData) {
   let f: PlanFields | null = null;
   await run(form, 'continuity', 'continuity', () => { f = planFields(form); }, async (sql) => {
     const p = f!;
-    // Duplicate titles are detected by the DB unique constraint (tenant_id, title).
+    // 同じ名前は DB の一意制約（tenant_id, title）で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.continuity_plans
@@ -899,7 +899,7 @@ export async function saveContinuityPlan(form: FormData) {
   });
 }
 
-/** Edits the content of a plan (test records are facts as of that time, so they are not edited). */
+/** 計画の内容を直す（試験の記録は、その時点の事実なので直さない）。 */
 export async function updateContinuityPlan(form: FormData) {
   let id = '', f: PlanFields | null = null;
   await run(form, 'continuity', 'continuity', () => { id = uuid(form, 'id'); f = planFields(form); }, async (sql) => {
@@ -919,7 +919,7 @@ export async function updateContinuityPlan(form: FormData) {
   });
 }
 
-/** Records a test. The tester is the person who records it. Not recorded against withdrawn plans. */
+/** 試験を記録する。実施者は記録した本人。取り下げた計画には記録しない。 */
 export async function recordContinuityTest(form: FormData) {
   let planId = '', testedOn = '', notes = '';
   let method: (typeof CONTINUITY_METHODS)[number] = 'tabletop';
@@ -936,12 +936,12 @@ export async function recordContinuityTest(form: FormData) {
     evidence = optionalUuid(form, 'evidence_id');
   }, async (sql) => {
     if (testedOn > todayJst()) return 'future_tested';
-    // Read the plan with a share lock (prevents it being withdrawn right after the check and a test getting attached to a withdrawn plan).
+    // 計画を共有ロックで読む（確かめた直後に取り下げられて、取り下げた計画に試験が付くのを防ぐ）。
     const plan = await sql`
       SELECT 1 FROM app.continuity_plans
        WHERE tenant_id = app.current_tenant() AND id = ${planId}::uuid AND status = 'active' FOR SHARE`;
     if (plan.length === 0) return 'not_found';
-    // Evidence must exist and not be deleted (controls aren't linked, so pass null).
+    // 証跡は在って削除されていないものだけ（統制は結ばないので null を渡す）。
     if (!(await legalRefsExist(sql, null, evidence))) return 'ref_unavailable';
     await sql`
       INSERT INTO app.continuity_tests
@@ -951,7 +951,7 @@ export async function recordContinuityTest(form: FormData) {
   });
 }
 
-/** Withdraws a plan (does not delete it; test records are kept). */
+/** 計画を取り下げる（消さない。試験の記録は残る）。 */
 export async function retireContinuityPlan(form: FormData) {
   let id = '';
   await run(form, 'continuity', 'continuity', () => { id = uuid(form, 'id'); }, async (sql) => {
@@ -962,7 +962,7 @@ export async function retireContinuityPlan(form: FormData) {
   });
 }
 
-/** Restores a withdrawn plan. */
+/** 取り下げた計画を戻す。 */
 export async function reactivateContinuityPlan(form: FormData) {
   let id = '';
   await run(form, 'continuity', 'continuity', () => { id = uuid(form, 'id'); }, async (sql) => {
@@ -973,9 +973,9 @@ export async function reactivateContinuityPlan(form: FormData) {
   });
 }
 
-// ---- Technical vulnerabilities (A.8.8) ----------------------------------------------------------
-// Detected -> in progress -> resolved, or false positive. Closed records are not reopened (a recurrence is a new record).
-// There is no "accepted without fixing" state (acceptance is handled in the risk register; design decision 2026-09-12).
+// ---- 技術的脆弱性（A.8.8） ----------------------------------------------------------
+// 検知 → 対応中 → 対処済み、または 誤検知。閉じたものは戻さない（再発は新しい記録）。
+// 直さずに受け入れる状態は置かない（受け入れるならリスク台帳で扱う。2026-09-12 goto-twin 決定）。
 const VULN_SOURCES = ['scan', 'advisory', 'report', 'pentest', 'other'] as const;
 const VULN_SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 
@@ -997,13 +997,13 @@ export async function saveVulnerability(form: FormData) {
     if (detectedOn > todayJst()) return 'future_detected';
     if (dueDate && dueDate < detectedOn) return 'due_before_detected';
     if (asset) {
-      // Read the asset with a share lock (prevents it being retired right after the check and a link to a retired asset).
+      // 資産を共有ロックで読む（確かめた直後に廃止されて、廃止した資産に結ばれるのを防ぐ）。
       const a = await sql`
         SELECT 1 FROM app.assets
          WHERE tenant_id = app.current_tenant() AND id = ${asset}::uuid AND status = 'active' FOR SHARE`;
       if (a.length === 0) return 'ref_unavailable';
     }
-    // Duplicate open records (same identifier, same asset) are detected by a DB unique index.
+    // 開いている記録の重複（同じ識別子・同じ資産）は DB の一意索引で判定する。
     const inserted = await unlessDuplicate(sql, async (sp) => {
       await sp`
         INSERT INTO app.vulnerabilities
@@ -1016,8 +1016,8 @@ export async function saveVulnerability(form: FormData) {
 }
 
 /**
- * Advances the status: detected -> in progress, or close (from detected or in progress) as resolved or false positive.
- * The closed date is today (JST). A false positive requires a reason (the DB CHECK also refuses). Closed records cannot be advanced.
+ * 状態を進める。検知 → 対応中、または（検知・対応中から）対処済み・誤検知で閉じる。
+ * 閉じた日は今日（JST）。誤検知は理由が要る（DB の CHECK でも拒否）。閉じたものは進められない。
  */
 export async function progressVulnerability(form: FormData) {
   let id = '', note = '';
@@ -1041,9 +1041,9 @@ export async function progressVulnerability(form: FormData) {
   });
 }
 
-// ---- Change requests and approval (A.8.32) ------------------------------------------------------
-// Request -> approve/reject (top management only, not the requester; written by app.decide_change_request) -> implement. Can be cancelled while requested or after approval.
-// State transitions, decision fields, and post-approval content are guarded by DB triggers. We check first here only to return the rejection reason in words the user understands.
+// ---- 変更の申請と承認（A.8.32） ------------------------------------------------------
+// 申請 → 承認・却下（経営層だけ・申請者以外。app.decide_change_request が書く）→ 実施。申請中・承認後は取りやめできる。
+// 状態の遷移・判断の欄・承認後の中身は DB のトリガが守る。ここでは拒否の理由を利用者に分かる言葉で返すために先に確かめる。
 const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 
 type ChangeFields = {
@@ -1060,7 +1060,7 @@ const changeFields = (form: FormData): ChangeFields => ({
   plannedOn: optionalDate(form, 'planned_on'),
 });
 
-/** Whether the asset is usable. Read with a share lock (prevents it being retired right after the check and a link to a retired asset). */
+/** 資産が使える状態か。共有ロックで読む（確かめた直後に廃止されて、廃止した資産に結ばれるのを防ぐ）。 */
 async function assetUsable(sql: TransactionSql, asset: string | null): Promise<boolean> {
   if (!asset) return true;
   const a = await sql`
@@ -1082,7 +1082,7 @@ export async function requestChange(form: FormData) {
   });
 }
 
-/** Edits the request content. Only possible while requested (so it doesn't drift from what was approved/rejected; DB triggers also refuse). */
+/** 申請の中身を直す。直せるのは申請中だけ（承認・却下した中身とずれないように。DB のトリガでも拒否する）。 */
 export async function updateChangeRequest(form: FormData) {
   let id = '', f: ChangeFields | null = null;
   await run(form, 'changes', 'change', () => { id = uuid(form, 'id'); f = changeFields(form); }, async (sql) => {
@@ -1092,7 +1092,7 @@ export async function updateChangeRequest(form: FormData) {
        WHERE tenant_id = app.current_tenant() AND id = ${id}::uuid FOR UPDATE`;
     if (!cur) return 'not_found';
     if (cur.status !== 'requested') return 'change_not_editable';
-    // Links that aren't changing are not checked (so other fields can still be edited even if a linked asset was retired afterward).
+    // 変えない結び付きは確かめない（結んだ後に資産を廃止しても、他の欄を直せるように）。
     if (c.asset !== cur.asset_id && !(await assetUsable(sql, c.asset))) return 'ref_unavailable';
     await sql`
       UPDATE app.change_requests
@@ -1103,7 +1103,7 @@ export async function updateChangeRequest(form: FormData) {
   });
 }
 
-/** Approve/reject. Top management only, not the requester, only while requested. Rejection requires a reason. Written by the DB function (which also links the approval record). */
+/** 承認・却下。経営層だけ・申請者以外・申請中だけ。却下には理由が要る。書くのは DB の関数（承認の記録も結ぶ）。 */
 export async function decideChangeRequest(form: FormData) {
   let id = '', approve = true, note = '';
   await run(form, 'changes', 'change', () => {
@@ -1124,7 +1124,7 @@ export async function decideChangeRequest(form: FormData) {
   });
 }
 
-/** Records that an approved change was implemented. The implementer is the person who records it, and the timestamp is now. */
+/** 承認済みの変更を実施したことを残す。実施者は記録した本人、実施日時は今。 */
 export async function implementChange(form: FormData) {
   let id = '', result = '';
   await run(form, 'changes', 'change', () => { id = uuid(form, 'id'); result = text(form, 'result_note'); }, async (sql) => {
@@ -1137,7 +1137,7 @@ export async function implementChange(form: FormData) {
   });
 }
 
-/** Cancels a request (only while requested or after approval; does not delete it). */
+/** 申請を取りやめる（申請中・承認後だけ。消さない）。 */
 export async function cancelChange(form: FormData) {
   let id = '';
   await run(form, 'changes', 'change', () => { id = uuid(form, 'id'); }, async (sql) => {

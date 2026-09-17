@@ -3,7 +3,7 @@ import { firstParam, pageParam } from '../src/lib/searchParams';
 
 describe('クエリの均し', () => {
   it('同じ名前が複数回来ても落ちない（?q=a&q=b は配列で届く）', () => {
-    // A place that would 500 because .trim() does not exist if we assumed a string.
+    // 文字列だと決め打ちすると .trim() が無くて 500 になる場所。
     expect(firstParam(['a', 'b'])).toBe('a');
     expect(firstParam('a')).toBe('a');
     expect(firstParam(undefined)).toBe('');
@@ -18,6 +18,6 @@ describe('クエリの均し', () => {
     expect(pageParam('0')).toBe(1);
     expect(pageParam('-5')).toBe(1);
     expect(pageParam('99999999999')).toBe(100_000);
-    expect(pageParam('1e9')).toBe(1); // parseInt returns 1
+    expect(pageParam('1e9')).toBe(1); // parseInt は 1 を返す
   });
 });

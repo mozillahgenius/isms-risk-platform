@@ -1,12 +1,12 @@
--- 0039 app: Home for LLM competency summaries (part of screen 5, "competency management")
+-- 0039 app: LLM力量サマリーの受け皿(画面⑤「力量管理」の一部)
 --
--- User decision (2026-09-02): the LLM call itself is not implemented this time. It is to be implemented
--- later by connecting to a local LLM once one is introduced. This migration
--- only prepares the data schema for storing generated results (a home for them).
--- The generation trigger (a manual button action by the secretariat only, as decided by the user), the actual LLM
--- call logic, and the "generate" action on screen will be implemented separately when the local LLM is introduced.
+-- ユーザー決定(2026-09-02): LLM呼び出し自体は今回実装しない。将来ローカルLLMを
+-- 導入する想定で、そちらに接続する形で改めて実装する。本マイグレーションは
+-- 生成結果を保存するためのデータスキーマのみを用意する(受け皿)。
+-- 生成トリガー(事務局の手動ボタン操作のみ、とユーザー決定済み)・実際のLLM
+-- 呼び出しロジック・画面上の「生成」操作は、ローカルLLM導入時に別途実装する。
 --
--- For the same reason as 0037/0038, RLS is set up individually here.
+-- 0037/0038と同じ理由でRLSはここで個別設定する。
 
 CREATE TABLE app.competency_summaries (
   id              uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -14,12 +14,12 @@ CREATE TABLE app.competency_summaries (
   member_id       uuid NOT NULL,
   generated_at    timestamptz NOT NULL DEFAULT now(),
   summary_text    text NOT NULL,
-  -- References to the sources (training history, fulfillment status, results of assigned measures, etc.). Corresponds to
-  -- source_data_refs in the spec. A JSON array so that multiple references can be held.
+  -- 根拠元(教育受講歴・充足状況・担当施策実績等)への参照。仕様書の
+  -- source_data_refsに対応。JSON配列で複数の参照を持てるようにする。
   source_data_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
   model_ref       text NOT NULL,
-  -- Spec C4: "has a human-confirmed flag". A guardrail so LLM output is not used as-is in HR
-  -- evaluations (the assumed practice is that unconfirmed summaries are reference information only).
+  -- 仕様書C4「人による確認済みフラグを持つ」。LLM出力をそのまま人事評価に
+  -- 使わないためのガードレール(未確認のサマリーは参考情報止まりとする運用を想定)。
   confirmed_by    uuid,
   confirmed_at    timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
@@ -27,10 +27,10 @@ CREATE TABLE app.competency_summaries (
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, member_id) REFERENCES app.users(tenant_id, id),
   FOREIGN KEY (tenant_id, confirmed_by) REFERENCES app.users(tenant_id, id),
-  -- Require both to match, to prevent confirmed_at alone being set (a confirmed state with an unknown confirmer).
-  -- confirmed_by IS NULL OR confirmed_at IS NOT NULL alone cannot prevent the reverse pattern of setting only
-  -- confirmed_at and leaving confirmed_by NULL
-  -- (Codex review finding, 2026-09-02).
+  -- confirmed_at単独設定(確認者不明の確認済み状態)を防ぐため両方一致を要求する。
+  -- confirmed_by IS NULL OR confirmed_at IS NOT NULL だけだと、confirmed_atのみ
+  -- 設定してconfirmed_byをNULLのままにする逆パターンを防げない
+  -- (Codexレビュー2026-09-02指摘)。
   CHECK ((confirmed_by IS NULL) = (confirmed_at IS NULL))
 );
 

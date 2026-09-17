@@ -105,10 +105,10 @@ export async function syncElearningCompletions(form: FormData) {
     let deferred = 0;
     for (const row of rows) {
       if (row.completion_status === 'incomplete') {
-        // The response cannot tell which year's revocation this is, so hold it without applying it to records.
-        // The decision rule and rationale live in invalidationTarget in lib/trainingSync.ts
-        // and are tested in isolation. **Evaluated records are never touched here** (no UPDATE is written).
-        // Only check whether the course exists. The year cannot be used for the decision, so it is not fetched either.
+        // どの年度の取消かは応答から判定できないので、記録には当てずに保留する。
+        // 判定規則と根拠は lib/trainingSync.ts の invalidationTarget に置き、
+        // 単体で検査している。**ここでは評価済みの記録に一切触れない**（UPDATE を書かない）。
+        // 講座の有無だけを見る。年度は判定に使えないので取得もしない。
         const known = await sql<{ one: number }[]>`
           SELECT 1 AS one FROM app.trainings
            WHERE tenant_id=app.current_tenant()
@@ -118,12 +118,12 @@ export async function syncElearningCompletions(form: FormData) {
         if (invalidationTarget(known.length > 0).kind === 'deferred') deferred += 1;
         continue;
       }
-      // There is only one import-source endpoint and token per deployment, and the response has no tenant identifier,
-      // so code cannot determine "whether this response covers only this tenant".
-      // Instead, only rows that could be matched to users in the current tenant pass. app.users is
-      // narrowed by tenant context, and training_records has a composite FK on (tenant_id,user_id),
-      // so records for other tenants' learners cannot be created (pinned by tests/management_workflows.sh).
-      // Course rows are also only created after this matching.
+      // 取込元のエンドポイントとトークンは配備単位で1組しか無く、応答にテナント識別子が
+      // 無いため、「この応答がこのテナントの分だけか」はコードでは判定できない。
+      // 代わりに、現テナントに居る利用者へ名寄せできた行だけを通す。app.users は
+      // テナント文脈で絞られ、training_records は (tenant_id,user_id) の複合FKなので、
+      // 他テナントの受講者の記録は作れない（tests/management_workflows.sh で固定）。
+      // 講座行の作成もこの名寄せの後にしか起きない。
       const users = await sql<{ id: string }[]>`
         SELECT id FROM app.users
          WHERE status = 'active' AND lower(email::text) = ${row.email}

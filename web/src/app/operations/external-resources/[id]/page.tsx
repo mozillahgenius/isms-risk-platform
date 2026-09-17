@@ -101,7 +101,7 @@ export default async function QuestionnairePage({ params, searchParams }: { para
               <div key={question.id} className="rounded-[var(--radius)] border border-[var(--border)] p-3">
                 <div className="text-[13px]">
                   問{question.ordinal}. {question.prompt}
-                  {question.required ? <span className="ms-1 text-[11px] text-[var(--badge-danger-fg)]">必須</span> : null}
+                  {question.required ? <span className="ml-1 text-[11px] text-[var(--badge-danger-fg)]">必須</span> : null}
                 </div>
                 <div className="mt-1 text-[11px] text-[var(--muted)]">
                   {ANSWER_TYPE_LABEL[question.answer_type] ?? question.answer_type}

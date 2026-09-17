@@ -38,7 +38,7 @@ func TestCollectUsesOnlyDefinitionItemsAndMapsFixture(t *testing.T) {
 		"off_premise":                {{"source": "enrollment"}},
 	}}
 	snapshot, err := Collect(context.Background(), d, runner, Metadata{
-		DeviceID: "d0000000-0000-4000-8000-000000000001", ExternalID: "serial", AgentVer: "test",
+		DeviceID: "00000000-0000-4000-8000-000000000007", ExternalID: "serial", AgentVer: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestCollectTreatsCompleteBuiltinProtectionAsEDRRunning(t *testing.T) {
 	runner.Rows["edr_running"] = []map[string]any{}
 	runner.Rows["edr_vendor"] = []map[string]any{{"vendor": "none"}}
 	snapshot, err := Collect(context.Background(), d, runner, Metadata{
-		DeviceID: "d0000000-0000-4000-8000-000000000001", ExternalID: "serial", AgentVer: "test",
+		DeviceID: "00000000-0000-4000-8000-000000000007", ExternalID: "serial", AgentVer: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestCollectPromotionIsOrderIndependent(t *testing.T) {
 	d.Items = ordered
 
 	snapshot, err := Collect(context.Background(), d, runner, Metadata{
-		DeviceID: "d0000000-0000-4000-8000-000000000001", ExternalID: "serial", AgentVer: "test",
+		DeviceID: "00000000-0000-4000-8000-000000000007", ExternalID: "serial", AgentVer: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestCollectFailsClosedForStoppedOrIncompleteBuiltinProtection(t *testing.T)
 			runner.Rows["edr_vendor"] = []map[string]any{{"vendor": "none"}}
 			runner.Rows["builtin_protection"] = []map[string]any{test.row}
 			snapshot, err := Collect(context.Background(), d, runner, Metadata{
-				DeviceID: "d0000000-0000-4000-8000-000000000001", ExternalID: "serial", AgentVer: "test",
+				DeviceID: "00000000-0000-4000-8000-000000000007", ExternalID: "serial", AgentVer: "test",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -222,11 +222,11 @@ func TestAdminAccountDefinitionExclusions(t *testing.T) {
 			Names: []string{"root"}, Prefixes: []string{"_"},
 		},
 	}
-	rows, err := parseNative(item, []string{"GroupMembership: root alice remoteaccess _mbsetupuser"})
+	rows, err := parseNative(item, []string{"GroupMembership: root service-user remoteaccess _mbsetupuser"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0]["username"] != "alice" || rows[1]["username"] != "remoteaccess" {
+	if len(rows) != 2 || rows[0]["username"] != "service-user" || rows[1]["username"] != "remoteaccess" {
 		t.Fatalf("definition exclusions were not applied: %+v", rows)
 	}
 }
@@ -334,7 +334,7 @@ func TestBuiltinProtectionParserRecordsXProtectEvidence(t *testing.T) {
 		"157\n",
 		"assessments enabled\n",
 		"System Integrity Protection status: enabled.\n",
-		"2 extension(s)\n*\t*\tTEAM\tcom.example.vpn.network-extension (1.0.0)\tExample VPN Network Extension\t[activated enabled]\n",
+		"2 extension(s)\n*\t*\tTEAM\tio.tailscale.ipn.macsys.network-extension (1.102.2)\tTailscale Network Extension\t[activated enabled]\n",
 	})
 	if err != nil {
 		t.Fatal(err)

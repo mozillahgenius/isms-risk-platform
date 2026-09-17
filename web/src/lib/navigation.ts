@@ -21,7 +21,8 @@ export type NavigationSection = {
 };
 
 const ISMS_ROUTE_PREFIXES = ['/', '/steps', '/wizard', '/organization', '/graph', '/iso27001'];
-const SHARED_ROUTE_PREFIXES = ['/operations', '/incidents', '/catalog', '/policies', '/settings', '/organization', '/cost', '/competency', '/training'];
+// /analysis(AI分析)は両モードの共通画面。ISMS モードでは ISMS タグの項目だけで算出する(2026-09-13)。
+const SHARED_ROUTE_PREFIXES = ['/operations', '/incidents', '/catalog', '/policies', '/settings', '/organization', '/cost', '/competency', '/training', '/analysis'];
 
 /**
  * URL is the source of truth for the shell mode.  This deliberately has no
@@ -41,8 +42,8 @@ export function resolveAppMode(pathname: string, search = ''): AppMode {
 }
 
 /**
- * While showing ISMS, prefer ISO 27001 over a different framework selection left in the URL.
- * Kept as a pure function usable in server components as well, so the display and the fetch target match.
+ * ISMS 表示中は、URL に残った別枠組み指定より ISO 27001 を優先する。
+ * サーバーコンポーネントでも使える純粋関数にして、表示と取得対象を一致させる。
  */
 export function frameworkForMode(
   framework: string | string[] | undefined,
@@ -138,6 +139,7 @@ export const ISMS_NAVIGATION: NavigationSection[] = [
     collapsible: true,
     items: [
       { href: '/', label: '進捗と次の一手', also: ['/wizard'] },
+      { href: '/analysis', label: 'AI分析' },
     ],
     children: [
       {

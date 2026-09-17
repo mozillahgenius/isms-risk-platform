@@ -14,21 +14,21 @@ function snapshot(over: Partial<CatalogSnapshot> = {}): CatalogSnapshot {
   return {
     dom: { version: '2026.1' },
     frameworks: [
-      { key: 'IPO-KARTE', name_ja: 'サンプル統制チェックカルテ（架空）', control_count: 2 },
+      { key: 'IPO-KARTE', name_ja: '上場準備 統制チェックカルテ', control_count: 2 },
       { key: 'ISO27001:2022', name_ja: 'ISO/IEC 27001:2022', control_count: 0 },
     ],
     controls: [
-      { id: 'c1', code: 'A-10-10-10(1)', title_ja: '統制1', theme: 'サンプル大項目 / サンプル中項目 / サンプル小項目', framework_key: 'IPO-KARTE' },
-      { id: 'c2', code: 'A-10-10-10(2)', title_ja: '統制2', theme: 'サンプル大項目 / サンプル中項目 / サンプル小項目', framework_key: 'IPO-KARTE' },
+      { id: 'c1', code: 'A-10-10-10(1)', title_ja: '統制1', theme: '運営基盤 / 機関設計 / 取締役会', framework_key: 'IPO-KARTE' },
+      { id: 'c2', code: 'A-10-10-10(2)', title_ja: '統制2', theme: '運営基盤 / 機関設計 / 取締役会', framework_key: 'IPO-KARTE' },
     ],
     risks: [
       {
         id: 'r1',
-        domain: 'サンプル部門A（Phase1）',
-        theme: 'サンプルテーマ',
-        measure: 'サンプル施策',
+        domain: '経理・税務（Phase1）',
+        theme: 'クラウド会計ソフト活用',
+        measure: '仕訳入力・チェック',
         frame: 'スピード',
-        summary: 'サンプルのリスク要約',
+        summary: '操作ミスで月次損益が不正確になる',
       },
     ],
     policies: [{ key: 'p01_basic', title_ja: '情報セキュリティ基本方針' }],
@@ -42,12 +42,12 @@ function snapshot(over: Partial<CatalogSnapshot> = {}): CatalogSnapshot {
 
 describe('分類の割り方', () => {
   it('統制の theme を段に割る', () => {
-    expect(splitTheme('サンプル大項目 / サンプル中項目 / サンプル小項目')).toEqual(['サンプル大項目', 'サンプル中項目', 'サンプル小項目']);
+    expect(splitTheme('運営基盤 / 機関設計 / 取締役会')).toEqual(['運営基盤', '機関設計', '取締役会']);
     expect(splitTheme('単一')).toEqual(['単一']);
     expect(splitTheme('')).toEqual([]);
   });
 
-  // catalog.controls.theme is nullable in the DB. If this breaks, /graph and control details return 500.
+  // catalog.controls.theme は DB で NULL 可。ここが落ちると /graph と統制詳細が 500 になる。
   it('theme が NULL・空白のみでも落ちず、分類なし（空配列）として扱う', () => {
     expect(splitTheme(null)).toEqual([]);
     expect(splitTheme(undefined)).toEqual([]);
@@ -56,8 +56,8 @@ describe('分類の割り方', () => {
   });
 
   it('リスクの domain を部門と Phase に割る。形が違えば部門だけ', () => {
-    expect(splitDomain('サンプル部門A（Phase1）')).toEqual({ dept: 'サンプル部門A', phase: 'Phase1' });
-    expect(splitDomain('サンプル部門B（Phase1）')).toEqual({ dept: 'サンプル部門B', phase: 'Phase1' });
+    expect(splitDomain('経理・税務（Phase1）')).toEqual({ dept: '経理・税務', phase: 'Phase1' });
+    expect(splitDomain('総務・法務（Phase1）')).toEqual({ dept: '総務・法務', phase: 'Phase1' });
     expect(splitDomain('形が違う')).toEqual({ dept: '形が違う', phase: null });
   });
 });
@@ -66,31 +66,31 @@ describe('図のモデル', () => {
   it('同じ分類を共有する統制は、同じ中間ノードにぶら下がる', () => {
     const m = buildGraphModel(snapshot());
     const themeNodes = m.pyramidNodes.filter((n) => decodeNodeId(n.id)?.key.startsWith('theme'));
-    // The 2 controls share the same theme, so one per level = 3 nodes is enough
+    // 2 件の統制は theme が同じなので、段ごとに 1 つずつ = 3 ノードで足りる
     expect(themeNodes).toHaveLength(3);
   });
 
   it('分類の無い統制も図から消さず、フレームワーク直下に付ける', () => {
     const m = buildGraphModel(
       snapshot({
-        frameworks: [{ key: 'IPO-KARTE', name_ja: 'サンプル統制チェックカルテ（架空）', control_count: 2 }],
+        frameworks: [{ key: 'IPO-KARTE', name_ja: '上場準備 統制チェックカルテ', control_count: 2 }],
         controls: [
-          { id: 'c1', code: 'A-1', title_ja: '分類あり', theme: 'サンプル大項目 / サンプル中項目', framework_key: 'IPO-KARTE' },
+          { id: 'c1', code: 'A-1', title_ja: '分類あり', theme: '運営基盤 / 機関設計', framework_key: 'IPO-KARTE' },
           { id: 'c2', code: 'A-2', title_ja: '分類なし', theme: null, framework_key: 'IPO-KARTE' },
         ],
       }),
     );
-    // No rows have disappeared (dropping them would make the screen's counts disagree with the DB)
+    // 行が消えていない（消すと画面の件数が DB と食い違う）
     const controls = m.pyramidNodes.filter((n) => decodeNodeId(n.id)?.type === 'control');
     expect(controls).toHaveLength(2);
     expect(controls.map((n) => n.title)).toContain('A-2 分類なし');
 
-    // A control without a classification attaches directly under the framework, without a theme intermediate node
+    // 分類なしの統制は、theme の中間ノードを介さずフレームワーク直下に付く
     const fid = m.pyramidNodes.find((n) => decodeNodeId(n.id)?.type === 'framework')!.id;
     const cid = controls.find((n) => n.title === 'A-2 分類なし')!.id;
     expect(m.pyramidLinks.some((l) => l.parent === fid && l.child === cid)).toBe(true);
 
-    // Do not invent an intermediate node representing "no classification" (do not add a nonexistent classification to the diagram)
+    // 分類なしを表す中間ノードを勝手に作らない（在りもしない分類を図に足さない）
     const themeNodes = m.pyramidNodes.filter((n) => decodeNodeId(n.id)?.key.startsWith('theme'));
     expect(themeNodes).toHaveLength(2);
   });
@@ -99,7 +99,7 @@ describe('図のモデル', () => {
     const m = buildGraphModel(snapshot());
     expect(m.realLinkCount).toBeGreaterThan(0);
     expect(m.linkCount).toBeGreaterThan(m.realLinkCount);
-    // Derived edges always carry a label showing they are "derived"
+    // 導出した辺には必ず「導出」と分かるラベルが付く
     const derivedEdges = m.pyramidLinks.filter((l) => l.section?.startsWith('導出'));
     expect(derivedEdges.length).toBeGreaterThan(0);
     const realEdges = m.pyramidLinks.filter((l) => l.section?.startsWith('実関係'));
@@ -143,18 +143,18 @@ describe('図のモデル', () => {
   });
 
   it('同じ辺を重ねない（分類の辺が、その分類に属する行の数だけ増えない）', () => {
-    // Two controls share the same theme. There should be only one classification edge for each.
+    // 同じ theme を共有する統制が 2 件ある。分類の辺はそれぞれ 1 本だけであるべき。
     const m = buildGraphModel(snapshot());
     const keys = m.pyramidLinks.map((l) => `${l.parent}|${l.child}|${l.section}`);
     expect(new Set(keys).size).toBe(keys.length);
 
-    // Adding more rows does not add classification edges (only leaf edges increase).
+    // 件数が増えても分類の辺は増えない（増えるのは葉の辺だけ）。
     const base = snapshot();
     const more = buildGraphModel({
       ...base,
       controls: [
         ...base.controls,
-        { id: 'c3', code: 'A-10-10-10(3)', title_ja: '統制3', theme: 'サンプル大項目 / サンプル中項目 / サンプル小項目', framework_key: 'IPO-KARTE' },
+        { id: 'c3', code: 'A-10-10-10(3)', title_ja: '統制3', theme: '運営基盤 / 機関設計 / 取締役会', framework_key: 'IPO-KARTE' },
       ],
       frameworks: base.frameworks.map((f) => (f.key === 'IPO-KARTE' ? { ...f, control_count: 3 } : f)),
     });
@@ -193,7 +193,7 @@ describe('図のモデル', () => {
       calendar: [],
       empties: { framework_mappings: 0, risk_template_controls: 0, checks: 0, connector_manifests: 0 },
     });
-    expect(m.pyramidNodes.length).toBeGreaterThan(0); // The DOM and the sections remain
+    expect(m.pyramidNodes.length).toBeGreaterThan(0); // DOM と区分は残る
     expect(m.graphLinks.length).toBeGreaterThan(0);
   });
 });

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Acceptance for the checker. Goes as far as **actually failing when things are broken**.
+# チェック機能（checker）の受入。**壊した状態で実際に落ちること**まで見る。
 #
-# What it checks:
-#   1. A tenant can be created (via the provisioner) / the 12 standard policies are expanded
-#   2. **The DB does not accept** an unverified check as pass
-#   3. A --skip-verify run passes nothing (all inconclusive)
-#   4. A normal run passes everything, leaving negative_verified and digest
-#   5. Creating a real violation yields fail (reverting it returns to pass)
-#   6. **The fixture does not pollute the target DB** (business data matches before and after the run)
+# 見るもの:
+#   1. テナントを作れる（provisioner 経由）／標準規程 12 本が展開される
+#   2. 確認できていないチェックは pass として **DB が受け付けない**
+#   3. --skip-verify の実行は 1 本も pass しない（全件 inconclusive）
+#   4. 通常の実行は全件 pass になり、negative_verified と digest が残る
+#   5. 実際に違反を作ると fail になる（作った違反を戻すと pass に戻る）
+#   6. **fixture は対象 DB を汚さない**（実行の前後で業務データが一致する）
 #
-# DB used: ISMS_CHECKER_TEST_DB (default isms_checker_test). It is recreated, so existing data is lost.
+# 使う DB: ISMS_CHECKER_TEST_DB（既定 isms_checker_test）。作り直すので既存データは消える。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +38,7 @@ trap cleanup EXIT
 
 printf '\n\033[36m== checker の受入\033[0m\n'
 
-# ---- 0. shape check of catalog SQL (no DB) -----------------------------------
+# ---- 0. カタログ SQL の形の検査（DB を使わない）------------------------------
 python3 "$ROOT/tests/checker_sql_guard_test.py" || die "カタログ SQL の形の検査"
 
 PGUSER="$ADMIN_PGUSER" dropdb --if-exists "$DB" >/dev/null
@@ -51,8 +51,8 @@ PGUSER="$ADMIN_PGUSER" psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$ROOT/db/seeds/00
 PGUSER="$ADMIN_PGUSER" ISMS_DB="$DB" python3 "$ROOT/db/seeds/0005_agent_definition.py" >/dev/null
 PGUSER="$ADMIN_PGUSER" psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$ROOT/db/seeds/0006_phase3_device_checks.sql" >/dev/null
 
-# DB creation, migrations and seeds run as admin; acceptance operations run as the real app role.
-# So that superuser privilege bypass does not falsely pass the "read/write/delete denied" checks.
+# DB作成・migration・seed は管理者、受入操作は実アプリロールで行う。
+# superuser の権限バイパスで「読み書き削除拒否」を誤って合格させない。
 export PGUSER="${ISMS_APP_PGUSER:-app_rw}"
 
 checker() {
@@ -63,15 +63,15 @@ checker() {
   fi
 }
 
-# ---- 1. create a tenant -----------------------------------------------------
+# ---- 1. テナントを作る -------------------------------------------------------
 OUT=$(ISMS_DB="$DB" python3 "$ROOT/scripts/new_tenant.py" \
         --name '検査用' --domain 'test.invalid' \
         --admin-email 'admin@test.invalid' --admin-name '管理者')
 TOKEN=$(printf '%s\n' "$OUT" | tail -1)
 EXPANDED=$(printf '%s\n' "$OUT" | sed -n 's/^規程の展開: \([0-9]*\) 本$/\1/p')
-# Do not hard-code the expected number. The spec is to expand as many standard policies as the
-# catalog has, and the count depends on the seed set (this test uses 0001-0006).
-# Hard-coding it makes this test fail just by adding a policy (it did fail going 12 -> 28).
+# 期待値を数値で埋め込まない。catalog に在る標準規程の数だけ展開されるのが仕様で、
+# 本数は seed の構成（この試験は 0001〜0006 まで）で変わる。
+# 埋め込むと、規程を足しただけでこの試験が落ちる（実際 12 → 28 で落ちた）。
 WANT_POL=$(psql -At -d "$DB" -c "SELECT count(*) FROM catalog.policies_default")
 [ "$EXPANDED" = "$WANT_POL" ] \
   || die "標準規程の展開が catalog の本数と違う（展開 ${EXPANDED} / catalog ${WANT_POL}）"
@@ -79,16 +79,16 @@ WANT_POL=$(psql -At -d "$DB" -c "SELECT count(*) FROM catalog.policies_default")
 [ ${#TOKEN} -ge 32 ] || die "トークンが短すぎる"
 pass "テナントを作れる（標準規程 ${EXPANDED} 本を展開＝catalog の全数）"
 
-ctx() { # $1=sql  establish the tenant context, run one statement, return only the last value
-  # Without -q, BEGIN / COMMIT command tags get mixed in and tail -1 yields 'COMMIT'.
+ctx() { # $1=sql  テナント文脈を確立して 1 文流し、最後の値だけ返す
+  # -q を付けないと BEGIN / COMMIT のコマンドタグが混ざり、tail -1 が 'COMMIT' になる。
   psql -Atq -d "$DB" -c "BEGIN; SELECT app.set_tenant_context('$TOKEN'); $1; COMMIT;" 2>&1
 }
 
-receipt() { # issue a (7) receipt ID covering every check in the current catalog
+receipt() { # 現在の catalog 全件を対象にした⑦の受付IDを発行する
   ctx "SELECT app.accept_verification_receipt(ARRAY(SELECT key FROM catalog.checks ORDER BY key), 'checker-test')" | tail -1
 }
 
-# ---- 2. a run cannot start without a receipt ID (negative check) ------------
+# ---- 2. 受付IDなしでは実行を始められない（逆向き検証）------------------------
 BEFORE_RUNS=$(ctx "SELECT count(*) FROM app.check_runs" | tail -1)
 ISMS_DB="$DB" ISMS_CHECKER_VERIFY_DB="$VERIFY_DB" \
   checker --token "$TOKEN" --skip-verify || true
@@ -123,7 +123,7 @@ case "$OUT" in
   *) die "対象外の受付IDで実行記録が通ってしまった: $OUT" ;;
 esac
 
-# ---- 3. (7) receipts are append-only (SELECT / UPDATE / DELETE rejected) -----
+# ---- 3. ⑦の受付は追記だけ（SELECT / UPDATE / DELETE を拒否）-----------------
 RECEIPT_ID=$(receipt)
 [ -n "$RECEIPT_ID" ] || die "検証受付IDを発行できない"
 OUT=$(psql -d "$DB" -v ON_ERROR_STOP=0 2>&1 <<SQL || true
@@ -160,7 +160,7 @@ case "$OUT" in
   *) die "受付レコードを削除できてしまった: $OUT" ;;
 esac
 
-# ---- 4. the DB rejects an unverified pass -----------------------------------
+# ---- 4. 確認していない pass は DB が拒否する ---------------------------------
 OUT=$(psql -d "$DB" -v ON_ERROR_STOP=0 2>&1 <<SQL || true
 BEGIN;
 SELECT app.set_tenant_context('$TOKEN');
@@ -174,7 +174,7 @@ case "$OUT" in
   *) die "確認していない pass が通ってしまった: $OUT" ;;
 esac
 
-# ---- 5. --skip-verify passes nothing ----------------------------------------
+# ---- 5. --skip-verify は 1 本も pass しない ----------------------------------
 ISMS_DB="$DB" ISMS_CHECKER_VERIFY_DB="$VERIFY_DB" \
   checker --token "$TOKEN" --verification-receipt-id "$RECEIPT_ID" --skip-verify || true
 N=$(ctx "SELECT count(*) FROM app.check_runs WHERE result='pass'" | tail -1)
@@ -183,13 +183,13 @@ N=$(ctx "SELECT count(*) FROM app.check_runs WHERE result='inconclusive'" | tail
 [ "$N" = "20" ] || die "inconclusive が 20 件ではない（$N）"
 pass "検証を飛ばすと 1 本も pass しない（全件 inconclusive）"
 
-# ---- 6, first half: fingerprint of business data before the run ------------
+# ---- 6 の前半: 実行前の業務データの指紋 --------------------------------------
 BEFORE=$(ctx "SELECT md5(string_agg(x, '|' ORDER BY x)) FROM (
                 SELECT id::text||coalesce(catalog_key,'') FROM app.policies
                 UNION ALL SELECT id::text||body_md FROM app.policy_versions
                 UNION ALL SELECT id::text||role_key FROM app.memberships) t(x)" | tail -1)
 
-# ---- 6. a normal run passes everything -------------------------------------
+# ---- 6. 通常の実行は全件 pass ------------------------------------------------
 RECEIPT_ID=$(receipt)
 ISMS_DB="$DB" ISMS_CHECKER_VERIFY_DB="$VERIFY_DB" \
   checker --token "$TOKEN" --verification-receipt-id "$RECEIPT_ID" \
@@ -199,7 +199,7 @@ N=$(ctx "SELECT count(*) FROM app.check_runs WHERE result='pass' AND negative_ve
 [ "$N" = "20" ] || die "確認つきの pass が 20 件ではない（$N）"
 pass "通常の実行は全件 pass（negative_verified と digest つき）"
 
-# ---- 6, second half: the target DB is not polluted -------------------------
+# ---- 6 の後半: 対象 DB が汚れていない ----------------------------------------
 AFTER=$(ctx "SELECT md5(string_agg(x, '|' ORDER BY x)) FROM (
                SELECT id::text||coalesce(catalog_key,'') FROM app.policies
                UNION ALL SELECT id::text||body_md FROM app.policy_versions
@@ -207,7 +207,7 @@ AFTER=$(ctx "SELECT md5(string_agg(x, '|' ORDER BY x)) FROM (
 [ "$BEFORE" = "$AFTER" ] || die "checker の実行で業務データが変わった（fixture が対象 DB に漏れている）"
 pass "fixture が対象 DB を汚していない"
 
-# ---- 7. detect a real violation ---------------------------------------------
+# ---- 7. 実際の違反を検出する -------------------------------------------------
 ctx "UPDATE app.policy_versions SET body_md = body_md || E'\n（動かした）'
       WHERE id = (SELECT id FROM app.policy_versions ORDER BY id LIMIT 1)" >/dev/null
 ISMS_DB="$DB" ISMS_CHECKER_VERIFY_DB="$VERIFY_DB" \
@@ -236,8 +236,8 @@ F=$(ctx "SELECT status FROM app.findings WHERE check_key='CHK-CORE-POLICY-003'
 [ "$F" = "retest_passed" ] || die "復旧後の finding が retest_passed ではない: $F"
 pass "復旧後は retest_passed へ進み closed にはしない"
 
-# ---- 7. fingerprint verification (DB trigger) ------------------------------
-# An arbitrary 64-digit value cannot claim "verified".
+# ---- 7. 指紋の照合（DB のトリガ）--------------------------------------------
+# 適当な 64 桁で「確認済み」を名乗れないこと。
 OUT=$(psql -d "$DB" -v ON_ERROR_STOP=0 2>&1 <<SQL || true
 BEGIN;
 SELECT app.set_tenant_context('$TOKEN');
@@ -253,7 +253,7 @@ case "$OUT" in
   *) die "でたらめな指紋が通ってしまった: $OUT" ;;
 esac
 
-# If a check's content is rewritten after verification, that fingerprint no longer passes.
+# 確認したあとにチェックの中身を書き換えたら、その指紋はもう通らないこと。
 D=$(psql -Atq -d "$DB" -c "SELECT catalog.check_digest('CHK-CORE-ROLE-001')")
 PGUSER="$ADMIN_PGUSER" psql -q -d "$DB" -c "SET ROLE schema_owner; UPDATE catalog.checks
   SET expect = '{\"max_violations\": 5}'::jsonb WHERE key='CHK-CORE-ROLE-001'" >/dev/null

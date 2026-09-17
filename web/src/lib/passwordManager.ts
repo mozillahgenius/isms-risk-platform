@@ -5,12 +5,10 @@ import { request as httpsRequest } from 'node:https';
 import { lstat, open } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { DERIVED_PASSWORD_RELEASE_LOCK, PASSWORD_STATUS_EVIDENCE_LOCK } from './passwordReleaseLock';
+import { IB_PASSWORD_RELEASE_LOCK, PASSWORD_STATUS_EVIDENCE_LOCK } from './passwordReleaseLock';
 
 export const VAULTWARDEN_PRODUCT_NAME = 'Vaultwarden 1.37.2（Bitwarden互換・非公式サーバー）';
 export const VAULTWARDEN_ALIVE_PATH = '/alive';
-// Conventional status-file location for a Vaultwarden deployment. It is pinned on purpose:
-// PASSWORD_MANAGER_STATUS_FILE may only point at this exact path (no traversal, no symlinks).
 const DEFAULT_STATUS_FILE = '/var/lib/vaultwarden/status/management-status.json';
 const MAX_STATUS_FILE_BYTES = 8_192;
 
@@ -30,10 +28,10 @@ const PASSWORD_MANAGER_PRODUCTS = {
     upstreamCommit: '46d71107f5094460dd5ecbe1dbac6e6c71e5189a',
     requiresCutoverEvidence: false,
   },
-  'vaultwarden-derived': {
-    provider: 'vaultwarden-derived',
-    productName: 'Custom Password Server（Vaultwarden派生・Bitwardenクライアント互換）',
-    provenance: '自組織で管理するVaultwarden派生候補です。実行中buildと切替ゲートの証跡が一致するまで、本番派生サーバーとは表示しません。',
+  'intelligent-beast-vaultwarden-derived': {
+    provider: 'intelligent-beast-vaultwarden-derived',
+    productName: 'Example Organization Password Server（Vaultwarden派生・Bitwardenクライアント互換）',
+    provenance: 'Example OrganizationのVaultwarden派生候補です。実行中buildと切替ゲートの証跡が一致するまで、本番派生サーバーとは表示しません。',
     healthPaths: [VAULTWARDEN_ALIVE_PATH],
     upstreamRef: '1.37.2',
     upstreamCommit: '46d71107f5094460dd5ecbe1dbac6e6c71e5189a',
@@ -43,7 +41,7 @@ const PASSWORD_MANAGER_PRODUCTS = {
 
 export type PasswordManagerProductId = keyof typeof PASSWORD_MANAGER_PRODUCTS;
 export type PasswordManagerProvider = (typeof PASSWORD_MANAGER_PRODUCTS)[PasswordManagerProductId]['provider'];
-const DEFAULT_PRODUCT_ID: PasswordManagerProductId = 'vaultwarden-1.37.2';
+const DEFAULT_PRODUCT_ID: PasswordManagerProductId = 'vaultwarden-1.37.2'; // gitleaks:allow — product identifier, not a credential
 
 export type PasswordManagerState =
   | 'unconfigured'
@@ -382,7 +380,7 @@ function cutoverEvidenceMatches(
   if (!productId) return false;
   const product = PASSWORD_MANAGER_PRODUCTS[productId];
   if (!product.requiresCutoverEvidence) return true;
-  const release = DERIVED_PASSWORD_RELEASE_LOCK;
+  const release = IB_PASSWORD_RELEASE_LOCK;
   return source === 'status_file'
     && value.productId === productId
     && productId === release.productId
@@ -397,7 +395,7 @@ function cutoverEvidenceMatches(
     && value.recoveryGate === 'passed';
 }
 
-/** Pin the connection to the IP confirmed by the DNS check, so no re-resolution happens after the check. */
+/** DNS検査で確認したIPへ接続を固定し、検査後の再解決を発生させない。 */
 const pinnedHealthRequest: HealthRequest = (url, resolved) => new Promise((resolve) => {
   const req = httpsRequest(url, {
     method: 'GET',

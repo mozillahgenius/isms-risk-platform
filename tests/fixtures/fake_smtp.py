@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Minimal SMTP server for acceptance tests (loopback only, plaintext).
+"""受入テスト用の最小 SMTP サーバー（ループバック限定・平文）。
 
-Writes each received mail, one by one, to the --out directory.
-Not for production. It exists only to confirm that scripts/send_mail_outbox.py can actually
-complete an SMTP conversation and that app.mail_outbox and questionnaire state advance after sending.
+受け取ったメールを 1 通ずつ --out のディレクトリへ書き出す。
+本番では使わない。scripts/send_mail_outbox.py が実際に SMTP 会話を通せて、
+送信後に app.mail_outbox と質問票の状態が進むことを確かめるためだけのもの。
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def handle(conn: socket.socket, out_dir: pathlib.Path, counter: list[int]) -> No
             send('250-fake-smtp')
             send('250 AUTH LOGIN PLAIN')
         elif upper.startswith('AUTH'):
-            # LOGIN receives the username and password in two round trips. Their contents are not inspected.
+            # LOGIN はユーザー名・パスワードを 2 往復で受ける。中身は見ない。
             if upper.startswith('AUTH LOGIN') and len(command.split()) == 2:
                 send('334 VXNlcm5hbWU6')
                 stream.readline()

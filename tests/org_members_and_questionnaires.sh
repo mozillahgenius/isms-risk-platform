@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Acceptance for 0059 / 0060: permission boundaries of member management, prohibition of zero owners,
-# work target record consistency, outbox permissions, validity of template questions, tenant isolation.
+# 0059 / 0060 の受入: メンバー管理の権限境界、オーナー 0 人の禁止、
+# 作業の対象レコード整合、送信キューの権限、テンプレート設問の妥当性、テナント分離。
 #
-# Verify not only "it passes" but also "it fails for the intended reason".
+# 「通ること」だけでなく「狙った理由で落ちること」を確かめる。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,17 +67,17 @@ call_as() {
   PGPASSWORD='' psql -Atq -v ON_ERROR_STOP=1 -U app_rw -d "$DB" \
     -c "BEGIN; SELECT app.set_tenant_context('$1'); $2 COMMIT;"
 }
-# Role dedicated to the sending worker. app_rw cannot advance outbox status (0059).
+# 送信ワーカー専用ロール。app_rw では送信キューの状態を進められない（0059）。
 call_as_worker() {
   PGPASSWORD='' psql -Atq -v ON_ERROR_STOP=1 -U mail_worker -d "$DB" \
     -c "BEGIN; SELECT app.set_tenant_context('$1'); $2 COMMIT;"
 }
 
-# Create assets within tenant context (since 0046, assets without framework assignment cannot be created).
+# 資産はテナント文脈の中で作る（0046 以降、枠組みの割当を伴わない資産は作れない）。
 call_as "$ADMIN_T" "INSERT INTO app.assets(tenant_id,id,asset_key,name,asset_type,classification) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000051','A-1','asset one','system','internal'); SELECT app.set_management_frameworks_human('asset','10000000-0000-4000-8000-000000000051',ARRAY['RISK-MANAGEMENT']);" >/dev/null
 
-# --- Permission boundaries of member management ---------------------------------
-# Verify success first, then failure (evidence that the check is not vacuous).
+# --- メンバー管理の権限境界 -------------------------------------------------
+# 通ることを先に確かめてから、落ちることを確かめる（検査が空振りしていない証拠）。
 call_as "$ADMIN_T" "INSERT INTO app.users(tenant_id,id,email,display_name) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000015','added@one.test','added');" >/dev/null
 [ "$(sql -At -c "SELECT count(*) FROM app.users WHERE email='added@one.test'")" = 1 ] || die "admin could not add a member"
 expect_fail_because 'admin role required' call_as "$MEM_T" \
@@ -87,56 +87,56 @@ expect_fail_because 'admin role required' call_as "$MGR_T" \
 expect_fail_because 'admin role required' call_as "$MEM_T" \
   "UPDATE app.users SET status='suspended' WHERE id='10000000-0000-4000-8000-000000000015';"
 
-# --- Privilege escalation paths are closed (Codex finding 1) ---------------------
-# A member cannot add ciso to themselves. Granting/removing owner is role_manage (owner) only.
+# --- 権限昇格の経路を塞げているか（Codex 指摘 1） ---------------------------
+# member が自分に ciso を足せない。オーナーの付け外しは role_manage（オーナー）のみ。
 expect_fail_because 'owner role required' call_as "$MEM_T" \
   "INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000014','ciso');"
 expect_fail_because 'admin role required' call_as "$MEM_T" \
   "INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000014','risk_owner');"
-# Admins cannot grant owner (cannot promote themselves).
+# 管理者はオーナーを配れない（自分を昇格させられない）。
 expect_fail_because 'owner role required' call_as "$ADMIN_T" \
   "INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000015','ciso');"
-# Admins also cannot demote by rewriting the ciso row (both old and new are checked).
+# 管理者は ciso 行を書き換えて降格させることもできない（新旧の両方を見る）。
 expect_fail_because 'owner role required' call_as "$ADMIN_T" \
   "UPDATE app.memberships SET role_key='employee' WHERE user_id='10000000-0000-4000-8000-000000000011' AND role_key='ciso';"
 expect_fail_because 'owner role required' call_as "$ADMIN_T" \
   "DELETE FROM app.memberships WHERE user_id='10000000-0000-4000-8000-000000000011' AND role_key='ciso';"
-# Admins can manage memberships (confirms the prohibition is not too broad).
+# 管理者は所属の整理はできる（禁止が広すぎないことの確認）。
 call_as "$ADMIN_T" "INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000015','employee');" >/dev/null
-# Departments can be touched only by owners and admins.
+# 部門はオーナー・管理者だけが触れる。
 expect_fail_because 'admin role required' call_as "$MGR_T" \
   "INSERT INTO app.departments(tenant_id,name) VALUES(app.current_tenant(),'勝手な部門');"
 call_as "$ADMIN_T" "INSERT INTO app.departments(tenant_id,id,name) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000031','営業部');" >/dev/null
 
-# --- Rewriting organization settings (Codex finding 2) ----------------------------
+# --- 組織設定の書き換え（Codex 指摘 2） -------------------------------------
 expect_fail_because 'admin role required' call_as "$MEM_T" \
   "INSERT INTO app.certification_bodies(tenant_id,body_name,certification_standard) VALUES(app.current_tenant(),'勝手な審査機関','ISO/IEC 27001:2022');"
 call_as "$ADMIN_T" "INSERT INTO app.certification_bodies(tenant_id,body_name,certification_standard) VALUES(app.current_tenant(),'審査機関A','ISO/IEC 27001:2022');" >/dev/null
 
-# --- Reject operations that would leave zero owners -------------------------------
+# --- オーナーが 0 人になる操作を拒む ----------------------------------------
 expect_fail_because 'at least one active owner' call_as "$CISO_T" \
   "UPDATE app.memberships SET revoked_at=now() WHERE user_id='10000000-0000-4000-8000-000000000011' AND role_key='ciso';"
 expect_fail_because 'at least one active owner' call_as "$ADMIN_T" \
   "UPDATE app.users SET status='left' WHERE id='10000000-0000-4000-8000-000000000011';"
-# Can step down if another owner exists (confirms the prohibition is not too broad).
+# 別のオーナーが居れば降ろせる（禁止が広すぎないことの確認）。
 call_as "$CISO_T" "INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000012','ciso');" >/dev/null
 call_as "$CISO_T" "UPDATE app.memberships SET revoked_at=now() WHERE user_id='10000000-0000-4000-8000-000000000011' AND role_key='ciso';" >/dev/null
 [ "$(sql -At -c "SELECT count(*) FROM app.memberships WHERE role_key='ciso' AND revoked_at IS NULL AND tenant_id='$T1'")" = 1 ] || die "owner handover failed"
 
-# --- Work target record consistency ------------------------------------------------
+# --- 作業の対象レコード整合 --------------------------------------------------
 call_as "$ADMIN_T" "INSERT INTO app.work_items(tenant_id,id,work_type,title,resource_type,resource_id,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000061','asset_inventory','asset work','asset','10000000-0000-4000-8000-000000000051',app.current_session_user(),app.current_session_user());" >/dev/null
 expect_fail_because 'resource type does not match work type' call_as "$ADMIN_T" \
   "INSERT INTO app.work_items(tenant_id,id,work_type,title,resource_type,resource_id,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000062','incident_response','mismatch','asset','10000000-0000-4000-8000-000000000051',app.current_session_user(),app.current_session_user());"
 expect_fail_because 'assignment target not found' call_as "$ADMIN_T" \
   "INSERT INTO app.work_items(tenant_id,id,work_type,title,resource_type,resource_id,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000063','asset_inventory','ghost','asset','10000000-0000-4000-8000-000000000099',app.current_session_user(),app.current_session_user());"
-# One-sided input (type only / ID only) is rejected by the CHECK (with type only, the trigger
-# fails first on the existence check, so the CHECK itself is verified with ID only).
+# 種別だけ・ID だけの片側入力は CHECK が拒む（種別だけの場合はトリガーが
+# 先に実在確認で落とすので、CHECK 自体は ID だけの向きで確かめる）。
 expect_fail_because 'work_items_resource_pair' call_as "$ADMIN_T" \
   "INSERT INTO app.work_items(tenant_id,id,work_type,title,resource_id,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000064','asset_inventory','half','10000000-0000-4000-8000-000000000051',app.current_session_user(),app.current_session_user());"
 expect_fail_because 'assignment target not found' call_as "$ADMIN_T" \
   "INSERT INTO app.work_items(tenant_id,id,work_type,title,resource_type,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000065','asset_inventory','half2','asset',app.current_session_user(),app.current_session_user());"
 
-# --- Outbox permissions --------------------------------------------------------
+# --- 送信キューの権限 --------------------------------------------------------
 call_as "$MGR_T" "INSERT INTO app.mail_outbox(tenant_id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'work_assignment','member@one.test','依頼','本文',app.current_session_user(),app.current_session_user());" >/dev/null
 expect_fail_because 'admin role required' call_as "$MGR_T" \
   "INSERT INTO app.mail_outbox(tenant_id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'external_questionnaire','x@vendor.test','件名','本文',app.current_session_user(),app.current_session_user());"
@@ -146,7 +146,7 @@ call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,su
 expect_fail_because 'violates check constraint' call_as "$ADMIN_T" \
   "INSERT INTO app.mail_outbox(tenant_id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'work_assignment','MiXeD@one.test','件名','本文',app.current_session_user(),app.current_session_user());"
 
-# The path of clearing only the session user to bypass the guard is closed (Codex finding).
+# 本人だけを消してガードを迂回する経路は塞がっている（Codex 指摘）。
 expect_fail_because 'session user context is required' \
   env PGPASSWORD='' psql -Atq -v ON_ERROR_STOP=1 -U app_rw -d "$DB" -c \
   "BEGIN; SELECT app.set_tenant_context('$MEM_T'); SELECT set_config('app.session_user_id','',true); INSERT INTO app.users(tenant_id,id,email,display_name) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000018','bypass@one.test','bypass'); COMMIT;"
@@ -154,7 +154,7 @@ expect_fail_because 'session user context is required' \
   env PGPASSWORD='' psql -Atq -v ON_ERROR_STOP=1 -U app_rw -d "$DB" -c \
   "BEGIN; SELECT app.set_tenant_context('$MEM_T'); SELECT set_config('app.session_user_id','',true); INSERT INTO app.mail_outbox(tenant_id,purpose,to_email,subject,body_text) VALUES(app.current_tenant(),'external_questionnaire','x@vendor.test','迂回','本文'); COMMIT;"
 
-# --- Templates -------------------------------------------------------------
+# --- テンプレート ------------------------------------------------------------
 call_as "$MGR_T" "INSERT INTO app.questionnaire_templates(tenant_id,id,name,kind,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000081','標準チェック','checklist',app.current_session_user(),app.current_session_user());" >/dev/null
 expect_fail_because 'manager role required' call_as "$MEM_T" \
   "INSERT INTO app.questionnaire_templates(tenant_id,name,kind,created_by,updated_by) VALUES(app.current_tenant(),'勝手に作る','checklist',app.current_session_user(),app.current_session_user());"
@@ -165,11 +165,11 @@ call_as "$MGR_T" "INSERT INTO app.questionnaire_template_questions(tenant_id,tem
 expect_fail_because 'violates check constraint' call_as "$MGR_T" \
   "UPDATE app.questionnaire_template_questions SET ordinal=0 WHERE template_id='10000000-0000-4000-8000-000000000081' AND ordinal=1;"
 
-# Create one questionnaire and link it to the outbox (to see its status advance after sending).
+# 質問票を 1 件作り、送信キューへ結び付ける（送信後に状態が進むことを見る）。
 call_as "$ADMIN_T" "INSERT INTO app.external_questionnaires(tenant_id,id,vendor_id,template_id,title,recipient_name,recipient_email,status,queued_at,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000091','10000000-0000-4000-8000-000000000041','10000000-0000-4000-8000-000000000081','標準チェック','担当','x@vendor.test','queued',now(),app.current_session_user(),app.current_session_user());" >/dev/null
 call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,subject,body_text,related_type,related_id,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000073','external_questionnaire','x@vendor.test','質問票の件名','質問票の本文','external_questionnaire','10000000-0000-4000-8000-000000000091',app.current_session_user(),app.current_session_user());" >/dev/null
 
-# --- Tenant isolation --------------------------------------------------------
+# --- テナント分離 ------------------------------------------------------------
 [ "$(call_as "$OTHER_T" "SELECT count(*) FROM app.questionnaire_templates;" | tail -1)" = 0 ] \
   || die "template leaked across tenants"
 [ "$(call_as "$OTHER_T" "SELECT count(*) FROM app.mail_outbox;" | tail -1)" = 0 ] \
@@ -177,40 +177,40 @@ call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,su
 [ "$(call_as "$OTHER_T" "SELECT count(*) FROM app.work_items;" | tail -1)" = 0 ] \
   || die "work items leaked across tenants"
 
-# --- Outbox tampering (Codex finding 8) ---------------------------------------
+# --- 送信キューの改ざん（Codex 指摘 8） -------------------------------------
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "UPDATE app.mail_outbox SET to_email='attacker@evil.test' WHERE id='10000000-0000-4000-8000-000000000071';"
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "UPDATE app.mail_outbox SET body_text='書き換え' WHERE id='10000000-0000-4000-8000-000000000071';"
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "DELETE FROM app.mail_outbox WHERE id='10000000-0000-4000-8000-000000000071';"
-# Cannot fabricate "sent" without sending a single mail (sent can only be entered from sending).
-# app_rw has no UPDATE privilege at all (cannot fabricate sent without sending a single mail).
+# 1 通も送らずに「送信済み」を作れない（sent へは sending からしか入れない）。
+# app_rw には UPDATE 権限そのものが無い（1 通も送らずに送信済みを作れない）。
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "UPDATE app.mail_outbox SET status='sent', sent_at=now() WHERE id='10000000-0000-4000-8000-000000000071';"
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "UPDATE app.mail_outbox SET status='failed' WHERE id='10000000-0000-4000-8000-000000000071';"
-# Sending functions are mail_worker only. app_rw lacks even EXECUTE privilege.
+# 送信関数は mail_worker 専用。app_rw には EXECUTE 権限すら無い。
 expect_fail_because 'permission denied for function claim_mail_batch' call_as "$ADMIN_T" \
   "SELECT app.claim_mail_batch(10, false, false);"
 expect_fail_because 'permission denied for function mark_mail_sent' call_as "$ADMIN_T" \
   "SELECT app.mark_mail_sent('10000000-0000-4000-8000-000000000071');"
 
-# --- Control characters cannot be queued (entry side of Codex finding 6) -----------
+# --- 制御文字は積めない（Codex 指摘 6 の入口側） ----------------------------
 expect_fail_because 'violates check constraint' call_as "$ADMIN_T" \
   "INSERT INTO app.mail_outbox(tenant_id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'work_assignment','member@one.test',E'件\\x1e名','本文',app.current_session_user(),app.current_session_user());"
-# Newlines in the body pass (confirms the prohibition is not too broad).
+# 本文の改行は通る（禁止が広すぎないことの確認）。
 call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000072','work_assignment','member@one.test','改行あり',E'1行目\\n2行目\\t字下げ',app.current_session_user(),app.current_session_user());" >/dev/null
 
-# --- Sending worker ----------------------------------------------------------
-# Without --apply, queued status is not advanced.
+# --- 送信ワーカー ------------------------------------------------------------
+# --apply を付けない限り、送信待ちの状態を進めない。
 QUEUED_BEFORE="$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='queued'")"
 [ "$QUEUED_BEFORE" = 4 ] || die "送信待ちの件数が想定と違う: $QUEUED_BEFORE"
 python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" >/dev/null
 [ "$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='queued'")" = 4 ] \
   || die "dry-run changed the queue"
 
-# Running --apply without SMTP settings fails without touching the queue.
+# SMTP 設定が無いまま --apply しても、キューへ触らずに落ちる。
 if env -u ISMS_SMTP_HOST -u ISMS_SMTP_USER -u ISMS_SMTP_PASSWORD -u ISMS_SMTP_FROM \
      python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --apply >/dev/null 2>&1; then
   die "apply without SMTP settings unexpectedly succeeded"
@@ -218,7 +218,7 @@ fi
 [ "$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='queued'")" = 4 ] \
   || die "failed apply consumed the queue"
 
-# If the peer is unreachable, leave rows as failed with the reason. Do not leave them in sending.
+# 繋がらない相手なら failed として残し、理由を書く。sending のまま放置しない。
 env ISMS_SMTP_HOST=127.0.0.1 ISMS_SMTP_PORT=1 ISMS_SMTP_USER=u ISMS_SMTP_PASSWORD=p \
     ISMS_SMTP_FROM='ISMS <isms@one.test>' ISMS_SMTP_STARTTLS=off \
     python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --apply >/dev/null 2>&1 \
@@ -228,13 +228,13 @@ env ISMS_SMTP_HOST=127.0.0.1 ISMS_SMTP_PORT=1 ISMS_SMTP_USER=u ISMS_SMTP_PASSWOR
 [ "$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='sending'")" = 0 ] \
   || die "rows left stuck in sending"
 
-# Plaintext cannot be used outward (rejected except for loopback).
+# 平文は外向きに使えない（ループバック以外では拒む）。
 env ISMS_SMTP_HOST=smtp.example.com ISMS_SMTP_PORT=25 ISMS_SMTP_USER=u ISMS_SMTP_PASSWORD=p \
     ISMS_SMTP_FROM='ISMS <isms@one.test>' ISMS_SMTP_STARTTLS=off \
     python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --apply --retry-failed >/dev/null 2>&1 \
   && die "plaintext to a remote host was allowed"
 
-# Actually run an SMTP conversation and verify the delivered body and the queue status.
+# 実際に SMTP 会話を通し、届いた本文とキューの状態を確かめる。
 MAILDIR="$(mktemp -d)"; trap 'dropdb --if-exists "$DB" >/dev/null 2>&1; rm -rf "$MAILDIR"' EXIT
 SMTP_PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()")
 python3 "$ROOT/tests/fixtures/fake_smtp.py" --port "$SMTP_PORT" --out "$MAILDIR" --expect 4 &
@@ -246,7 +246,7 @@ env ISMS_SMTP_HOST=127.0.0.1 ISMS_SMTP_PORT="$SMTP_PORT" ISMS_SMTP_USER=u ISMS_S
   || die "send through the fake smtp failed"
 wait "$FAKE_PID" || true
 [ "$(ls "$MAILDIR" | wc -l | tr -d ' ')" = 4 ] || die "fake smtp did not receive 4 mails"
-# Japanese subjects/bodies are carried as RFC2047 / base64, so decode before checking.
+# 日本語の件名・本文は RFC2047 / base64 で載るので、復号してから確かめる。
 python3 - "$MAILDIR" <<'EOF' || die "delivered mail did not carry the subject and body"
 import email, email.header, pathlib, sys
 subjects, bodies = [], []
@@ -259,25 +259,25 @@ assert any('本文' in b for b in bodies), bodies
 EOF
 [ "$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='sent' AND sent_at IS NOT NULL")" = 4 ] \
   || die "sent rows were not recorded"
-# The questionnaire becomes sent only when mail was actually sent.
+# 実際に出たときだけ質問票が送信済みになる。
 [ "$(sql -At -c "SELECT status FROM app.external_questionnaires WHERE id='10000000-0000-4000-8000-000000000091'")" = sent ] \
   || die "questionnaire was not advanced to sent"
 
-# The enqueuing side cannot specify delivery status (cannot create "sent" via INSERT).
+# 積む側は配送の状態を指定できない（INSERT で「送信済み」を作れない）。
 call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,subject,body_text,status,sent_at,attempts,last_error,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000075','work_assignment','member@one.test','偽装','本文','sent',now(),9,'でっちあげ',app.current_session_user(),app.current_session_user());" >/dev/null
 [ "$(sql -At -c "SELECT status||'/'||attempts||'/'||coalesce(sent_at::text,'-')||'/'||last_error FROM app.mail_outbox WHERE id='10000000-0000-4000-8000-000000000075'")" = 'queued/0/-/' ] \
   || die "INSERT で配送状態を指定できてしまう"
 
-# Rows stuck in sending are not auto-resent and become visible via the reclaim command
-# (Codex finding 5). They may have been delivered, so they are only dropped to failed, not resent.
-# The only way to create a real sending row is for the worker to claim it (INSERT cannot).
+# sending のまま止まった行は、自動再送されず、回収コマンドで見えるようになる
+# （Codex 指摘 5）。届いたかもしれないので failed へ落とすだけで再送はしない。
+# 本物の sending を作るにはワーカーが掴むしかない（INSERT では作れない）。
 call_as "$ADMIN_T" "INSERT INTO app.mail_outbox(tenant_id,id,purpose,to_email,subject,body_text,created_by,updated_by) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000074','work_assignment','member@one.test','取り残し','本文',app.current_session_user(),app.current_session_user());" >/dev/null
 call_as_worker "$ADMIN_T" "SELECT app.claim_mail_batch(50,false,false);" >/dev/null
 [ "$(sql -At -c "SELECT status FROM app.mail_outbox WHERE id='10000000-0000-4000-8000-000000000074'")" = sending ] \
   || die "worker could not claim the row"
-# Only the elapsed-time staging is written directly for test purposes (not in the production path).
+# 経過時間の演出だけは検査の都合で直接書く（本番経路には無い）。
 sql -c "UPDATE app.mail_outbox SET updated_at = now() - interval '3 hours' WHERE tenant_id='$T1' AND status='sending';" >/dev/null
-# Neither a normal run nor --retry-failed picks up sending rows.
+# 通常実行も --retry-failed も sending は拾わない。
 python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" | grep -q '10000000-0000-4000-8000-000000000074' \
   || die "dry-run did not surface the stuck row"
 python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --reclaim-stale 60 >/dev/null
@@ -285,25 +285,25 @@ python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --recl
   || die "stale sending row was not reclaimed"
 [ "$(sql -At -c "SELECT count(*) FROM app.mail_outbox WHERE status='sending'")" = 0 ] \
   || die "stale reclaim left rows in sending"
-# Too-short thresholds are rejected (they would catch workers that are running).
+# 短すぎるしきい値は拒む（実行中のワーカーを巻き込むため）。
 python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --reclaim-stale 5 >/dev/null 2>&1 \
   && die "reclaim accepted a too-short threshold"
-# Reclaimed rows are not picked up by --retry-failed (they may have been delivered, so no auto-resend).
+# 回収した行は --retry-failed では拾わない（届いたかもしれないので自動再送しない）。
 env ISMS_SMTP_HOST=127.0.0.1 ISMS_SMTP_PORT=1 ISMS_SMTP_USER=u ISMS_SMTP_PASSWORD=p \
     ISMS_SMTP_FROM='ISMS <isms@one.test>' ISMS_SMTP_STARTTLS=off \
     python3 "$ROOT/scripts/send_mail_outbox.py" --token "$ADMIN_T" --db "$DB" --apply --retry-failed >/dev/null 2>&1 || true
 [ "$(sql -At -c "SELECT attempts FROM app.mail_outbox WHERE id='10000000-0000-4000-8000-000000000074'")" = 1 ] \
   || die "reclaimed row was picked up by --retry-failed"
 
-# app_rw cannot move outbox status at all (confirms the role boundary itself).
+# app_rw では送信キューの状態を一切動かせない（ロール境界そのものの確認）。
 expect_fail_because 'permission denied' call_as "$ADMIN_T" \
   "UPDATE app.mail_outbox SET attempts=attempts+1 WHERE id='10000000-0000-4000-8000-000000000071';"
 expect_fail_because 'permission denied for function reclaim_stale_mail' call_as "$ADMIN_T" \
   "SELECT app.reclaim_stale_mail(60);"
 
-# --- Rollback ----------------------------------------------------------------
-# Do not hard-code the number of migrations to roll back. When migrations are added later,
-# a hard-coded count rolls back a different version and the check becomes vacuous (hit when 0061 was added).
+# --- 巻き戻し ----------------------------------------------------------------
+# 巻き戻す本数は固定値にしない。後から migration が増えると、
+# 本数決め打ちでは別の版を巻き戻して検査が空振りする（0061 追加時に踏んだ）。
 DOWN_N="$(sql -At -c "SELECT count(*) FROM public.schema_migrations WHERE version >= '0059'")"
 "$ROOT/scripts/migrate.sh" down "$DOWN_N" >/dev/null
 [ "$(sql -At -c "SELECT to_regclass('app.mail_outbox') IS NULL")" = t ] || die "0059 down left mail_outbox"

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// deviceControl.ts depends on 'server-only' and 'next/headers', so both are mocked to
-// directly verify which header name authorizedActorEmail() itself actually reads.
-// (Codex review finding on 2026-09-01: when the header name was changed from x-auth-request-email to x-forwarded-email,
-// there was no regression test for this function itself, and all existing tests passed
-// even with the old header name.)
+// deviceControl.ts は 'server-only' と 'next/headers' に依存するため、両方をモックして
+// authorizedActorEmail() 自身が実際にどのヘッダ名を読むかを直接検証する。
+// (2026-09-01 のCodexレビュー指摘: ヘッダ名を x-auth-request-email → x-forwarded-email へ
+// 修正した際、この関数自体の回帰テストが無く、旧ヘッダ名のままでも既存テストは全て
+// 通ってしまっていた。)
 
 vi.mock('server-only', () => ({}));
 
@@ -18,7 +18,7 @@ function mockHeaders(entries: Record<string, string>) {
 }
 
 const PROXY_SECRET = 'a'.repeat(32);
-const ALLOWED = 'alice@example.com';
+const ALLOWED = 'admin@example.invalid';
 
 async function loadWithHeaders(entries: Record<string, string>) {
   vi.resetModules();
@@ -36,7 +36,7 @@ describe('authorizedActorEmail() が実際に読むヘッダ名', () => {
 
   it('x-forwarded-email + 正しい共有シークレットなら許可する', async () => {
     const email = await loadWithHeaders({
-      'x-isms-device-control-proxy-secret': PROXY_SECRET,
+      'x-ib-device-control-proxy-secret': PROXY_SECRET,
       'x-forwarded-email': ALLOWED,
     });
     expect(email).toBe(ALLOWED);
@@ -44,7 +44,7 @@ describe('authorizedActorEmail() が実際に読むヘッダ名', () => {
 
   it('旧ヘッダ名 x-auth-request-email だけでは許可しない(この経路では転送されないヘッダのため)', async () => {
     const email = await loadWithHeaders({
-      'x-isms-device-control-proxy-secret': PROXY_SECRET,
+      'x-ib-device-control-proxy-secret': PROXY_SECRET,
       'x-auth-request-email': ALLOWED,
     });
     expect(email).toBeNull();

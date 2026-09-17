@@ -43,9 +43,9 @@ function parseOrRedirect<T>(form: FormData, parse: () => T): T {
 }
 
 /**
- * Choices are received newline-separated and turned into a jsonb array. With fewer than 2 for
- * single_choice the questionnaire cannot be answered, so apply the same rule as 0060's CHECK here too
- * (the DB is the real backstop; this is to return readable wording).
+ * 選択肢は改行区切りで受け取り、jsonb 配列にする。single_choice で 2 つ未満だと
+ * 回答者が選べない質問票になるので、0060 の CHECK と同じ規則をここでも見る
+ * （DB が真のバックストップ、ここは読める言葉を返すため）。
  */
 function parseOptions(raw: string | null, answerType: string): string[] {
   const options = (raw ?? '')
@@ -82,7 +82,7 @@ export async function saveExternalResource(form: FormData) {
 }
 
 // ------------------------------------------------------------------
-// Templates
+// テンプレート
 // ------------------------------------------------------------------
 
 export async function saveTemplate(form: FormData) {
@@ -156,8 +156,8 @@ export async function addTemplateQuestion(form: FormData) {
     };
   });
   const result = await withTenantWrite(async (sql) => {
-    // Numbering is max + 1. UNIQUE(tenant_id, template_id, ordinal) exists, so
-    // with concurrent additions one fails. If it fails, the user can just press again.
+    // 採番は最大値 + 1。UNIQUE(tenant_id, template_id, ordinal) があるので、
+    // 同時追加は片方が落ちる。落ちたら利用者がもう一度押せばよい。
     await sql`
       INSERT INTO app.questionnaire_template_questions
         (tenant_id, template_id, ordinal, prompt, answer_type, options, required)
@@ -180,11 +180,11 @@ export async function removeTemplateQuestion(form: FormData) {
       DELETE FROM app.questionnaire_template_questions
        WHERE tenant_id=app.current_tenant() AND template_id=${templateId}::uuid
          AND id=${questionId}::uuid`;
-    // Close the gap left after deletion. If numbers skip, "Q3" of a sent questionnaire
-    // no longer matches "Q3" of the template and they cannot be reconciled.
-    // UNIQUE(tenant_id, template_id, ordinal) cannot be deferred, so first
-    // shift them far out, then renumber to 1..n (CHECK (ordinal > 0) means
-    // negative temporary values cannot be used).
+    // 消したあとの穴を詰める。番号が飛ぶと、送った質問票の「問3」が
+    // テンプレートの「問3」と一致しなくなり、突合できない。
+    // UNIQUE(tenant_id, template_id, ordinal) は遅延できないので、いったん
+    // 大きくずらしてから 1..n へ振り直す（CHECK (ordinal > 0) があるため
+    // 負数の一時値は使えない）。
     await sql`
       UPDATE app.questionnaire_template_questions
          SET ordinal = ordinal + 1000
@@ -206,7 +206,7 @@ export async function removeTemplateQuestion(form: FormData) {
 }
 
 // ------------------------------------------------------------------
-// Questionnaires
+// 質問票
 // ------------------------------------------------------------------
 
 export async function createQuestionnaire(form: FormData) {
@@ -249,8 +249,8 @@ export async function createQuestionnaire(form: FormData) {
       RETURNING id`;
     const questionnaireId = rows[0]?.id;
     if (!questionnaireId) throw new Error('questionnaire not created');
-    // Questions are copied from the template, not referenced, so that later edits to the template
-    // do not change the contents of questionnaires already sent.
+    // 設問はテンプレートから複写する。参照にしないのは、あとでテンプレートを
+    // 直しても既に送った質問票の中身が変わらないようにするため。
     await sql`
       INSERT INTO app.external_questionnaire_questions
         (tenant_id, questionnaire_id, ordinal, prompt, answer_type, options, required)
@@ -268,12 +268,12 @@ export async function createQuestionnaire(form: FormData) {
 }
 
 /**
- * Send a questionnaire.
+ * 質問票を送る。
  *
- * This only goes as far as "enqueue for sending". The actual SMTP send is done by
- * scripts/send_mail_outbox.py in a separate process, which advances this questionnaire's
- * status to sent on success. The split keeps SMTP credentials off the web app, and
- * a record of the send always remains in app.mail_outbox.
+ * ここでやるのは「送信キューへ積む」ところまで。実際の SMTP 送信は
+ * scripts/send_mail_outbox.py が別プロセスで行い、成功したらこの質問票の
+ * status を sent へ進める。Web に SMTP 資格情報を置かないための分割で、
+ * 送信の記録は app.mail_outbox に必ず残る。
  */
 export async function sendQuestionnaire(form: FormData) {
   const questionnaireId = parseOrRedirect(form, () => uuid(form, 'questionnaire_id'));
@@ -339,7 +339,7 @@ export async function sendQuestionnaire(form: FormData) {
   redirect(route(form, `${BASE}/${questionnaireId}?queued=1`));
 }
 
-/** A staff member records the returned answers. Only answered items are counted. */
+/** 返ってきた回答を担当者が記録する。回答があるものだけ数える。 */
 export async function recordAnswers(form: FormData) {
   const questionnaireId = parseOrRedirect(form, () => uuid(form, 'questionnaire_id'));
   const markSubmitted = String(form.get('mark_submitted') ?? '') === 'on';

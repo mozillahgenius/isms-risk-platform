@@ -1,17 +1,17 @@
 import 'server-only';
 import postgres, { type Sql } from 'postgres';
 
-// The only entry point from the UI to the DB. **Connects with the read-only role (app_ro).**
+// 画面から DB への唯一の入口。**読み取り専用ロール（app_ro）で繋ぐ。**
 //
-// Why restrict by role:
-//   A promise that merely says "the UI is read-only" can be broken by adding one line of code.
-//   If the connection role only has SELECT, whoever tries to break it gets refused by the DB.
-//   catalog grants app_ro SELECT only (migration 0015).
+// なぜロールで縛るか:
+//   「画面は読み取り専用です」と書いておくだけの約束は、コードを1行足せば破れる。
+//   接続ロールに SELECT しか無ければ、破ろうとした側が DB に断られる。
+//   catalog は app_ro に SELECT のみ（migration 0015）。
 //
-// Don't read app.* / audit.* from here. Reading app.* with app_ro doesn't return 0 rows; it
-// fails with "tenant context is not set" (because there is no RLS tenant context).
-// Displaying operational data is a separate matter that requires establishing a tenant context (app.set_tenant_context),
-// and is outside this UI's scope. See tenantDataStatus() in src/lib/catalog.ts for details.
+// app.* / audit.* はここから読まない。app_ro で app.* を読むと 0 件ではなく
+// 「tenant context is not set」で失敗する（RLS のテナント文脈が無いため）。
+// 運用データの表示はテナント文脈の確立（app.set_tenant_context）が要る別の話で、
+// この画面の担当範囲ではない。詳細は src/lib/catalog.ts の tenantDataStatus()。
 
 let client: Sql | null | undefined;
 let writeClient: Sql | null | undefined;
@@ -27,8 +27,8 @@ export function getDb(): Sql {
     max: 4,
     idle_timeout: 20,
     connect_timeout: 5,
-    // The UI only reads. Make the transaction fail the moment a write is attempted
-    // (a second safeguard on top of role privileges; writes fail even in an environment with a misconfigured role).
+    // 画面は読み取りしかしない。書き込みを試みた時点でトランザクションが落ちるようにする
+    // （ロール権限に加えた二重の歯止め。ロール設定を取り違えた環境でも書けない）。
     connection: { default_transaction_read_only: true },
     onnotice: () => {},
   });
@@ -39,7 +39,7 @@ export function writeConnectionString(): string {
   return process.env.ISMS_WRITE_DATABASE_URL || 'postgres:///isms_dev?user=app_rw';
 }
 
-/** A connection dedicated to register inserts/updates. Kept separate from the read-only app_ro. */
+/** 台帳の登録・更新専用の接続。読み取り用の app_ro と分ける。 */
 export function getWriteDb(): Sql {
   if (writeClient) return writeClient;
   writeClient = postgres(writeConnectionString(), {
@@ -67,7 +67,7 @@ export function getProxyWriteDb(): Sql {
   return proxyWriteClient;
 }
 
-/** Rethrows DB-originated failures in a form the UI can honestly display as "could not be retrieved". */
+/** DB 由来の失敗を、画面が「取得できなかった」と正直に出せる形にして投げ直す。 */
 export class DbUnavailable extends Error {
   readonly cause: unknown;
   constructor(cause: unknown) {

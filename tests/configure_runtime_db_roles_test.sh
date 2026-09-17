@@ -53,7 +53,7 @@ printf '%s\n' "ISMS_DEVICE_CONTROL_PROXY_SECRET=proxy-secret-0123456789abcdef" >
 chmod 600 "$PROXY_ENV"
 
 TEST_ADMIN_PASSWORD=admin-pass \
-python3 "$ROOT/scripts/configure_db_roles.py" \
+python3 "$ROOT/scripts/configure_runtime_db_roles.py" \
   --pgpass "$SOURCE_PGPASS" \
   --pgpass-target "$TARGET_PGPASS" \
   --host 127.0.0.1 \
@@ -93,7 +93,7 @@ NESTED_ADMIN_USER="$(
 [ "$NESTED_ADMIN_USER" = "$ADMIN_USER" ]
 
 TEST_ADMIN_PASSWORD=admin-pass \
-python3 "$ROOT/scripts/configure_db_roles.py" \
+python3 "$ROOT/scripts/configure_runtime_db_roles.py" \
   --pgpass "$TWO_ROLE_PGPASS" \
   --target "$ROLE_ENV" \
   --proxy-env-file "$PROXY_ENV" \
@@ -105,4 +105,4 @@ python3 "$ROOT/scripts/configure_db_roles.py" \
 grep -Fq 'ISMS_WEB_DATABASE_URL=' "$ROLE_ENV"
 grep -Fq 'ISMS_PROXY_DATABASE_URL=' "$ROLE_ENV"
 
-echo "configure_db_roles_test: PASS"
+echo "configure_runtime_db_roles_test: PASS"

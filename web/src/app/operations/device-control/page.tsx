@@ -1,44 +1,66 @@
 import Link from 'next/link';
 import {
   authorizedActorEmail,
-  deviceControlDevices,
+  DEVICE_CONTROL_DEVICES,
   DISPATCH_TEMPLATES,
   getDeviceControlHistory,
-  getDeviceInventory,
+  getManagementDeviceInventory,
   isDeviceControlConfigured,
 } from '@/lib/deviceControl';
 import { dispatchDeviceControlAction, recoverDispatchAction } from './actions';
+import EnrollmentPanel from './EnrollmentPanel';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'デバイス管理' };
 
-// Screen that can run patch application and screen sharing ON/OFF only via fixed templates.
-// Execution itself is delegated as-is to the existing policy evaluation and audit logging of the external device dispatcher (orchestrator).
-// The fixed-template path proceeds to execution without waiting for additional approval.
-// Here you can only choose "which template, on which device"
-// (no free-form command field is provided).
+// パッチ適用・画面共有ON/OFFを固定テンプレートでのみ実行できる画面。
+// 実行そのものはCodzilla(自社の内製自動化基盤)の既存ポリシー評価・監査記録に
+// そのまま委ねる。固定テンプレート経路はSlack承認を待たずに実行へ進む。
+// ここでは「どのテンプレートを、どの端末に」しか選べない
+// (自由入力のコマンド欄は置かない)。
 //
-// Own-organization boundary: anyone can open this screen, but only deployments where
-// ISMS_DEVICE_DISPATCH_URL/ISMS_DEVICE_DISPATCH_TOKEN are set can actually dispatch or fetch history (since it is a server-to-server token
-// for the organization's own execution platform, it is not distributed to deployments for other organizations' tenants).
+// 自社限定の境界: この画面自体は誰でも開けるが、実際にディスパッチ・履歴取得ができるのは
+// CODZILLA_ISMS_DISPATCH_URL/TOKEN が設定されたデプロイだけ(自社の内製実行基盤への
+// サーバ間トークンのため、他社テナント向けデプロイには配布しない)。
 //
-// Both execute operations (buttons) and history viewing are authorized independently at the app layer,
-// separately from the upstream SSO reverse proxy (shared-secret header + ISMS_DEVICE_CONTROL_ALLOWED_EMAILS;
-// fail-closed because header forwarding is unverified in production. Unauthorized users see no history at all).
+// 実行操作(ボタン)・履歴閲覧のどちらも、前段のSSOリバースプロキシとは別にアプリ層で
+// 独立して認可する(共有シークレットヘッダ＋ISMS_DEVICE_CONTROL_ALLOWED_EMAILS。
+// ヘッダ転送が本番で未確認のためfail-closed。許可されない利用者には履歴も一切見せない)。
 
-const INVENTORY_UNAVAILABLE_LABEL: Record<string, string> = {
-  not_configured: 'この経路は設定されていません(ISMS_DEVICE_DISPATCH_URL/ISMS_DEVICE_DISPATCH_VIEW_TOKEN未設定)',
-  unauthorized: 'この台帳を閲覧する権限がありません(ISMS_DEVICE_CONTROL_VIEW_ALLOWED_EMAILSに許可された利用者のみ)',
-  http_error: '台帳の取得に失敗しました',
-  network_error: '接続できませんでした',
-  upstream_unavailable: 'ディスパッチャ側の端末台帳が未設定、または応答が得られませんでした',
+const MANAGEMENT_INVENTORY_UNAVAILABLE_LABEL: Record<string, string> = {
+  not_configured: 'Managementのテナント接続が設定されていません',
+  unauthorized: 'この台帳を閲覧する権限がありません',
+  invalid_session: 'Managementのログイン状態を確認できません',
+  database_error: 'Managementの端末台帳を読み取れませんでした',
+};
+
+const MANAGEMENT_STATUS_LABEL: Record<string, string> = {
+  issued: '発行済み',
+  sent: '送付済み',
+  downloaded: 'ダウンロード済み',
+  installed: '導入済み',
+  activation_pending: '認証待ち',
+  active: '登録済み',
+  failed: '失敗',
+  expired: '期限切れ',
+};
+
+const MANAGEMENT_STATUS_CLASS: Record<string, string> = {
+  issued: 'badge',
+  sent: 'badge',
+  downloaded: 'badge',
+  installed: 'badge badge-on-hold',
+  activation_pending: 'badge badge-on-hold',
+  active: 'badge badge-done',
+  failed: 'badge badge-danger',
+  expired: 'badge badge-danger',
 };
 
 const ERROR_LABEL: Record<string, string> = {
   bad_request: '不正な入力です',
   unauthorized: 'この操作を実行する権限がありません',
-  not_configured: 'この経路は設定されていません(ISMS_DEVICE_DISPATCH_URL/ISMS_DEVICE_DISPATCH_TOKEN未設定)',
+  not_configured: 'この経路は設定されていません(CODZILLA_ISMS_DISPATCH_URL/TOKEN未設定)',
   timeout: '承認待ちが続いているか、応答がありません。実行自体は継続している可能性があります(下の履歴で確認してください)',
   http_error: 'ディスパッチに失敗しました',
   network_error: '接続できませんでした',
@@ -52,9 +74,9 @@ const ERROR_LABEL: Record<string, string> = {
   recover_network_error: '接続できなかったため、未確定の要求を閉じられませんでした',
 };
 
-// Four categories users cannot confuse (design doc 2026-09-11 §9.4): accepted / succeeded on device / failed / unconfirmed.
-// Success only when an execution audit with exit code 0 is present. Items closed by a person (closed manually) are not counted as success.
-// pending / unknown are values returned by older orchestrator versions (a fallback for when deployment order varies).
+// 利用者が取り違えない4つの区分（設計書 2026-09-11 §9.4）: 受け付けた／端末で成功した／失敗した／未確定。
+// 成功は終了コード0の実行監査がそろったときだけ。人が閉じたもの（手動で閉じた）は成功に数えない。
+// pending / unknown は旧版の orchestrator が返す値（配備順が前後したときの受け皿）。
 const EXECUTION_RESULT_LABEL: Record<string, string> = {
   accepted: '受付済み（端末の結果待ち）',
   success: '成功',
@@ -77,33 +99,11 @@ const EXECUTION_RESULT_CLASS: Record<string, string> = {
   unknown: 'bg-[var(--surface-2)] text-[var(--muted)]',
 };
 
-// Make the wording show that it is a human declaration (since it is read alongside "success"/"failure", which are determined by exit code).
+// 人の申告であることが文言で分かるようにする（終了コードで決まる「成功」「失敗」と並べて読まれるため）。
 const RECOVERY_OUTCOME_LABEL: Record<string, string> = {
   executed_confirmed: '人の確認: 実行されていた',
   not_executed_confirmed: '人の確認: 実行されていなかった',
   undetermined: '人の確認: 分からないまま閉じた',
-};
-
-const INVENTORY_STATE_LABEL: Record<string, string> = {
-  ok: '正常',
-  stale: '応答遅延',
-  baseline: '初期確認中',
-  paused: '監視停止',
-  failed: '要対応',
-  unmonitored: '未監視',
-  quiet: '長期未応答',
-  never: '未接続',
-};
-
-const INVENTORY_STATE_CLASS: Record<string, string> = {
-  ok: 'badge badge-done',
-  stale: 'badge badge-on-hold',
-  baseline: 'badge',
-  paused: 'badge badge-danger',
-  failed: 'badge badge-danger',
-  unmonitored: 'badge badge-danger',
-  quiet: 'badge badge-danger',
-  never: 'badge badge-danger',
 };
 
 export default async function DeviceControlPage({
@@ -112,29 +112,23 @@ export default async function DeviceControlPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  // Target devices are read from configuration (ISMS_DEVICE_CONTROL_DEVICES). If unset, zero devices and no operations are shown.
-  const devices = deviceControlDevices();
-  const selectedDevice: string | null = typeof params.device === 'string' && devices.some((d) => d.key === params.device)
+  const selectedDevice = typeof params.device === 'string' && DEVICE_CONTROL_DEVICES.some((d) => d.key === params.device)
     ? params.device
-    : devices[0]?.key ?? null;
+    : DEVICE_CONTROL_DEVICES[0]!.key;
   const dispatched = params.dispatched === '1';
   const recovered = params.recovered === '1';
   const error = typeof params.error === 'string' ? params.error : null;
   const mode = params.mode === 'isms' ? 'isms' : 'risk';
-  const selectedDeviceLabel = selectedDevice
-    ? devices.find((d) => d.key === selectedDevice)?.label ?? selectedDevice
-    : '（未設定）';
+  const selectedDeviceLabel = DEVICE_CONTROL_DEVICES.find((d) => d.key === selectedDevice)?.label ?? selectedDevice;
 
   const configured = isDeviceControlConfigured();
-  // Check authorization first; for unauthorized users, do not call the history fetch (getDeviceControlHistory)
-  // at all. Fetching and then hiding the display is avoided because it leaves room for information to leak
-  // through side effects or timing of the fetch itself.
+  // 認可確認を先に行い、許可されていない利用者へは履歴取得(getDeviceControlHistory)
+  // 自体を呼ばない。取得してから表示を隠す実装は、取得処理自体の副作用や
+  // タイミングで情報が漏れる余地を残すため避ける。
   const actorEmail = configured ? await authorizedActorEmail() : null;
-  const history = actorEmail && selectedDevice ? await getDeviceControlHistory(selectedDevice) : null;
-  // Inventory viewing has authorization and configuration checks independent of the execution side (actorEmail/configured)
-  // (getDeviceInventory itself checks authorizedViewerEmail; no guard is needed in the caller).
-  const inventory = await getDeviceInventory();
-
+  const history = actorEmail ? await getDeviceControlHistory(selectedDevice) : null;
+  // 登録状態はManagement自身の台帳を読む。Codzilla/Kanameの操作対象一覧とは別物。
+  const managementInventory = await getManagementDeviceInventory();
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -142,8 +136,8 @@ export default async function DeviceControlPage({
           <p className="text-[12px] font-medium text-[var(--accent)]">Agent管理（RMM）</p>
           <h1 className="mt-1 text-[22px] font-semibold tracking-tight">デバイス管理</h1>
           <p className="mt-1 max-w-[820px] text-[13px] text-[var(--muted)]">
-            端末台帳を確認し、外部ディスパッチャ経由の固定操作を管理者として実行します。
-            端末利用者の都度承認は不要ですが、管理者認可と監査は常に必要です。
+            Management自身の端末台帳へagentを登録し、Codzillaの固定操作を管理者として実行します。
+            Kaname・Codzilla・Managementは独立して登録状態を持ち、不一致は登録完了にせずエラーとして扱います。
           </p>
         </div>
         <Link className="btn px-3 py-1.5 text-[12px]" href={`/operations?mode=${mode}`}>運用に戻る</Link>
@@ -153,12 +147,12 @@ export default async function DeviceControlPage({
         <div className="card p-4">
           <div className="text-[12px] text-[var(--muted)]">登録端末</div>
           <div className="mt-1 text-[24px] font-semibold tabular-nums">
-            {inventory.state === 'ok' ? inventory.items.length : inventory.state === 'empty' ? 0 : '確認不可'}
+            {managementInventory.state === 'ok' ? managementInventory.items.length : managementInventory.state === 'empty' ? 0 : '確認不可'}
           </div>
         </div>
         <div className="card p-4">
           <div className="text-[12px] text-[var(--muted)]">管理方式</div>
-          <div className="mt-1 text-[16px] font-semibold">ローカル端末エージェント</div>
+          <div className="mt-1 text-[16px] font-semibold">Codzilla Agent</div>
           <p className="mt-1 text-[11px] text-[var(--muted)]">Apple MDM登録は未実装</p>
         </div>
         <div className="card p-4">
@@ -168,49 +162,58 @@ export default async function DeviceControlPage({
         </div>
       </section>
 
+      <EnrollmentPanel />
+
       <section>
-        <h2 className="mb-1 text-[15px] font-semibold">管理対象</h2>
-        <p className="mb-3 max-w-[900px] text-[12px] text-[var(--muted)]">
-          正本はディスパッチャ側の端末台帳です。この画面は読み取り専用で、取得できない状態を0台とは表示しません。
-        </p>
-        {inventory.state === 'unavailable' ? (
-          <div className="card p-4 text-[13px] text-[var(--muted)]">
-            台帳を読み取れなかった({INVENTORY_UNAVAILABLE_LABEL[inventory.reason] ?? inventory.reason})
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="mb-1 text-[15px] font-semibold">管理対象</h2>
+            <p className="max-w-[900px] text-[12px] text-[var(--muted)]">
+              ここはManagement自身の登録台帳です。認証前の送付・導入状態も含め、登録経路の現在状態を表示します。
+            </p>
           </div>
-        ) : inventory.state === 'empty' ? (
+        </div>
+        {managementInventory.state === 'unavailable' ? (
+          <div className="card p-4 text-[13px] text-[var(--muted)]">
+            台帳を読み取れなかった({MANAGEMENT_INVENTORY_UNAVAILABLE_LABEL[managementInventory.reason] ?? managementInventory.reason})
+          </div>
+        ) : managementInventory.state === 'empty' ? (
           <div className="card p-4 text-[13px] text-[var(--muted)]">登録されている端末がまだ無い</div>
         ) : (
           <div className="card overflow-x-auto">
-            <table className="w-full min-w-[700px] border-collapse text-[13px]">
+            <table className="w-full min-w-[820px] border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-[12px] text-[var(--muted)]">
                   <th className="px-4 py-2 font-medium">端末</th>
                   <th className="px-4 py-2 font-medium">OS</th>
-                  <th className="px-4 py-2 font-medium">準拠状態</th>
-                  <th className="px-4 py-2 font-medium">管理方式</th>
-                  <th className="px-4 py-2 font-medium">最終応答</th>
+                  <th className="px-4 py-2 font-medium">登録状態</th>
+                  <th className="px-4 py-2 font-medium">送付先</th>
+                  <th className="px-4 py-2 font-medium">最終更新</th>
                 </tr>
               </thead>
               <tbody>
-                {inventory.items.map((it) => (
-                  <tr key={it.device_key} className="border-b border-[var(--border)]">
-                    <td className="px-4 py-2">
-                      {devices.find((d) => d.key === it.device_key)?.label ?? it.device_key}
-                    </td>
-                    <td className="px-4 py-2 text-[12px] text-[var(--muted)]">
-                      {it.os_family}{it.os_version ? ` ${it.os_version}` : ''}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className={INVENTORY_STATE_CLASS[it.state] ?? 'badge'}>
-                        {INVENTORY_STATE_LABEL[it.state] ?? '判定不能'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-[12px]">Agent</td>
-                    <td className="px-4 py-2 whitespace-nowrap text-[12px] text-[var(--muted)]">
-                      {it.last_success_at ? new Date(it.last_success_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '未実測'}
-                    </td>
-                  </tr>
-                ))}
+                {managementInventory.items.map((it) => {
+                  const deviceLabel = it.target_name || it.hardware_id || it.target_email;
+                  const lastUpdated = it.activated_at ?? it.installed_at ?? it.created_at;
+                  return (
+                    <tr key={it.id} className="border-b border-[var(--border)]">
+                      <td className="px-4 py-2">
+                        <div>{deviceLabel}</div>
+                        {it.hardware_id && <div className="text-[11px] text-[var(--muted)]">機体ID: {it.hardware_id}</div>}
+                      </td>
+                      <td className="px-4 py-2 text-[12px] text-[var(--muted)]">{it.os_family}</td>
+                      <td className="px-4 py-2">
+                        <span className={MANAGEMENT_STATUS_CLASS[it.status] ?? 'badge'}>
+                          {MANAGEMENT_STATUS_LABEL[it.status] ?? it.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-[12px]">{it.target_email}</td>
+                      <td className="px-4 py-2 whitespace-nowrap text-[12px] text-[var(--muted)]">
+                        {new Date(lastUpdated).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -221,11 +224,11 @@ export default async function DeviceControlPage({
         <section className="card border-[var(--warning)] p-5">
           <h2 className="text-[15px] font-semibold text-[var(--badge-warning-fg)]">この画面からは端末操作を実行できない</h2>
           <p className="mt-2 max-w-[820px] text-[13px] text-[var(--fg-2)]">
-            ディスパッチャの実行経路が利用できません。端末台帳の閲覧には影響しませんが、操作は管理者が接続設定を確認するまで停止します。
+            Codzillaの実行経路が利用できません。端末台帳の閲覧には影響しませんが、操作は管理者が接続設定を確認するまで停止します。
           </p>
           <details className="mt-3 text-[11px] text-[var(--muted)]">
             <summary className="cursor-pointer">管理者向け詳細</summary>
-            <p className="mt-2">サーバ側の実行URL、実行用S2S資格情報、テナント文脈、操作対象端末(ISMS_DEVICE_CONTROL_DEVICES)のいずれかが未設定です。</p>
+            <p className="mt-2">サーバ側の実行URL、実行用S2S資格情報、テナント文脈のいずれかが未設定です。</p>
           </details>
         </section>
       ) : (
@@ -233,12 +236,12 @@ export default async function DeviceControlPage({
           {dispatched && (
             <section className="card border-[var(--success)] bg-[var(--success-weak)] p-4" role="status">
               <p className="text-sm font-semibold text-[var(--badge-success-fg)]">実行を要求した</p>
-              <p className="mt-1 text-xs text-[var(--fg-2)]">固定テンプレートは追加の承認なしで実行へ進む。下の履歴で状態を確認できる。</p>
+              <p className="mt-1 text-xs text-[var(--fg-2)]">固定テンプレートはSlack承認なしで実行へ進む。下の履歴で状態を確認できる。</p>
             </section>
           )}
           {recovered && (
             <section className="card border-[var(--border)] bg-[var(--surface-2)] p-4" role="status">
-              {/* Not the success color. Being closed does not mean success on the device (success is only stated via exit code). */}
+              {/* 成功色にしない。閉じたことは端末での成功を意味しない（成功は終了コードでしか言わない）。 */}
               <p className="text-sm font-semibold text-[var(--fg)]">未確定の要求を閉じた（成功とは扱わない）</p>
               <p className="mt-1 text-xs text-[var(--fg-2)]">再実行はしていない。確認内容は監査に残り、この端末へ次の操作を出せるようになった。</p>
             </section>
@@ -257,7 +260,7 @@ export default async function DeviceControlPage({
               </p>
             </div>
             <nav aria-label="操作対象端末" className="mt-4 flex flex-wrap gap-2">
-              {devices.map((d) => (
+              {DEVICE_CONTROL_DEVICES.map((d) => (
                 <Link
                   key={d.key}
                   href={`/operations/device-control?device=${encodeURIComponent(d.key)}&mode=${mode}`}
@@ -278,7 +281,7 @@ export default async function DeviceControlPage({
               <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {DISPATCH_TEMPLATES.map((t) => (
                   <form key={t.id} action={dispatchDeviceControlAction} className="rounded-[var(--radius)] border border-[var(--border)] p-4">
-                    <input type="hidden" name="device_key" value={selectedDevice ?? ''} />
+                    <input type="hidden" name="device_key" value={selectedDevice} />
                     <input type="hidden" name="template_id" value={t.id} />
                     <input type="hidden" name="mode" value={mode} />
                     <div className="flex items-center justify-between gap-2">
@@ -309,8 +312,8 @@ export default async function DeviceControlPage({
           <section>
             <h2 className="mb-1 text-[15px] font-semibold">実行履歴: {selectedDeviceLabel}</h2>
             <p className="mb-3 max-w-[900px] text-[12px] text-[var(--muted)]">
-              直近{' '}20{' '}件。ディスパッチャ側の実行監査に加え、実行監査の終了コードから結果を表示する。
-              <span className="ms-1">終了コード0だけを「成功」とし、「executed」だけでは成功扱いにしない。</span>
+              直近{' '}20{' '}件。Codzilla側の実行監査(tool_calls)に加え、実行監査の終了コードから結果を表示する。
+              <span className="ml-1">終了コード0だけを「成功」とし、「executed」だけでは成功扱いにしない。</span>
             </p>
             {!actorEmail ? (
               <div className="card p-4 text-[13px] text-[var(--muted)]">

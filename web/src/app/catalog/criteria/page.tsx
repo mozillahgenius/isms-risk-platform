@@ -33,16 +33,16 @@ export default async function CriteriaPage() {
     return 'unknown';
   };
 
-  const levels = [5, 4, 3, 2, 1]; // Vertical axis (likelihood): higher at the top
-  // Number of "distinct values" in the band. Summing array lengths would show 14 even if the same value
-  // appeared twice, which would not prove that "all possible values are defined".
+  const levels = [5, 4, 3, 2, 1]; // 縦（発生可能性）は上を高くする
+  // 帯に入っている「相異なる値」の数。配列の長さを足すと、同じ値が二度入っていても
+  // 14 に見えてしまい、「取りうる値をすべて定義した」ことの根拠にならない。
   const defined = new Set([
     ...criteria.band_top_priority,
     ...criteria.band_action,
     ...criteria.band_consider,
     ...criteria.band_accept,
   ]).size;
-  // Products actually possible on 5x5 (14 distinct). Any gap in the definitions shows up as a difference here.
+  // 5×5 で実際に取りうる積（相異なる 14 通り）。定義漏れがあればここで差が出る。
   const reachable = new Set([1, 2, 3, 4, 5].flatMap((a) => [1, 2, 3, 4, 5].map((b) => a * b)));
   const undefinedValues = [...reachable].filter((v) => bandOf(v) === 'unknown').sort((a, b) => a - b);
 
@@ -97,7 +97,7 @@ export default async function CriteriaPage() {
         <p className="mt-3 text-[11px] text-[var(--muted)]">
           定義済みの値: {defined} 通り（5×5 で取りうる相異なる積は {reachable.size} 通り）。
           {undefinedValues.length > 0 && (
-            <span className="ms-1 text-[var(--danger)]">
+            <span className="ml-1 text-[var(--danger)]">
               未定義: {undefinedValues.join(', ')}
             </span>
           )}

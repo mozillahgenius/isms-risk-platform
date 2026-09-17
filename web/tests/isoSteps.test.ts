@@ -19,11 +19,11 @@ import {
   type StepTool,
 } from '../src/lib/isoSteps';
 
-// The measured baseline. The point is to break parts of it and confirm the test fails.
+// 実測の下敷き。ここを部分的に壊して「落ちること」を確かめるのが本題。
 const FULL: StepFacts = {
   counts: {
-    controls: 8,
-    risk_scenario_templates: 9,
+    controls: 304,
+    risk_scenario_templates: 196,
     policies: 12,
     roles: 5,
     asset_classes: 4,
@@ -90,7 +90,7 @@ const FULL: StepFacts = {
   registers: { assets: 17, risks: 18, measures: 19, competencies: 4, trainings: 3, scopeStatement: 1, scopeApprovals: 1, approvedPolicyVersions: 28, roleAssignments: 5, tenantPolicies: 28, soaControls: 93, audits: 1, auditFindings: 8, correctiveActions: 8, managementReviews: 1, securityObjectives: 4, controlEffectiveness: 2, contextIssues: 3, interestedParties: 5, legalRequirements: 6, continuityPlans: 2, continuityTests: 3, vulnerabilities: 4, changeRequests: 5 },
 };
 
-// Current real data: Annex A has 0 items, all policies are placeholders, and there is almost no records functionality.
+// いまの実データ: 附属書 A は 0 件、規程は全件が仮置き、記録の機能はほぼ無い。
 const clone = (f: StepFacts): StepFacts => ({
   counts: { ...f.counts },
   policyBodies: { ...f.policyBodies },
@@ -115,7 +115,7 @@ describe('段階の並び', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  // Building expectations from ISO_STEPS would pass even if a stage were removed. Pin the order here.
+  // 期待値を ISO_STEPS から作ると、段階を削っても通ってしまう。並びをここに固定する。
   const EXPECTED_KEYS = [
     'scope',
     'policy',
@@ -162,7 +162,7 @@ describe('段階の並び', () => {
       if (s.ordinal === ISO_STEPS.length) expect(next).toBeNull();
       else expect(next?.ordinal).toBe(s.ordinal + 1);
     }
-    // Can be traversed from end to end (if not, there is a cycle or a break)
+    // 端から端まで辿り切れる（辿れなければ循環か切断がある）
     let cur = getStep(ISO_STEPS[0].key);
     let hops = 0;
     while (cur && stepNeighbors(cur.key).next) {
@@ -180,7 +180,7 @@ describe('段階の並び', () => {
 });
 
 describe('段階が持つ道具の不変条件', () => {
-  // If required is empty, every() is true and it turns into usable. Types cannot prevent this, so stop it here.
+  // required が空だと every() が真になって usable に化ける。型では防げないのでここで止める。
   it('どの段階も required な下敷きと記録を 1 つ以上持つ', () => {
     for (const s of ISO_STEPS) {
       const req = s.tools.filter((t) => t.required);
@@ -202,8 +202,8 @@ describe('段階が持つ道具の不変条件', () => {
     }
   });
 
-  // Only things that can serve as evidence of implementation may be counted as records.
-  // Write this as an **allowlist**, not a denylist. A denylist leaves holes when sources are added.
+  // 記録として数えてよいのは、実施の証跡になり得るものだけ。
+  // 禁止リストではなく**許可リスト**で書く。禁止リストは source を増やしたときに穴が空く。
   it('記録の取得元は unbuilt・verifiedCheckRuns・register だけ', () => {
     for (const s of ISO_STEPS) {
       for (const t of s.tools) {
@@ -216,10 +216,10 @@ describe('段階が持つ道具の不変条件', () => {
     }
   });
 
-  // The allowlist only says "register may be used".
-  // Which register is wired to which screen is pinned separately. Without pinning it,
-  // all tests pass even if registerKey is mixed up or href is wrong
-  // (you could not notice the asset field showing the risk count).
+  // 許可リストは「register を使ってよい」までしか言わない。
+  // どの台帳を、どの画面につないだかは別に固定する。ここを固定しないと、
+  // registerKey を取り違えても href を間違えても、試験は全部通る
+  // （資産の欄がリスクの件数を出していても気づけない）。
   it('記録欄と台帳と行き先の対応が固定されている', () => {
     const EXPECTED: Record<string, { registerKey: RegisterKey; path: string }> = {
       'assets/asset-register': { registerKey: 'assets', path: '/risk-management/assets' },
@@ -233,25 +233,25 @@ describe('段階が持つ道具の不変条件', () => {
         const id = `${s.key}/${t.key}`;
         seen.push(id);
         const want = EXPECTED[id];
-        if (!want) continue; // Registers added by another owner are pinned in that owner's tests
+        if (!want) continue; // 別の担当が足した台帳は、その担当の試験で固定する
         expect(t.source.registerKey, `${id} の台帳`).toBe(want.registerKey);
         expect(t.href, `${id} の行き先`).not.toBeNull();
         const url = new URL(t.href!, 'https://management.invalid');
         expect(url.pathname, `${id} の行き先`).toBe(want.path);
-        // The stage screens are an ISMS lens. If the destination drops the lens,
-        // the stage-side count (ISO scope) and the register-side list (company-wide) disagree.
+        // 段階の画面は ISMS のレンズ。行き先でレンズが外れると、
+        // 段階側の件数（ISO 対象）と台帳側の一覧（全社）が食い違う。
         expect(url.searchParams.get('framework'), `${id} の枠組み`).toBe('ISO27001:2022');
         expect(url.searchParams.get('mode'), `${id} のモード`).toBe('isms');
       }
     }
-    // The expected 3 items must actually exist. Make it fail even if the definition is deleted entirely.
+    // 期待した 3 件が実在すること。定義ごと消えても落ちるようにする。
     for (const id of Object.keys(EXPECTED)) {
       expect(seen, `${id} が段階から消えている`).toContain(id);
     }
   });
 
-  // 0065: Organizational issues (4.1) and interested parties (4.2) only show counts, since the standard does not require documented information.
-  // Making them required would turn the currently satisfied scope stage into unsatisfied for existing tenants (decided 2026-09-12).
+  // 0065: 組織の課題（4.1）・利害関係者（4.2）は、規格が文書化情報を求めないので件数を出すだけ。
+  // 必須にすると、今は満たしている適用範囲の段階が既存テナントで満たさない表示に変わる（2026-09-12 決定）。
   it('組織の課題・利害関係者は適用範囲の段階に件数表示だけで載る', () => {
     const scope = ISO_STEPS.find((s) => s.key === 'scope')!;
     const want: Record<string, { registerKey: RegisterKey; hash: string }> = {
@@ -271,7 +271,7 @@ describe('段階が持つ道具の不変条件', () => {
     }
   });
 
-  // 0066: A.5.31 is an Annex A control. Applicability is decided by the Statement of Applicability, so it appears in the operation stage as a count only.
+  // 0066: A.5.31 は附属書 A の統制。適用は適用宣言書で決まるので、運用の段階に件数表示だけで載る。
   it('法令・契約上の要求事項は運用の段階に件数表示だけで載る', () => {
     const operate = ISO_STEPS.find((s) => s.key === 'operate')!;
     const t = operate.tools.find((x) => x.key === 'legal-requirements');
@@ -285,7 +285,7 @@ describe('段階が持つ道具の不変条件', () => {
     expect(url.searchParams.get('mode')).toBe('isms');
   });
 
-  // 0068: Business continuity has separate fields for plans and tests; both appear in the operation stage as counts only.
+  // 0068: 事業継続は計画と試験を別の欄にし、どちらも運用の段階に件数表示だけで載る。
   it('事業継続の計画と試験は運用の段階に別の欄として件数表示だけで載る', () => {
     const operate = ISO_STEPS.find((s) => s.key === 'operate')!;
     const want: Record<string, RegisterKey> = {
@@ -303,7 +303,7 @@ describe('段階が持つ道具の不変条件', () => {
     }
   });
 
-  // 0069: A.8.8 is also an Annex A control. It appears in the operation stage as a count only.
+  // 0069: A.8.8 も附属書 A の統制。運用の段階に件数表示だけで載る。
   it('技術的脆弱性は運用の段階に件数表示だけで載る', () => {
     const operate = ISO_STEPS.find((s) => s.key === 'operate')!;
     const t = operate.tools.find((x) => x.key === 'vulnerabilities');
@@ -315,7 +315,7 @@ describe('段階が持つ道具の不変条件', () => {
     expect(url.hash).toBe('#vulnerabilities');
   });
 
-  // 0070: A.8.32 is also an Annex A control. It appears in the operation stage as a count only.
+  // 0070: A.8.32 も附属書 A の統制。運用の段階に件数表示だけで載る。
   it('変更の申請と承認は運用の段階に件数表示だけで載る', () => {
     const operate = ISO_STEPS.find((s) => s.key === 'operate')!;
     const t = operate.tools.find((x) => x.key === 'change-requests');
@@ -327,8 +327,8 @@ describe('段階が持つ道具の不変条件', () => {
     expect(url.hash).toBe('#changes');
   });
 
-  // Do not count the catalog (baseline shared by all tenants) as records.
-  // Records come from the organization's own operational data (app schema).
+  // カタログ（全テナント共有の下敷き）を記録として数えない。
+  // 記録は自社の運用データ（app スキーマ）から出る。
   it('参照の取得元に register を使わない', () => {
     for (const s of ISO_STEPS) {
       for (const t of s.tools) {
@@ -343,9 +343,9 @@ describe('段階が持つ道具の不変条件', () => {
       for (const t of s.tools) {
         if (t.href === null) continue;
         expect(t.href, `${s.key}/${t.key}`).toMatch(
-          // **Before adding here, confirm that web/src/app/<name>/page.tsx exists.**
-          // organization and wizard exist only as directories without pages,
-          // so pointing to them gives 404 (this check actually caught an attempt to point to them).
+          // **ここに足す前に web/src/app/<名前>/page.tsx が在ることを確かめる。**
+          // organization と wizard はディレクトリだけ在ってページが無く、
+          // 指すと 404 になる（実際に指しかけてこの検査が止めた）。
           /^\/(catalog|operations|graph|steps|risk-management|competency|training|policies|iso27001|incidents)(\/|\?|$)/,
         );
       }
@@ -364,8 +364,8 @@ describe('段階が持つ道具の不変条件', () => {
     }
   });
 
-  // Checking only the shape of clauses is meaningless. Pin the mapping to stages itself.
-  // Fails if the order of 10.1/10.2, 6.1.3 (d is the Statement of Applicability), or the placement of A.5.35/A.5.36 is moved by mistake.
+  // 箇条は形だけ見ても意味が無い。段階との対応そのものを固定する。
+  // 10.1/10.2 の順、6.1.3（d が適用宣言書）、A.5.35/A.5.36 の置き場所を誤って動かせば落ちる。
   it('段階と箇条の対応が固定されている', () => {
     const EXPECTED: Record<string, string[]> = {
       scope: ['4.1', '4.2', '4.3', '4.4'],
@@ -423,11 +423,11 @@ describe('seed の行が段階から浮かない', () => {
   });
 
   it('差集合を双方向で出す', () => {
-    // If the config and the DB match, both are 0
+    // 設定と DB が一致していれば両方 0
     expect(diffAssignment(['a', 'b'], ['a', 'b'])).toEqual({ inDbOnly: [], inConfigOnly: [] });
-    // Added to the DB but forgot the assignment
+    // DB に足して割り当てを忘れた
     expect(diffAssignment(['a'], ['a', 'b']).inDbOnly).toEqual(['b']);
-    // Wrote a key that does not exist in the config
+    // 設定に存在しないキーを書いた
     expect(diffAssignment(['a', 'zz'], ['a']).inConfigOnly).toEqual(['zz']);
   });
 
@@ -494,8 +494,8 @@ describe('道具の状態', () => {
   });
 
   it('要る規程が DB から欠けていれば present にしない', () => {
-    // The denominator is "number of required policies". If only the number present in the DB were used,
-    // losing one would still be "usable" as long as the rest are complete.
+    // 分母は「要る規程の数」。DB に在る数だけを分母にすると、
+    // 1 本抜け落ちても残りがそろっているだけで「使える」になる。
     const t = tool({ kind: 'policies', keys: ['p01_basic', 'does_not_exist'] });
     expect(resolveTool(t, FULL)).toEqual({ kind: 'placeholder', count: 1, total: 2 });
 
@@ -503,7 +503,7 @@ describe('道具の状態', () => {
     delete gone.policyBodies.p01_basic;
     expect(resolveTool(t, gone)).toEqual({ kind: 'empty' });
 
-    // If 1 of the 5 required disappears from the DB, it fails even if the remaining 4 have real bodies
+    // 5 本要るうち 1 本が DB から消えると、残り 4 本が実本文でも落ちる
     const five = tool({
       kind: 'policies',
       keys: ['p07_access', 'p09_physical', 'p10_technical', 'p11_vendor', 'p12_incident'],
@@ -531,7 +531,7 @@ describe('道具の状態', () => {
     const t = tool({ kind: 'annexA' });
     expect(resolveTool(t, FULL)).toEqual({ kind: 'present', count: 93 });
 
-    // Looking only at counts would pass even when non-Annex-A controls are linked
+    // 件数だけ見ていると、附属書 A ではない統制を紐付けても通ってしまう
     const bad = clone(FULL);
     bad.annexA = { total: 94, wellFormed: 93 };
     expect(resolveTool(t, bad)).toEqual({ kind: 'malformed', wellFormed: 93, total: 94 });
@@ -552,7 +552,7 @@ describe('道具の状態', () => {
     const t = tool({ kind: 'roles', keys: ['auditor'] });
     expect(resolveTool(t, FULL)).toEqual({ kind: 'present', count: 1 });
 
-    // Even with all 5, independence is not assured without an auditor
+    // 5 件そろっていても、監査人が居なければ独立性は担保されない
     const noAuditor = clone(FULL);
     noAuditor.roleKeys = ['ciso', 'secretariat', 'risk_owner', 'employee', 'extra'];
     expect(noAuditor.roleKeys.length).toBe(5);
@@ -563,7 +563,7 @@ describe('道具の状態', () => {
   });
 
   it('規程のキー判定でプロトタイプのプロパティを拾わない', () => {
-    // Written as `k in obj`, this would be counted as "a policy present in the DB"
+    // `k in obj` で書くと、これが「DB に在る規程」として数えられてしまう
     const t = tool({ kind: 'policies', keys: ['toString', 'constructor'] });
     expect(resolveTool(t, FULL)).toEqual({ kind: 'empty' });
   });
@@ -574,7 +574,7 @@ describe('道具の状態', () => {
     nan.annexA = { total: Number.NaN, wellFormed: 0 };
     expect(resolveTool(t, nan)).toEqual({ kind: 'unreadable' });
 
-    // A matching-shape count exceeding the total means the aggregation is broken
+    // 形の合う件数が総数を超えるのは集計が壊れている
     const over = clone(FULL);
     over.annexA = { total: 2, wellFormed: 5 };
     expect(resolveTool(t, over)).toEqual({ kind: 'malformed', wellFormed: 5, total: 2 });
@@ -592,7 +592,7 @@ describe('道具の状態', () => {
     zero.verifiedCheckRuns = 0;
     expect(resolveTool(t, zero)).toEqual({ kind: 'empty' });
 
-    // Do not let NaN turn into "not loaded" or Infinity into "usable"
+    // NaN を「未投入」に、Infinity を「使える」に化けさせない
     const nan = clone(FULL);
     nan.verifiedCheckRuns = Number.NaN;
     expect(resolveTool(t, nan)).toEqual({ kind: 'unreadable' });
@@ -601,19 +601,19 @@ describe('道具の状態', () => {
     expect(resolveTool(t, inf)).toEqual({ kind: 'unreadable' });
   });
 
-  // Registers are prone to confusing 0 items, not implemented, and unreadable. Pin all three separately.
+  // 台帳は 0 件・未実装・読めないの取り違えが起きやすい。3 つとも別々に固定する。
   it('台帳は行があれば使えると出す', () => {
     const t = tool({ kind: 'register', registerKey: 'assets' }, 'record');
 
-    // If registered, show as usable regardless of approval or presence of a management representative
-    // (user decision on 2026-09-07; do not tip this toward the 0-items side).
+    // 登録されていれば、承認や管理責任者の有無に関係なく使える側に出す
+    // （2026-09-07 のユーザー判断。ここを 0 件側へ倒さない）。
     expect(resolveTool(t, FULL)).toEqual({ kind: 'present', count: 17 });
 
     const one = clone(FULL);
     one.registers!.assets = 1;
     expect(resolveTool(t, one)).toEqual({ kind: 'present', count: 1 });
 
-    // Not loaded only when the register is empty
+    // 台帳が空のときだけ未投入
     const empty = clone(FULL);
     empty.registers!.assets = 0;
     expect(resolveTool(t, empty)).toEqual({ kind: 'empty' });
@@ -622,12 +622,12 @@ describe('道具の状態', () => {
   it('台帳が読めないときに 0 件と言わない', () => {
     const t = tool({ kind: 'register', registerKey: 'risks' }, 'record');
 
-    // No tenant context / DB is down
+    // テナント文脈が無い・DB が落ちている
     const unread = clone(FULL);
     unread.registers = null;
     expect(resolveTool(t, unread)).toEqual({ kind: 'unreadable' });
 
-    // Do not let values from a broken count turn into either not loaded or usable
+    // 数え方が壊れている値を、未投入にも使えるにも化けさせない
     const nan = clone(FULL);
     nan.registers!.risks = Number.NaN;
     expect(resolveTool(t, nan)).toEqual({ kind: 'unreadable' });
@@ -641,25 +641,25 @@ describe('道具の状態', () => {
     expect(resolveTool(t, neg)).toEqual({ kind: 'unreadable' });
   });
 
-  // A key mix-up silently becomes a lie (the asset field shows the risk count).
+  // キーの取り違えは静かに嘘になる（資産の欄がリスクの件数を出す）。
   it('台帳のキーごとに別の実測を読む', () => {
     const f = clone(FULL);
     const at = (k: RegisterKey) =>
       resolveTool(tool({ kind: 'register', registerKey: k }, 'record'), f);
-    // **Check every key individually.** Checking only some means that if an added key
-    // shows another key's count, you cannot notice.
+    // **全キーを個別に確かめる。** 一部だけ見ると、増えたキーが
+    // 別のキーの件数を出していても気づけない。
     for (const [key, want] of Object.entries(f.registers!) as [RegisterKey, number][]) {
       expect(at(key), `${key} の件数`).toEqual(
         want > 0 ? { kind: 'present', count: want } : { kind: 'empty' },
       );
     }
-    // Expectations must cover every key (adding a key but forgetting the fixture would slip through).
-    // 0063 added control effectiveness evaluation (controlEffectiveness), making 17.
-    // 0065 added organizational issues (contextIssues) and interested parties (interestedParties), making 19.
-    // 0066 added legal and contractual requirements (legalRequirements), making 20.
-    // 0068 added business continuity plans (continuityPlans) and tests (continuityTests), making 22.
-    // 0069 added vulnerabilities (vulnerabilities), making 23.
-    // 0070 added change requests (changeRequests), making 24.
+    // 期待値が全キー分そろっていること（キーを足して fixture を忘れると素通りする）。
+    // 0063 で統制の有効性評価（controlEffectiveness）を足して 17。
+    // 0065 で組織の課題（contextIssues）・利害関係者（interestedParties）を足して 19。
+    // 0066 で法令・契約上の要求事項（legalRequirements）を足して 20。
+    // 0068 で事業継続の計画（continuityPlans）・試験（continuityTests）を足して 22。
+    // 0069 で脆弱性（vulnerabilities）を足して 23。
+    // 0070 で変更の申請（changeRequests）を足して 24。
     expect(Object.keys(f.registers!).length).toBe(24);
   });
 });
@@ -783,7 +783,7 @@ describe('段階の状態の導出', () => {
     const a = assessStep(s, unread);
     expect(a.status).toBe('partial');
     expect(a.hasUnreadable).toBe(true);
-    // Do not say unreadable when it is readable
+    // 読めているときに読めないと言わない
     expect(assessStep(s, FULL).hasUnreadable).toBe(false);
   });
 });

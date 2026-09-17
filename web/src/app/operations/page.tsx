@@ -12,9 +12,9 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: '運用' };
 
-// Screen for operations (the tenant's actual data).
-// What matters is "not presenting an empty dashboard with the face of a working one".
-// Write 0 only when it is known to be 0. If it could not be read, say it could not be read.
+// 運用（テナントの実データ）の画面。
+// 大事なのは「空のダッシュボードを、動いているダッシュボードの顔で置かない」こと。
+// 0 と書けるのは 0 だと分かっているときだけ。読めていないなら読めていないと出す。
 
 const PLANNED: { title: string; detail: string }[] = [
   { title: '逸脱と是正', detail: '検出 → 是正 → 閉じたことの再確認まで' },
@@ -267,9 +267,9 @@ ISMS_WEB_TENANT_TOKEN=<トークン>`}</pre>
                             確認後に中身が変わった
                           </span>
                         ) : (
-                          // It claims to be verified but has no fingerprint. Currently the 0022 trigger
-                          // prevents this state, but we do not assert that "it changed".
-                          // Report what cannot be determined as undeterminable.
+                          // 確認済みと言っているのに指紋が無い。いまは 0022 のトリガが
+                          // この状態を作らせないが、「変わった」と断定はしない。
+                          // 判定できないことを判定できないと出す。
                           <span
                             className="badge badge-on-hold"
                             title="確認済みとされているが指紋が無く、いまの定義と照らせない"

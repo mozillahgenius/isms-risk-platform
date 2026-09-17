@@ -15,9 +15,9 @@ const optionalText = (form: FormData, key: string, max = 4000): string | null =>
   return value ? value.slice(0, max) : null;
 };
 
-// Follows as is the approach established in the Codex review of 0037 (cost):
-// The form guarantees YYYY-MM-DD via an HTML5 date input, but it can be tampered with, so
-// the server also validates the format and that the date exists.
+// 0037(cost)のCodexレビューで確立した方針をそのまま踏襲する:
+// フォームはHTML5 date inputでYYYY-MM-DDを保証するが、改ざん可能なので
+// サーバー側でも形式・実在日付を検証する。
 const isoDate = (form: FormData, key: string, label: string): string => {
   const raw = text(form, key, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error(`${label} はYYYY-MM-DD形式で入力してください`);
@@ -44,10 +44,10 @@ export async function saveRequirement(form: FormData) {
   const requiredCompetency = text(form, 'required_competency', 200);
   const description = optionalText(form, 'description', 2000) ?? '';
   const result = await withTenantWrite(async (sql) => {
-    // Unlike rate_master (0037), requirement definitions are not something other calculations
-    // refer back to for past periods (they are just definition text), so re-registration may be treated
-    // as an update of the description (upsert). Re-registering the same (role, required_competency)
-    // need not be an error.
+    // rate_master(0037)と違い、要件定義は他の計算が過去分を遡って参照する
+    // ものではない(単なる定義テキスト)ため、再登録は説明文の更新として
+    // 扱ってよい(upsert)。同じ(role, required_competency)への再登録を
+    // エラーにする必要はない。
     await sql`
       INSERT INTO app.competency_requirements (tenant_id, role, required_competency, description)
       VALUES (app.current_tenant(), ${role}, ${requiredCompetency}, ${description})
@@ -89,10 +89,10 @@ export async function saveFulfillment(form: FormData) {
       evidenceTrainingId = trainingId;
       evidenceTrainingUserId = memberId;
     }
-    // Each requirement_id/member_id pair is consolidated into one row (UNIQUE constraint), so
-    // treat it as an update of the existing record (fulfillment status is a list of "how it is now", so
-    // the design keeps the latest value, not history. Different in nature from 0037's duplicate = reject:
-    // here, re-evaluating the same combination is normal operation).
+    // requirement_id・member_idの組は1行に集約する(UNIQUE制約)ので、
+    // 既存記録の更新として扱う(充足状況は「今どうか」の一覧のため、
+    // 履歴ではなく最新値を保持する設計。0037の重複=拒否とは性質が違う:
+    // こちらは同じ組み合わせへの再評価が正常な運用)。
     await sql`
       INSERT INTO app.competency_fulfillments
         (tenant_id, requirement_id, member_id, status, evidence_ref, assessed_on,

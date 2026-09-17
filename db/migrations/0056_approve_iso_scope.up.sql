@@ -1,16 +1,16 @@
 -- @run-as: admin
--- 0056: Function that records approval of the ISMS scope (4.3).
+-- 0056: ISMS 適用範囲（4.3）の承認を記録する関数。
 --
--- Only the scope had no approval path; the only option was a direct INSERT into app.approvals.
--- A direct INSERT means the DB does not check "who may approve", so align it with policy approval
--- (app.approve_policy_version in 0034).
+-- 適用範囲だけ承認の経路が無く、app.approvals へ直接 INSERT するしかなかった。
+-- 直接 INSERT だと「誰が承認してよいか」を DB が見ないので、規程の承認
+-- （0034 の app.approve_policy_version）と同じ形にそろえる。
 --
--- Three points are aligned:
---   1. Only the executive (ciso) can approve
---   2. The hash of the body at approval time is bound to the approval record
---      (even if the body is edited later, "what was approved" remains)
---   3. The same body cannot be approved twice
---      (if the body has changed, it can be approved again)
+-- そろえるのは 3 点:
+--   1. 経営責任者（ciso）でなければ承認できない
+--   2. 承認した時点の本文のハッシュを承認記録へ結ぶ
+--      （後から本文を直しても「何を承認したか」が残る）
+--   3. 同じ本文を二重に承認できない
+--      （本文が変わっていれば、改めて承認できる）
 
 SET ROLE schema_owner;
 
@@ -31,11 +31,11 @@ BEGIN
     RAISE EXCEPTION 'executive role required' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
-  -- **Do not add FOR UPDATE.** Row locks also require an UPDATE policy, but
-  -- schema_owner has only SELECT (ctx_tenant_lookup) and INSERT
-  -- policies on app.tenants. With it, no row is visible and the body is misjudged as empty (measured).
-  -- Records stay consistent even without a lock. The hash is taken from **the body just read**, so
-  -- the approval record always points to "the body at approval time".
+  -- **FOR UPDATE を付けない。** 行ロックは UPDATE ポリシーも要求するが、
+  -- schema_owner は app.tenants に SELECT（ctx_tenant_lookup）と INSERT の
+  -- ポリシーしか持たない。付けると 1 行も見えず「本文が空」と誤判定する（実測）。
+  -- ロックが無くても記録は矛盾しない。ハッシュは**いま読んだ本文**から取るので、
+  -- 承認記録は常に「承認した時点の本文」を指す。
   SELECT iso_scope_statement INTO v_scope
     FROM app.tenants WHERE id = v_tenant;
   IF v_scope IS NULL OR length(btrim(v_scope)) = 0 THEN
@@ -44,8 +44,8 @@ BEGIN
 
   v_hash := public.digest(pg_catalog.convert_to(v_scope, 'UTF8'), 'sha256');
 
-  -- **Do not approve the same body twice.** If the body has changed, allow it
-  -- (re-approving on every revision is how 4.3 is operated).
+  -- **同じ本文を二重に承認しない。** 本文が変わっていれば通す
+  -- （改訂のたびに承認し直すのが 4.3 の運用）。
   IF EXISTS (
     SELECT 1 FROM app.approvals
      WHERE tenant_id = v_tenant AND target_type = 'iso_scope'

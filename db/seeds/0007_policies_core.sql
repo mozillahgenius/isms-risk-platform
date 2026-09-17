@@ -1,30 +1,30 @@
--- 0007 Bodies of the standard policies (p01-p12)
+-- 0007 標準規程の本文（p01〜p12）
 --
--- In 0001 all 12 were placeholders: a heading plus "(standard body)". The screens likewise
--- showed them as "body not yet prepared" (the check in web/src/lib/policyBody.ts). Here they are
--- replaced with **bodies of rules that can actually be followed**.
+-- 0001 では 12 本すべてが見出し＋「（標準本文）」の仮置きだった。画面もそれを
+-- 「本文が未整備」と表示していた（web/src/lib/policyBody.ts の判定）。ここで
+-- **実際に守れる規則の本文**へ置き換える。
 --
--- On provenance (stated explicitly to avoid misunderstanding):
---   These bodies are not the text of the ISO/IEC 27001 standard. They are **templates of the standard policies
---   this project distributes as DOM 2026.1**, written by this project with the intent of satisfying
---   the standard's requirements and the Annex A controls. clause_refs are an indicative association,
---   not a formal mapping to the standard (/catalog/policies carries the same disclaimer).
+-- 出所について（誤解を避けるために明記する）:
+--   この本文は ISO/IEC 27001 の規格本文ではない。**当社が DOM 2026.1 として配る
+--   標準規程のひな形**であり、規格の要求事項と附属書 A の管理策を満たすことを
+--   意図して当社が書き下したもの。clause_refs は関連づけの目安であって、
+--   規格との正式な対応表ではない（/catalog/policies にも同じ断りがある）。
 --
--- 0001 is not rewritten. Its placeholders are a premise of check_web.sh's mutation test (confirming that
--- the stage display changes from placeholder -> real body); removing them would kill that reverse verification.
--- The bodies are overwritten by this seed.
+-- 0001 は書き換えない。0001 の仮置きは check_web.sh の変異試験（仮置き → 実本文で
+-- 段階の表示が変わることの確認）が前提にしていて、そこを消すと逆向き検証が死ぬ。
+-- 本文はこの seed で上書きする。
 --
--- Writing conventions:
---   - Policies are the **standard** distributed by DOM. Do not write specific organization, person or product names in bodies.
---     Values that vary per organization (scope, structure, services used) are written in the policy as
---     "as determined by the organization", with the actual values held in the tenant's ledgers (app.assets /
---     app.measures / app.risk_scenarios) and records.
---   - Clauses spell out "who does what, when, and how it is recorded". Do not write clauses whose
---     compliance cannot be verified afterwards.
---   - A tenant's changes to a body are recorded as deviations (policy_edit in app.deviations)
---     (design doc 1.6). So the standard side must not be vague.
+-- 書き方の約束:
+--   - 規程は DOM が配る **標準**。特定の組織名・人名・製品名を本文へ書かない。
+--     組織ごとに変わる値（適用範囲・体制・利用するサービス）は、規程では
+--     「組織が定める」と書き、実際の値はテナントの台帳（app.assets /
+--     app.measures / app.risk_scenarios）と各種記録に持たせる。
+--   - 条文は「誰が・何を・いつ・どう記録するか」まで書く。守れたかを後から
+--     確かめられない条文は書かない。
+--   - 本文を変えるテナントの差分は逸脱（app.deviations の policy_edit）として
+--     記録される（設計書 1.6）。だから標準側を曖昧に濁さない。
 --
--- Idempotent. Running it any number of times yields the same bodies.
+-- 冪等。何度流しても同じ本文になる。
 
 \set ON_ERROR_STOP on
 
@@ -471,8 +471,8 @@ UPDATE catalog.policies_default SET body_md = $md$# インシデント対応・�
 マネジメントレビューの入力に用いる。
 $md$ WHERE key = 'p12_incident';
 
--- Verify on the spot that this seed "really inserted the bodies".
--- None of the 12 may remain a placeholder. If even one remains, rerunning is pointless.
+-- この seed が「本当に本文を入れたか」をその場で確かめる。
+-- 12 本すべてが仮置きでなくなっていること。1 本でも残っていたら流し直しても意味が無い。
 DO $$
 DECLARE v_bad text;
 BEGIN

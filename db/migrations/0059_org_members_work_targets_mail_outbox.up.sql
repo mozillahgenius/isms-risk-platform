@@ -1,33 +1,33 @@
 -- @run-as: admin
--- 0059: Organization and member management / linking work to records / mail send queue
+-- 0059: 組織・メンバー管理 / 作業のレコード紐付け / メール送信キュー
 --
--- Background (measured):
---   (1) navigation.ts shows /organization in both RISK and ISMS modes, yet
---       web/src/app/organization/ was empty and returned 404 (deleted in 27c56ef). In restoring
---       the screen, we also let it handle "adding and suspending members", which the screen
---       never had. app.set_tenant_context_for_proxy (0050) only admits "people with status='active' and
---       exactly one valid membership", so the member table is effectively the access-rights
---       list. Who may touch it is enforced on the DB side too.
---   (2) app.work_items in 0058 holds only the unit of work, not which record the work is
---       about. app.work_assignments in 0057 is per record but can hold only one person,
---       which would mean two ledgers. Here work_items carries the target record, consolidating
---       the ledger into work_items alone (work_assignments is left as in 0057).
---   (3) "Sending" external questionnaires and request notifications both exit through one channel: mail. Rather than a table
---       per destination, everything goes into a single send queue, app.mail_outbox.
+-- 背景（実測）:
+--   (1) navigation.ts は RISK / ISMS の両モードで /organization を出しているのに
+--       web/src/app/organization/ が空で 404 だった（27c56ef で削除）。画面を戻すに
+--       あたり、これまで画面が持っていなかった「メンバーを増やす・止める」を扱える
+--       ようにする。app.set_tenant_context_for_proxy(0050) は「status='active' かつ
+--       有効な所属が 1 件だけある人」しか通さないので、メンバー表＝実質のアクセス権
+--       一覧である。誰が触ってよいかを DB 側にも置く。
+--   (2) 0058 の app.work_items は作業単位だけを持ち、どのレコードについての作業かを
+--       持たない。0057 の app.work_assignments はレコード単位だが人が 1 人しか持てず、
+--       台帳が 2 本になる。ここでは work_items 側に対象レコードを持たせ、台帳を
+--       work_items 一本に寄せる（work_assignments は 0057 のまま触らない）。
+--   (3) 外部質問票の「送付」も、依頼の通知も、出口はメール 1 本。宛先ごとに別表を
+--       作らず、単一の送信キュー app.mail_outbox に集約する。
 --
--- Policy: DML is done by the application (management_web = app_rw); this migration
---   puts only "who may do it" and "never allowing a broken state" on the DB side.
---   app.users / app.memberships are under FORCE RLS and schema_owner has only SELECT
---   policies on them (ctx_*_lookup in 0005), so a SECURITY DEFINER function cannot
---   write to them. Same shape as 0057 / 0058 (checks in functions, writes in the app)
---   for consistency.
+-- 方針: DML はアプリ側（management_web = app_rw）で行い、この migration は
+--   「誰がやってよいか」と「壊れた状態を作らせないか」だけを DB 側へ置く。
+--   app.users / app.memberships は FORCE RLS 下で schema_owner に SELECT の
+--   ポリシーしか無い（0005 の ctx_*_lookup）ため、SECURITY DEFINER 関数から
+--   書き込むことはできない。0057 / 0058 と同じ形（判定は関数・書き込みはアプリ）
+--   にそろえる。
 
 SET ROLE schema_owner;
 
 -- ------------------------------------------------------------------
--- (1) Add member_manage / department_manage / notify to the permission check
---     Carries over the 0057 body as-is and only adds branches. So that there are not two
---     permission checks, new screens also look only here.
+-- (1) 権限判定に member_manage / department_manage / notify を足す
+--     0057 の本体をそのまま持ち込み、分岐だけを追加する。判定を 2 系統に
+--     しないため、新画面もここだけを見る。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.require_management_permission(
   p_resource_type text,
@@ -46,11 +46,11 @@ BEGIN
   IF p_action = 'role_manage' AND v_role <> 'owner' THEN
     RAISE EXCEPTION 'owner role required' USING ERRCODE='insufficient_privilege';
   END IF;
-  -- Registering, suspending and reactivating members, and creating/retiring departments, are for owners and admins only.
-  -- Managers can make requests for their own department but do not decide who joins or leaves.
-  -- People joining/leaving (member_manage) and the organization's shape, scope and certification body (org_manage)
-  -- are for owners and admins only. Managers can make requests for their own department but decide neither
-  -- joining/leaving nor the organization's shape. Reassigning management roles themselves is role_manage (owner).
+  -- メンバーの新規登録・停止・再開と部門の改廃は、オーナーと管理者まで。
+  -- マネージャーは自部門の依頼はできるが、入退場は決めない。
+  -- 人の出入り（member_manage）と、組織の形・適用範囲・審査機関（org_manage）は
+  -- オーナーと管理者まで。マネージャーは自部門の依頼はできるが、入退場も
+  -- 組織の形も決めない。管理ロールそのものの付け替えは role_manage（オーナー）。
   IF p_action IN ('member_manage','org_manage') AND v_role NOT IN ('owner','admin') THEN
     RAISE EXCEPTION 'admin role required' USING ERRCODE='insufficient_privilege';
   END IF;
@@ -79,22 +79,22 @@ REVOKE ALL ON FUNCTION app.require_management_permission(text,uuid,text) FROM PU
 GRANT EXECUTE ON FUNCTION app.require_management_permission(text,uuid,text) TO app_rw;
 
 -- ------------------------------------------------------------------
--- (2) Member management invariants
+-- (2) メンバー管理の不変条件
 --
---   Paths without a context (app.provision_tenant in 0021 stays SECURITY DEFINER and
---   INSERTs into app.users without setting app.tenant_id; migration scripts and
---   tests/*.sh do the same) pass through. Only writes coming from the screens are
---   constrained here. Constraining without a context would break tenant creation itself.
+--   文脈が無い経路（app.provision_tenant は 0021 で SECURITY DEFINER のまま
+--   app.tenant_id を立てずに app.users へ INSERT する。移行スクリプトと
+--   tests/*.sh も同じ）は素通しする。ここで縛るのは画面から入ってくる
+--   書き込みだけ。文脈が無いのに縛るとテナント作成そのものが落ちる。
 -- ------------------------------------------------------------------
--- A state where a tenant context exists but the actor is not set is NOT passed through.
+-- テナント文脈があるのに本人が立っていない状態は「素通し」にしない。
 --
--- If it were, app_rw could create a context with set_tenant_context, then
--- clear only the actor with set_config('app.session_user_id',''), after which this function returns
--- false and the guard is bypassed entirely (Codex finding).
--- The only case allowed through is "no tenant context at all"
--- = app.provision_tenant (0021), migration scripts, and direct writes in tests/*.sh.
--- The legitimate paths (app.set_tenant_context / set_tenant_context_for_proxy)
--- always set tenant and session_user together, so a half-set state never arises.
+-- 素通しにすると、app_rw が set_tenant_context で文脈を作ったあと
+-- set_config('app.session_user_id','') で本人だけ消し、以後この関数が false を
+-- 返すことでガードを丸ごと迂回できる（Codex 指摘）。
+-- 逃がしてよいのは「テナント文脈がそもそも無い」場合だけ
+-- ＝ app.provision_tenant(0021)・移行スクリプト・tests/*.sh の直書き。
+-- 正規の経路（app.set_tenant_context / set_tenant_context_for_proxy）は
+-- 必ず tenant と session_user を同時に立てるので、片方だけの状態は作られない。
 CREATE OR REPLACE FUNCTION app.has_actor_context() RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -126,14 +126,14 @@ CREATE TRIGGER trg_guard_org_user
   BEFORE INSERT OR UPDATE ON app.users
   FOR EACH ROW EXECUTE FUNCTION app.guard_org_user();
 
--- Reject operations that would leave zero owners (ciso). With zero owners,
--- role_manage in require_management_permission passes for nobody, and
--- permissions can never be restored from the screens (verified by measurement).
--- The owner-count check is serialized per tenant.
--- If two transactions each demote a different owner, each sees "the other one remains"
--- and both pass, leaving zero owners. Ordering them with an advisory lock makes
--- the later one recount after seeing the earlier result (under READ COMMITTED a new statement
--- takes a new snapshot, so committed changes are visible).
+-- オーナー（ciso）が 0 人になる操作を拒む。0 人になると
+-- require_management_permission の role_manage が誰にも通らなくなり、
+-- 画面からは二度と権限を戻せない（実測で確かめる）。
+-- オーナー数の検査はテナント単位で直列化する。
+-- 2 つのトランザクションが別々のオーナーを降ろすと、互いに「相手が残っている」と
+-- 見えて両方通り、結果としてオーナーが 0 人になる。助言ロックで順番を付ければ、
+-- 後から来た側は先の結果を見てから数え直す（READ COMMITTED では新しい文が
+-- 新しいスナップショットを取るため、コミット済みの変更が見える）。
 CREATE OR REPLACE FUNCTION app.lock_owner_guard(p_tenant uuid) RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
   SELECT pg_catalog.pg_advisory_xact_lock(
@@ -148,10 +148,10 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE v_tenant uuid := coalesce(OLD.tenant_id, NEW.tenant_id);
 BEGIN
   PERFORM app.lock_owner_guard(v_tenant);
-  -- A tenant with no remaining memberships is being dismantled or not yet created. There is no
-  -- organization to protect, so say nothing (cleanup in tests/rls_test.sh and the
-  -- intermediate state of app.provision_tenant land here). The path the screens use is an update setting revoked_at,
-  -- where other memberships remain, so this escape hatch cannot be used there.
+  -- 所属が 1 件も残っていないテナントは、解体中か作成前。守る対象の組織が
+  -- 無いので何も言わない（tests/rls_test.sh の後始末や app.provision_tenant の
+  -- 途中経過がここに来る）。画面が通る経路は revoked_at を立てる更新であり、
+  -- そちらでは他の所属が残っているのでこの逃げ道は使えない。
   IF NOT EXISTS (
     SELECT 1 FROM app.memberships m
      WHERE m.tenant_id=v_tenant AND m.revoked_at IS NULL
@@ -185,18 +185,18 @@ CREATE CONSTRAINT TRIGGER trg_user_status_keeps_owner
   FOR EACH ROW WHEN (OLD.status='active' AND NEW.status <> 'active')
   EXECUTE FUNCTION app.assert_owner_remains();
 
--- Constrain reassignment of memberships (= the permissions themselves) on the DB side too.
--- app_rw has all DML on app.memberships since 0015, so through paths that bypass Server Actions
--- (another screen's code, a mixed-up SQL statement) a member could add ciso to
--- themselves. Granting/removing owner requires role_manage (owner); any other
--- membership change requires member_manage (owner, admin).
+-- 所属（＝権限そのもの）の付け替えを DB 側でも縛る。
+-- app_rw は 0015 で app.memberships の全 DML を持っているので、Server Action を
+-- 通らない経路（別の画面のコード・SQL の取り違え）から member が自分に ciso を
+-- 足せてしまう。オーナーの付け外しだけは role_manage（オーナー）、それ以外の
+-- 所属の整理は member_manage（オーナー・管理者）を要求する。
 CREATE OR REPLACE FUNCTION app.guard_org_membership() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
   IF NOT app.has_actor_context() THEN RETURN coalesce(NEW, OLD); END IF;
-  -- **Look at both old and new.** Looking only at NEW, an update rewriting a ciso row to employee
-  -- would pass with member_manage, letting an admin demote an owner
-  -- (revoking owner, not just granting it, is role_manage's domain).
+  -- **新旧の両方を見る。** NEW だけ見ると、ciso の行を employee へ書き換える
+  -- 更新が member_manage で通り、管理者がオーナーを降ろせてしまう
+  -- （オーナーの付与だけでなく剥奪も role_manage の領分）。
   IF NEW.role_key = 'ciso' OR OLD.role_key = 'ciso' THEN
     PERFORM app.require_management_permission(NULL::text, NULL::uuid, 'role_manage');
   ELSE
@@ -227,7 +227,7 @@ CREATE TRIGGER trg_guard_org_department
   BEFORE INSERT OR UPDATE OR DELETE ON app.departments
   FOR EACH ROW EXECUTE FUNCTION app.guard_org_department();
 
--- The organization's scope and certification-body information sit behind the same boundary. Anyone could write them from the screens.
+-- 組織の適用範囲と審査機関情報も同じ境界に置く。画面から誰でも書けていた。
 CREATE OR REPLACE FUNCTION app.guard_org_settings() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -244,9 +244,9 @@ CREATE TRIGGER trg_guard_certification_body
   FOR EACH ROW EXECUTE FUNCTION app.guard_org_settings();
 
 -- ------------------------------------------------------------------
--- (3) Link work down to "which record it is about"
---     The ledger stays work_items alone. Both NULL (work not tied to a record) is also
---     allowed (e.g. a company-wide asset inventory).
+-- (3) 作業を「どのレコードについてか」まで結ぶ
+--     台帳は work_items 一本のまま。両方 NULL（レコードに紐づかない作業）も
+--     許す（例: 全社の資産棚卸し）。
 -- ------------------------------------------------------------------
 ALTER TABLE app.work_items
   ADD COLUMN resource_type text,
@@ -263,18 +263,18 @@ CREATE INDEX work_items_resource_idx
 COMMENT ON COLUMN app.work_items.resource_type IS
   '対象レコードの種別（asset/risk/measure/incident/training/vendor/vendor_assessment）。作業全体への依頼なら NULL';
 
--- **Not SECURITY DEFINER.** app.assignment_target_exists in 0057 is
--- SECURITY DEFINER and runs as schema_owner, but app.assets etc. are under FORCE ROW
--- LEVEL SECURITY with policies only for app_rw / app_ro (0015).
--- With no owner policy, that function always returns false (measured).
--- Here existence is checked with the caller's (app_rw) privileges.
+-- **SECURITY DEFINER にしない。** 0057 の app.assignment_target_exists は
+-- SECURITY DEFINER で schema_owner として走るが、app.assets 等は FORCE ROW
+-- LEVEL SECURITY で app_rw / app_ro 向けのポリシーしか持たない（0015）。
+-- 所有者向けのポリシーが無いので、あの関数は常に false を返す（実測）。
+-- ここは呼び出し元（app_rw）の権限のまま実在確認をする。
 CREATE OR REPLACE FUNCTION app.guard_work_item_resource() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE v_exists boolean;
 BEGIN
   IF NEW.resource_type IS NULL THEN RETURN NEW; END IF;
-  -- Do not allow a resource type that mismatches the work type. On a mismatch,
-  -- require_work_permission looks at a different work type and wrongly grants or denies.
+  -- 種別と作業種別が食い違う組み合わせを作らせない。食い違うと
+  -- require_work_permission が別の作業種別を見て許可・拒否を誤る。
   IF app.work_type_for_resource(NEW.resource_type) IS DISTINCT FROM NEW.work_type THEN
     RAISE EXCEPTION 'resource type does not match work type';
   END IF;
@@ -317,11 +317,11 @@ CREATE TRIGGER trg_guard_work_item_resource
   FOR EACH ROW EXECUTE FUNCTION app.guard_work_item_resource();
 
 -- ------------------------------------------------------------------
--- (4) Mail send queue
+-- (4) メール送信キュー
 --
---   The web process holds no SMTP credentials. The screens only enqueue a "send";
---   actual sending is done by scripts/send_mail_outbox.py in a separate process.
---   The ISMS in-scope system itself thus has no direct outbound channel to the outside.
+--   Web プロセスは SMTP 資格情報を持たない。画面は「送る」を積むだけで、
+--   実際の送信は scripts/send_mail_outbox.py が別プロセスで行う。
+--   ISMS の対象システム自身が社外への送信口を直接持たない形にしておく。
 -- ------------------------------------------------------------------
 CREATE TABLE app.mail_outbox (
   id            uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -348,13 +348,13 @@ CREATE TABLE app.mail_outbox (
   CHECK (to_email = lower(to_email::text)),
   CHECK (length(to_email::text) BETWEEN 3 AND 254),
   CHECK (status <> 'sent' OR sent_at IS NOT NULL),
-  -- The send worker processes psql output. If control characters get into the recipient name or subject,
-  -- they are read as delimiters and the row is silently dropped (= it vanishes while still
-  -- pending). These values also go into headers, so they are not allowed at all.
+  -- 送信ワーカーは psql の出力を読んで処理する。宛先名・件名に制御文字が
+  -- 混ざると、区切りとして解釈されて行が黙って捨てられる（=送信待ちのまま
+  -- 消える）。ヘッダに入る値でもあるので、そもそも持たせない。
   CHECK (to_email::text ~ '^[^[:cntrl:][:space:]]+$'),
   CHECK (to_name ~ '^[^[:cntrl:]]*$'),
   CHECK (subject ~ '^[^[:cntrl:]]*$'),
-  -- The body allows only newlines and tabs.
+  -- 本文は改行とタブだけ許す。
   CHECK (body_text ~ '^([^[:cntrl:]]|[\n\t])*$')
 );
 
@@ -367,15 +367,15 @@ CREATE INDEX mail_outbox_related_idx
 COMMENT ON TABLE app.mail_outbox IS
   '外部質問票の送付と依頼通知の送信キュー。Web は積むだけで、送信は別プロセス';
 
--- Only the enqueuing side checks permissions. The send worker (app_rw + tenant context only, no actor identity)
--- advances status, so UPDATE does not go through this check.
+-- 積む側だけ権限を見る。送信ワーカー（app_rw ＋ テナント文脈のみ、本人性なし）は
+-- status を進めるので、UPDATE ではこの判定を通さない。
 CREATE OR REPLACE FUNCTION app.guard_mail_outbox() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
-  -- **The enqueuing side cannot specify delivery state.** Without pinning it here, even with UPDATE
-  -- blocked, simply INSERTing status='sent', sent_at=now() would
-  -- create a "sent" record (the send record would not be evidence).
-  -- An enqueued row always starts queued, with 0 attempts, no error, and not sent.
+  -- **積む側は配送の状態を指定できない。** ここで固定しないと、UPDATE を
+  -- 塞いでも INSERT で status='sent', sent_at=now() と書くだけで
+  -- 「送った記録」を作れてしまう（送信記録が証跡にならない）。
+  -- 積まれた行は必ず queued・0 回・エラー無し・未送信から始まる。
   NEW.status := 'queued';
   NEW.attempts := 0;
   NEW.last_error := '';
@@ -383,8 +383,8 @@ BEGIN
   NEW.queued_at := now();
   NEW.created_at := now();
   NEW.updated_at := now();
-  -- The send queue has no bootstrap path (neither tenant creation nor migrations enqueue mail).
-  -- Never allow rows whose enqueuer is unknown, and always run the permission check.
+  -- 送信キューには bootstrap 経路が無い（テナント作成も移行もメールを積まない）。
+  -- 誰が積んだか分からない行を作らせず、権限確認も必ず通す。
   IF NOT app.has_actor_context() THEN
     RAISE EXCEPTION 'queued mail requires an actor context' USING ERRCODE='insufficient_privilege';
   END IF;
@@ -405,9 +405,9 @@ CREATE TRIGGER trg_guard_mail_outbox
   BEFORE INSERT ON app.mail_outbox
   FOR EACH ROW EXECUTE FUNCTION app.guard_mail_outbox();
 
--- Prevent rewriting the content after enqueueing. Recipient, subject, body, purpose and
--- related target are immutable. The send worker may only advance the state and attempt record.
--- Without this, something never sent could be marked "sent", and it would not serve as audit evidence.
+-- 積んだ後に中身を書き換えられないようにする。宛先・件名・本文・用途・
+-- 関連先は不変。送信ワーカーが進めてよいのは状態と試行の記録だけ。
+-- これが無いと、送っていないものを「送信済み」にでき、監査の証跡にならない。
 CREATE OR REPLACE FUNCTION app.guard_mail_outbox_update() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -422,11 +422,11 @@ BEGIN
      OR NEW.created_by IS DISTINCT FROM OLD.created_by THEN
     RAISE EXCEPTION 'queued mail is immutable except for its delivery state';
   END IF;
-  -- State can only move in the defined order; in particular, sent can only be entered from sending.
-  -- If this were open, just writing status='sent' and
-  -- sent_at=now() without sending a single message would create a "sent" record,
-  -- and the send queue would not hold up as evidence. Only the send worker that grabbed the row with
-  -- FOR UPDATE SKIP LOCKED can set sending.
+  -- 状態は決められた順にしか動かせない。とくに sent へは sending からしか
+  -- 入れない。ここを開けておくと、1 通も送らずに status='sent' と
+  -- sent_at=now() を書くだけで「送信済み」の記録を作れてしまい、
+  -- 送信キューが証跡として成立しない。sending にできるのは、
+  -- FOR UPDATE SKIP LOCKED で行を掴んだ送信ワーカーだけ。
   IF NEW.status IS DISTINCT FROM OLD.status THEN
     IF NOT (
          (OLD.status = 'queued'  AND NEW.status IN ('sending','cancelled'))
@@ -460,24 +460,24 @@ CREATE POLICY tenant_security_definer ON app.mail_outbox FOR ALL TO schema_owner
   USING (tenant_id = app.current_tenant())
   WITH CHECK (tenant_id = app.current_tenant());
 REVOKE ALL ON app.mail_outbox FROM PUBLIC;
--- **Do not grant UPDATE to app_rw.** The web only "enqueues".
--- Only the send worker may advance state, and it does so through the SECURITY DEFINER functions below
--- (callable only by mail_worker). Leaving UPDATE with app_rw would let it write
--- queued->sending->sent without sending anything and create a "sent" record.
--- DELETE is not granted either (a deletable audit log is not evidence).
+-- **app_rw に UPDATE を渡さない。** Web がやるのは「積む」ことだけ。
+-- 状態を進めてよいのは送信ワーカーだけで、それは下の SECURITY DEFINER 関数
+-- （mail_worker からしか呼べない）を通す。app_rw に UPDATE を残すと、
+-- 1 通も送らずに queued→sending→sent と書いて「送信済み」の記録を作れる。
+-- DELETE も渡さない（消せる監査ログは証跡にならない）。
 GRANT SELECT, INSERT ON app.mail_outbox TO app_rw;
 GRANT SELECT ON app.mail_outbox TO app_ro;
 
 -- ------------------------------------------------------------------
--- (5) Send worker boundary
+-- (5) 送信ワーカーの境界
 --
---   Same shape as management_web in 0050. A dedicated role is created, and only SECURITY DEFINER
---   functions callable solely by that role can advance the send queue's state.
---   Without a separate role, "permission to send" and "permission to write business data" would be the same,
---   and a single defect on the web side would directly become forgery of send records.
+--   0050 の management_web と同じ形。専用ロールを作り、そのロールでしか
+--   呼べない SECURITY DEFINER 関数だけが送信キューの状態を進められる。
+--   ロールを分けないと「送る権限」と「業務データを書く権限」が同じになり、
+--   Web 側の 1 つの欠陥がそのまま送信記録の偽装になる。
 -- ------------------------------------------------------------------
--- schema_owner cannot create roles (it lacks CREATEROLE).
--- As 0050 does for management_web, switch back to the executor (admin) just here.
+-- ロールの作成は schema_owner ではできない（CREATEROLE を持たない）。
+-- 0050 が management_web を作るのと同じく、ここだけ実行者（管理者）に戻す。
 RESET ROLE;
 DO $$
 BEGIN
@@ -488,9 +488,9 @@ BEGIN
   ALTER ROLE mail_worker LOGIN INHERIT NOSUPERUSER NOBYPASSRLS
     NOCREATEDB NOCREATEROLE NOREPLICATION;
 END $$;
--- If a role with the same name already exists and inherits business roles, the boundary is meaningless
--- (inheriting app_rw would allow UPDATEing the send queue directly). ALTER ROLE only changes
--- attributes, so memberships are revoked explicitly, and we stop if any remain.
+-- 既に同名のロールが居た場合、業務用ロールを継承していると境界が意味を失う
+-- （app_rw を継承していれば送信キューを直接 UPDATE できる）。ALTER ROLE は
+-- 属性しか変えないので、所属は明示的に外し、残っていれば止める。
 REVOKE app_rw, app_ro, auth_svc, management_web, schema_owner FROM mail_worker;
 DO $$
 DECLARE v_roles text;
@@ -513,17 +513,17 @@ GRANT SELECT ON app.mail_outbox TO mail_worker;
 CREATE POLICY tenant_worker_read ON app.mail_outbox FOR SELECT TO mail_worker
   USING (tenant_id = app.current_tenant());
 
--- Advancing a questionnaire to "sent" is done from SECURITY DEFINER (schema_owner).
--- 0057 created no owner policy, so it is added here.
+-- 質問票を「送信済み」に進めるのは SECURITY DEFINER（schema_owner）から。
+-- 0057 は所有者向けのポリシーを張っていないので、ここで足す。
 --
--- **Written so it does not throw when there is no context.** app.current_tenant() RAISEs when unset,
--- so an owner policy using it would make the validation scan of a later ALTER TABLE ... ADD FOREIGN KEY
--- (which runs as the owner) fail there (actually hit when adding template_id in 0060).
--- Comparing against a NULL-returning version means that without a context no rows are visible, and
--- nothing more = the same behavior as before the policy existed.
+-- **文脈が無いときに例外を投げない形で書く。** app.current_tenant() は未設定だと
+-- RAISE するので、所有者にポリシーを張ると以後の ALTER TABLE ... ADD FOREIGN KEY
+-- の検証スキャン（所有者として走る）がそこで落ちる（0060 の template_id 追加で
+-- 実際に踏んだ）。NULL を返す版で比べれば、文脈が無いときは 1 行も見えないだけで
+-- 済む＝ポリシーを張る前と同じ挙動になる。
 --
--- SELECT is needed too. An UPDATE with WHERE also uses the SELECT policy to scan rows,
--- so an UPDATE policy alone yields 0 rows (measured).
+-- SELECT も要る。WHERE 付きの UPDATE は行の走査に SELECT ポリシーも使うため、
+-- UPDATE ポリシーだけだと 0 行になる（実測）。
 CREATE OR REPLACE FUNCTION app.current_tenant_or_null() RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
 BEGIN
@@ -543,7 +543,7 @@ CREATE POLICY tenant_security_definer ON app.external_questionnaires FOR ALL TO 
 CREATE OR REPLACE FUNCTION app.require_mail_worker() RETURNS void
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog, app AS $$
 BEGIN
-  -- session_user is a keyword, not a function, so it cannot be schema-qualified.
+  -- session_user は関数ではなくキーワードなので schema 修飾できない。
   IF session_user <> 'mail_worker' THEN
     RAISE EXCEPTION 'mail worker role required' USING ERRCODE='insufficient_privilege';
   END IF;
@@ -553,8 +553,8 @@ ALTER FUNCTION app.require_mail_worker() OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.require_mail_worker() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.require_mail_worker() TO mail_worker;
 
--- Take the rows to send and advance them to sending at the same time. Contention is
--- resolved with FOR UPDATE SKIP LOCKED (two processes never send the same row).
+-- 送る対象を取り出し、同時に sending へ進める。取り合いは
+-- FOR UPDATE SKIP LOCKED で解決する（同じ行を 2 プロセスが送らない）。
 CREATE OR REPLACE FUNCTION app.claim_mail_batch(
   p_limit integer, p_retry_failed boolean, p_retry_unconfirmed boolean
 ) RETURNS json
@@ -593,7 +593,7 @@ ALTER FUNCTION app.claim_mail_batch(integer,boolean,boolean) OWNER TO schema_own
 REVOKE ALL ON FUNCTION app.claim_mail_batch(integer,boolean,boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.claim_mail_batch(integer,boolean,boolean) TO mail_worker;
 
--- Mark as sent only what actually went out. Advance the questionnaire at the same time.
+-- 実際に出たものだけを送信済みにする。質問票も同時に進める。
 CREATE OR REPLACE FUNCTION app.mark_mail_sent(p_id uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE v_purpose text; v_related_type text; v_related_id uuid;
@@ -636,9 +636,9 @@ ALTER FUNCTION app.mark_mail_failed(uuid,text) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.mark_mail_failed(uuid,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.mark_mail_failed(uuid,text) TO mail_worker;
 
--- Reclaim rows left in sending after a crash right after claiming. **No resend.**
--- Only this function sets the marker, and last_error cannot be written from outside the function, so
--- even the worker role cannot remove [unconfirmed] to put a row back into the resend set.
+-- 取り出した直後に落ちて sending のまま残った行の回収。**再送はしない。**
+-- 印を付けるのはこの関数だけで、last_error は関数の外からは書けないので、
+-- [unconfirmed] を消して再送対象へ戻すことはワーカーロールでもできない。
 CREATE OR REPLACE FUNCTION app.reclaim_stale_mail(p_minutes integer) RETURNS json
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE v_result json;

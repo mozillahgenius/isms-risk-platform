@@ -11,7 +11,7 @@ import {
 type IsmsStepRailProps = {
   assessments: ReadonlyMap<string, StepAssessment>;
   currentKey?: string;
-  /** On detail screens, use a display that omits stage names so it does not take too much width. */
+  /** 詳細画面では横幅を使い過ぎない、段階名を省いた表示にする。 */
   compact?: boolean;
 };
 
@@ -22,8 +22,8 @@ const STATUS_ICON = {
 } as const;
 
 /**
- * ISMS progress rail. Computes no state (takes the measured evaluation from isoSteps as is).
- * Replacing this with a separate "completion rate" would make reference-material counts alone read as complete.
+ * ISMS の進行導線。状態を計算しない（isoSteps の実測評価をそのまま受け取る）。
+ * これを別の「完了率」に置き換えると、参考資料の件数だけで完了と読ませてしまう。
  */
 export function IsmsStepRail({ assessments, currentKey, compact = false }: IsmsStepRailProps) {
   return (

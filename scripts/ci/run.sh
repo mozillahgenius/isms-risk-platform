@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Quality gate (the parts of design doc 11.5 implemented so far).
-# Exits non-zero if any step fails. Nothing passes until everything is green.
+# 品質ゲート（設計書 11.5 のうち、現時点で実装できているもの）。
+# 1 つでも落ちたら非ゼロで終わる。緑になるまで通さない。
 #
 #   scripts/ci/run.sh
 #
-# DB used: ISMS_CI_DB (default isms_ci). It is recreated, so existing data is lost.
+# 使う DB: ISMS_CI_DB（既定 isms_ci）。作り直すので既存データは消える。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,10 +17,9 @@ die()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
 export ISMS_DB="$CIDB"
 unset DATABASE_URL || true
 
-# Control catalog CSVs. Default is the bundled fictional sample. Point LEGAL_SCRIPTS_DIR at your own catalog.
 SNAPSHOT_DIR="$ROOT/db/seeds/snapshots"
-CATALOG_DIR="${LEGAL_SCRIPTS_DIR:-$SNAPSHOT_DIR}"
-csv_rows() { # $1 = CSV path. Number of data rows excluding the header (newlines inside quotes count as one row)
+CATALOG_DIR="${CATALOG_SCRIPTS_DIR:-$SNAPSHOT_DIR}"
+csv_rows() {
   python3 -c 'import csv,sys; print(sum(1 for _ in csv.DictReader(open(sys.argv[1], encoding="utf-8"))))' "$1"
 }
 
@@ -29,10 +28,17 @@ psql -At -d postgres -c "select version()" | head -1
 printf '  \033[33m注意\033[0m 設計書は PostgreSQL 16 前提。この機は上の版で検証している。\n'
 printf '        PG16 での検証は Docker が使える環境で別途行うこと（未実施）。\n'
 
+step "0.1 Go ツールチェーン"
+"$ROOT/scripts/ensure_go_toolchain.sh" --check
+ok "Go 1.26以上"
+
 step "1. 同梱サンプルカタログの SHA-256 突合"
 (cd "$SNAPSHOT_DIR" && shasum -a 256 -c SHA256SUMS) >/dev/null \
   || die "db/seeds/snapshots/SHA256SUMS と一致しない"
 ok "db/seeds/snapshots/SHA256SUMS"
+
+step "1.1 外部再利用資産のハッシュ突合（設定時のみ）"
+bash "$ROOT/scripts/ci/check_reused_assets.sh"
 
 step "2. 空 DB へ全 DDL を適用する"
 dropdb --if-exists "$CIDB" >/dev/null
@@ -49,14 +55,14 @@ psql -v ON_ERROR_STOP=1 -q -d "$CIDB" -f "$ROOT/scripts/ci/check_rls.sql" >/dev/
 ok "check_rls.sql"
 
 step "4. 巻き戻し（up → down → up）と、無関係オブジェクトの保全"
-# Place a sentinel in a separate schema to see whether down deletes too much.
+# down が過剰に消していないかを見るため、別スキーマに sentinel を置く。
 psql -q -v ON_ERROR_STOP=1 -d "$CIDB" >/dev/null <<'SQL'
 CREATE SCHEMA IF NOT EXISTS sentinel;
 CREATE TABLE IF NOT EXISTS sentinel.keepme (id int primary key, note text);
 INSERT INTO sentinel.keepme VALUES (1, '消えてはいけない') ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION sentinel.keepfn() RETURNS int LANGUAGE sql AS 'SELECT 1';
 SQL
-# Record the object list before migrations and check it matches exactly after down
+# migration 適用前のオブジェクト一覧を控えて、down 後に完全一致するか見る
 SNAP_BEFORE=$(psql -At -d "$CIDB" -c "
   select coalesce(string_agg(x,E'\n' order by x),'') from (
     select n.nspname||'.'||c.relname as x from pg_class c
@@ -73,7 +79,7 @@ SNAP_AFTER=$(psql -At -d "$CIDB" -c "
      where n.nspname not in ('pg_catalog','information_schema','pg_toast')
   ) t")
 
-# After down, only "pre-migration objects + schema_migrations" should remain
+# down 後は「migration 適用前 ＋ schema_migrations」だけが残っているはず
 EXPECTED=$(printf '%s\npublic.schema_migrations\npublic.schema_migrations_pkey\n' "" | sort -u)
 psql -At -d "$CIDB" -c "select count(*) from sentinel.keepme where id=1" | grep -qx 1 \
   || die "sentinel テーブルの行が消えた（down が過剰）"
@@ -82,8 +88,8 @@ psql -At -d "$CIDB" -c "select sentinel.keepfn()" | grep -qx 1 \
 psql -At -d "$CIDB" -c "
   select count(*) from pg_namespace where nspname in ('app','catalog','audit')" \
   | grep -qx 0 || die "down 後もスキーマが残っている"
-# Roles are cluster-wide, so it is correct for them to remain while another DB in the same cluster
-# (e.g. for development) references them. Here we check that "dependencies from this DB are gone".
+# ロールはクラスタ全体の存在なので、同じクラスタの別 DB（開発用など）が参照している間は
+# 残るのが正しい。ここでは「この DB からの依存が消えていること」を見る。
 psql -At -d "$CIDB" -c "
   select count(*) from pg_shdepend d
     join pg_roles ro on ro.oid = d.refobjid
@@ -137,11 +143,7 @@ C2=$(psql -At -d "$CIDB" -c "
          (select count(*) from catalog.checks)||'/'||
          (select count(*) from catalog.connector_manifests)")
 [ "$C1" = "$C2" ] || die "seed を 2 回流すと件数が変わる (冪等でない): ${C1} -> ${C2}"
-# Controls = CSV controls + the 93 of ISO/IEC 27001:2022 Annex A (0009). Risk templates = CSV row count.
-N_CTL=$(csv_rows "$CATALOG_DIR/control_check/control_requirements_master.csv")
-N_TPL=$(csv_rows "$CATALOG_DIR/risk_map/risk_map_master.csv")
-WANT="$((N_CTL + 93))/${N_TPL}/14/28/5/4/20/2"
-[ "$C1" = "$WANT" ] || die "seed の件数が期待値と違う: $C1 (期待 $WANT)"
+[ "$C1" = "$(( $(csv_rows "$CATALOG_DIR/control_check/control_requirements_master.csv") + 93 ))/$(csv_rows "$CATALOG_DIR/risk_map/risk_map_master.csv")/14/28/5/4/20/2" ] || die "seed の件数が期待値と違う: $C1"
 ok "2 回流しても件数が変わらない: ${C2}"
 
 psql -v ON_ERROR_STOP=1 -q -d "$CIDB" -f "$ROOT/scripts/ci/check_seeds.sql" >/dev/null \
@@ -182,12 +184,12 @@ python3 "$ROOT/scripts/hr_identity_link.py" --self-test >/dev/null \
   || die "hr_identity_link.py --self-test が落ちた"
 ok "hr_identity_link.py --self-test"
 
-step "13. role別pgpass生成"
-python3 "$ROOT/scripts/configure_db_roles.py" --self-test >/dev/null \
-  || die "configure_db_roles.py --self-test が落ちた"
-"$ROOT/tests/configure_db_roles_test.sh" >/dev/null \
-  || die "configure_db_roles_test.sh が落ちた"
-ok "configure_db_roles.py self-test / libpq integration"
+step "13. RUNTIME role別pgpass生成"
+python3 "$ROOT/scripts/configure_runtime_db_roles.py" --self-test >/dev/null \
+  || die "configure_runtime_db_roles.py --self-test が落ちた"
+"$ROOT/tests/configure_runtime_db_roles_test.sh" >/dev/null \
+  || die "configure_runtime_db_roles_test.sh が落ちた"
+ok "configure_runtime_db_roles.py self-test / libpq integration"
 
 printf '\n\033[32m品質ゲート: 全て緑\033[0m\n'
 printf '未実施のゲート（設計書 11.5 のうち Phase 2 以降）:\n'

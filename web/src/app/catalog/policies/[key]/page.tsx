@@ -6,8 +6,8 @@ import { isPlaceholderBody } from '@/lib/policyBody';
 
 export const dynamic = 'force-dynamic';
 
-// Show the same category name as the list. Using an individual name would mean querying the DB
-// once more just to show details (the rows already fetched for the main render cannot be reused).
+// 一覧と同じ区分名を出す。個別の名前にすると詳細を出すためだけに
+// もう 1 度 DB を引くことになる（本体の描画で既に引いている行を再利用できない）。
 export const metadata = { title: '規程' };
 
 const KEY_RE = /^[a-z0-9_]{1,64}$/;

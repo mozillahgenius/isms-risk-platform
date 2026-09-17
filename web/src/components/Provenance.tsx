@@ -7,8 +7,8 @@ const LABEL: Record<Provenance['target'], string> = {
 };
 
 /**
- * "Where did this rule come from?" Shows the measured values of catalog.seed_provenance as-is.
- * Listing fixed strings would leave the screen unchanged even when upstream moves, so always read the DB.
+ * 「このルールはどこから来たか」。catalog.seed_provenance の実測をそのまま出す。
+ * 固定文字列を並べると、上流が動いても画面は同じ顔のままになるので、必ず DB を読む。
  */
 export function ProvenanceTable({ rows, only }: { rows: Provenance[]; only?: Provenance['target'][] }) {
   const shown = only ? rows.filter((r) => only.includes(r.target)) : rows;

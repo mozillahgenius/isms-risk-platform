@@ -1,18 +1,18 @@
-# Google Workspace connector (reader) - design doc 3.2
+# Google Workspace コネクタ（reader）— 設計書 3.2
 #
-# The source of truth is this file in Git. The DB (catalog.connector_manifests) is its projection,
-# and only db/seeds/0003_connectors.py loads it (nothing gets in without passing validation).
+# 正本は Git のこのファイル。DB（catalog.connector_manifests）はその投影で、
+# 投入は db/seeds/0003_connectors.py だけが行う（検証を通らないと入らない）。
 #
-# **One file per version.** app.integrations references (connector, manifest_version) by
-# FK, so a version that was ever used cannot be deleted. Overwriting a single file and only bumping
-# version would make old versions unreproducible when the DB is rebuilt.
+# **版ごとに別ファイルにする。** app.integrations が (connector, manifest_version) を
+# FK 参照するので、一度でも使われた版は消せない。1 つのファイルを上書きして version だけ
+# 上げると、DB を作り直したときに古い版を再現できなくなる。
 connector: google_workspace
 kind: elevated_reader
 version: 4
 
 auth:
   type: service_account_dwd
-  # A reader may only list read-only scopes (enforced by validation).
+  # reader は read-only スコープしか書けない（検証で強制）。
   scopes:
     - https://www.googleapis.com/auth/admin.directory.user.readonly
     - https://www.googleapis.com/auth/admin.directory.user.security
@@ -22,11 +22,11 @@ auth:
     - https://www.googleapis.com/auth/drive.readonly
     - https://www.googleapis.com/auth/drive.metadata.readonly
 
-# Declare the allowed HTTP methods. reader / elevated_reader: GET / HEAD only
-# (even with read-only scopes, being able to POST would allow writes at runtime).
+# 出せる HTTP メソッドを宣言する。reader / elevated_reader は GET / HEAD のみ
+# （スコープが read-only でも、POST が書ければ実行時には書き込めてしまう）。
 http:
   methods: [GET]
-  # Hosts that may be reached. Hosts not listed here are unreachable (structurally prevents credential exfiltration).
+  # 到達してよいホスト。ここに無いホストへは出られない（資格情報の外部送出を構造で防ぐ）。
   allowed_hosts:
     - www.googleapis.com
     - admin.googleapis.com
@@ -38,7 +38,7 @@ resources:
     paging: {type: page_token, param: pageToken, size: 500}
     map_to: accounts
     fields:
-      external_id: id              # immutable ID; email is not used as the primary key
+      external_id: id              # 不変 ID。メールを一次キーにしない
       email: primaryEmail
       suspended: suspended
       mfa_enrolled: isEnrolledIn2Sv
@@ -54,7 +54,7 @@ resources:
     fields:
       external_id: id
       name: name
-      email: email                 # Drive permissions refer to groups by emailAddress
+      email: email                 # Drive の permission がグループを emailAddress で指す
     on_error: {403: fail_run, 429: retry}
 
   - name: group_members
@@ -111,7 +111,7 @@ resources:
     depends_on: drive_files
     map_to: grants
     fields:
-      subject_kind: $derive.permission_subject_kind   # derived from type + domain
+      subject_kind: $derive.permission_subject_kind   # type + domain から導出
       subject_domain: domain
       subject_account_email: emailAddress
       role: role

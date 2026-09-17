@@ -35,7 +35,7 @@ export default async function CalendarPage() {
         <section key={cad}>
           <h2 className="mb-2 text-[14px] font-semibold">
             {CADENCE_LABEL[cad] ?? cad}
-            <span className="ms-2 text-[12px] font-normal text-[var(--muted)]">
+            <span className="ml-2 text-[12px] font-normal text-[var(--muted)]">
               {events.filter((e) => e.cadence === cad).length} 件
             </span>
           </h2>

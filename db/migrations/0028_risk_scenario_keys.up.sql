@@ -1,4 +1,4 @@
--- 0028: give operational risks a stable, human-usable key.
+-- 0028: 運用リスクに人が扱える安定キーを与える。
 ALTER TABLE app.risk_scenarios
   ADD COLUMN risk_key text;
 

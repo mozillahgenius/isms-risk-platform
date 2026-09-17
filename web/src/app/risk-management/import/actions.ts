@@ -12,24 +12,24 @@ import {
 } from '@/lib/csvImport';
 import { withTenantActor, withTenantWrite } from '@/lib/tenant';
 
-// Initial data import (design doc 2026-09-11 §8). Starting from assets and risks (design decision 2026-09-12).
+// 初期データの取り込み（設計書 2026-09-11 §8）。資産とリスクから（2026-09-12 goto-twin 決定）。
 //
-// Flow: pick a file and "check the contents" (writes nothing) -> if there are no errors, "import"
-//       (writes all rows in one transaction; if even one row fails, nothing is kept) -> "undo" if needed
-//       (retires rows instead of deleting them; rows edited after import or referenced by other records are excluded and counted).
-// A key that matches an existing one is an error, not an overwrite (re-running the same file creates nothing = idempotent; fix data in the existing screens).
-// The write path is the same as the existing save (require_work_permission, set_management_frameworks_for_work).
-// The file itself is not stored (only the hash, counts, and per-row results go into the import record 0071).
-// Only owner / admin can import (the DB's records_role_allows('import') makes the final decision).
-// Policies only get a draft version added (approval and activation happen only via approve_policy_version / activate_policy_version on the policy screen).
-// Standard policies exist in every tenant, so for policies alone an overlap with an existing one is not an error; a version is added to that policy instead (design decision 2026-09-12).
+// 流れ: ファイルを選んで「内容を確かめる」（何も書かない）→ 誤りが無ければ「取り込む」
+//       （全件を 1 トランザクションで書く。1 行でも失敗したら何も残らない）→ 必要なら「取り消す」
+//       （行を消さずに退役させる。取り込み後に直された行・他の記録が参照している行は対象外にして数える）。
+// 既存と同じキーは上書きせず誤りにする（同じファイルをもう一度流しても何も作られない＝冪等。直すのは既存の画面で）。
+// 書く経路は既存の保存と同じ（require_work_permission・set_management_frameworks_for_work）。
+// ファイル本体は保存しない（ハッシュ・件数・行の結果だけを取り込みの記録 0071 に残す）。
+// 取り込めるのは owner / admin（DB の records_role_allows('import') が最終判断）。
+// 規程は下書きの版を足すだけ（承認・有効化は規程の画面の approve_policy_version / activate_policy_version だけ）。
+// 標準規程は全テナントに必ずあるので、規程だけは「既存と重なったら誤り」にせず、その規程に版を足す（2026-09-12 goto-twin 決定）。
 
 export type PlanRow = { row: number; key: string; label: string };
 
 export type ImportState = {
   stage: 'idle' | 'checked' | 'imported' | 'failed';
   kind: ImportKind;
-  /** The checked contents. Sent back unchanged when importing (the server checks everything again). */
+  /** 確かめた中身。取り込むときに同じものを送り返す（サーバーはもう一度すべて確かめる）。 */
   csv: string;
   sha256: string;
   issues: RowIssue[];
@@ -47,8 +47,8 @@ const readKind = (form: FormData): ImportKind => {
   const value = String(form.get('kind') ?? '');
   return (KINDS as readonly string[]).includes(value) ? (value as ImportKind) : 'assets';
 };
-// Normalize line breaks to LF before hashing. When the checked contents are sent back via the form, the browser converts line breaks to CRLF
-// (without normalizing, the same contents would hash differently at check time and at import time).
+// 改行を LF にそろえてからハッシュにする。確かめた中身をフォームで送り返すと、ブラウザが改行を CRLF に変えるため
+// （そろえないと、同じ中身なのに確かめた時と取り込んだ時でハッシュが変わる）。
 const sha256Hex = (text: string): string =>
   createHash('sha256').update(text.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
 const failed = (kind: ImportKind, message: string, issues: RowIssue[] = []): ImportState => ({
@@ -56,7 +56,7 @@ const failed = (kind: ImportKind, message: string, issues: RowIssue[] = []): Imp
 });
 const byRow = (a: RowIssue, b: RowIssue) => a.row - b.row;
 
-/** Reads the selected file as a UTF-8 string. Size and character encoding are checked here. */
+/** 選ばれたファイルを UTF-8 の文字列として読む。大きさと文字コードをここで確かめる。 */
 async function readUpload(form: FormData): Promise<{ text: string } | { error: string }> {
   const file = form.get('file');
   if (!(file instanceof File) || file.size === 0) return { error: 'ファイルを選んでください' };
@@ -73,26 +73,26 @@ type Examined = {
   plan: PlanRow[];
   assets: AssetImportRow[];
   risks: RiskImportRow[];
-  /** Key of a risk's related asset -> asset ID (active assets only). */
+  /** リスクの関連資産のキー → 資産 ID（有効な資産だけ）。 */
   assetIds: Map<string, string>;
   departments: DepartmentImportRow[];
-  /** Name of a registered parent department -> department ID (only names that occur exactly once). */
+  /** 登録済みの上位部署の名前 → 部署 ID（同じ名前が 1 つだけのもの）。 */
   parentIds: Map<string, string>;
-  /** Owner's email -> user ID (active users only). */
+  /** 責任者のメール → 利用者 ID（在籍中だけ）。 */
   ownerIds: Map<string, string>;
   assignments: AssignmentImportRow[];
-  /** Name of the target department -> department ID (only names that occur exactly once). */
+  /** 割り当て先の部署の名前 → 部署 ID（同じ名前が 1 つだけのもの）。 */
   deptIds: Map<string, string>;
-  /** User's email -> membership row that has not been revoked. */
+  /** 利用者のメール → 失効していない所属の行。 */
   members: Map<string, { id: string; roleKey: string }[]>;
   policies: PolicyImportRow[];
-  /** Policy row number -> existing policy to add a version to (null means create a new one), and the number of the version to add. */
+  /** 規程の行番号 → 版を足す既存の規程（null は新しく作る）と、足す版の番号。 */
   policyTargets: Map<number, { policyId: string | null; nextVersion: number }>;
 };
 
 type NamedDepartment = { name: string; id: string; n: number };
 
-/** Looks up departments by name (names have no unique constraint, so also returns how many share the name). */
+/** 部署を名前で引く（名前に一意制約が無いので、同じ名前が何件あるかも返す）。 */
 async function departmentsByName(sql: TransactionSql, names: string[]): Promise<Map<string, NamedDepartment>> {
   const rows = await sql<NamedDepartment[]>`
     SELECT name, min(id::text) AS id, count(*)::int AS n FROM app.departments
@@ -101,17 +101,17 @@ async function departmentsByName(sql: TransactionSql, names: string[]): Promise<
 }
 
 /**
- * Checks the contents (shape and values, plus duplicates against existing data and references, via the DB). Writes nothing.
- * lock: in the check right before importing, take a share lock on the referenced user rows (so a user suspended after the check is not made
- * an owner, and their membership is not edited; the suspension update waits until this transaction ends). Not used for read-only checks.
+ * 中身を確かめる（形・値に加え、既存との重複と参照を DB で確かめる）。書き込みはしない。
+ * lock: 取り込む直前の確かめでは、指した利用者の行を共有ロックする（確かめた後に停止されて、停止した人を責任者にしたり
+ * その人の所属を直したりしない。停止の更新はこのトランザクションが終わるまで待つ）。読み取り専用の確かめでは付けない。
  */
 async function examine(sql: TransactionSql, kind: ImportKind, text: string, lock = false): Promise<Examined> {
   const empty: Examined = {
     issues: [], plan: [], assets: [], risks: [], assetIds: new Map(), departments: [], parentIds: new Map(),
     ownerIds: new Map(), assignments: [], deptIds: new Map(), members: new Map(), policies: [], policyTargets: new Map(),
   };
-  // Normalize line breaks to LF before reading. The browser converts them to CRLF when the checked contents are sent back via the form, so without this
-  // line breaks inside quotes (such as policy bodies) differ between check time and import time, and CRs remain in the imported body.
+  // 改行を LF にそろえてから読む。確かめた中身をフォームで送り返すとブラウザが CRLF に変えるので、そろえないと
+  // 引用符の中の改行（規程の本文など）が確かめた時と取り込んだ時で変わり、取り込んだ本文に CR が残る。
   const parsed = parseCsv(text.replace(/\r\n?/g, '\n'));
   if (!parsed.ok) return { ...empty, issues: [{ row: 0, message: parsed.error }] };
 
@@ -200,7 +200,7 @@ async function examine(sql: TransactionSql, kind: ImportKind, text: string, lock
       if (rows.length === 0) {
         v.issues.push({ row: a.row, column: 'email', message: '在籍中で所属のある利用者が見つかりません（利用者は組織の画面で追加します）' });
       } else if (role !== 'owner' && rows.some((m) => m.roleKey === 'ciso')) {
-        // The DB also lets only role_manage (owner) write the top-management row. Failing at write time cannot give a reason, so stop here.
+        // DB も最高責任者の行は role_manage（オーナー）でしか書かせない。書く段階で落ちると理由を出せないので、ここで止める。
         v.issues.push({ row: a.row, column: 'email', message: '最高責任者の所属は、オーナーだけが部署を割り当てられます' });
       }
     }
@@ -217,12 +217,12 @@ async function examine(sql: TransactionSql, kind: ImportKind, text: string, lock
     const v = validatePolicies(parsed.header, parsed.rows);
     const keys = [...new Set(v.rows.map((p) => p.catalogKey).filter(Boolean))];
     const titles = [...new Set(v.rows.filter((p) => !p.catalogKey).map((p) => p.title))];
-    // Right before importing, lock the policy rows (so that after the version number is decided, no other version is added to the same policy;
-    // adding a version takes a foreign-key share lock on the policy row, so it waits here).
-    // Order: read -> lock the read policies in id order -> read again (Codex review 2026-09-12).
-    //   A statement that waited on a lock reads the latest version from its pre-wait snapshot, so locking and reading are separate statements.
-    //   Locks are taken in id order (the same order as undo; acquiring in opposite orders causes deadlock).
-    //   If the re-read shows a policy that is not locked (one created during the check), do not import and ask for a re-check.
+    // 取り込む直前は規程の行をロックする（版の番号を決めた後に、同じ規程へ別の版が足されないように。
+    // 版の追加は規程の行へ外部キーの共有ロックを取るので、ここで待たされる）。
+    // 読む → 読んだ規程を id の順にロック → 読み直す、の順にする（Codex レビュー 2026-09-12）。
+    //   ロックを待った文は待つ前のスナップショットのまま最新の版を読むので、ロックと読み取りは別の文にする。
+    //   ロックは id の順（取り消しと同じ順。逆順に取り合うとデッドロックになる）。
+    //   読み直しで、ロックしていない規程（確かめている間に作られた規程）が出たら、取り込まずに確かめ直してもらう。
     type PolicyHit = {
       id: string; catalog_key: string | null; title: string; latest_version: number | null; latest_body: string | null;
     };
@@ -276,7 +276,7 @@ async function examine(sql: TransactionSql, kind: ImportKind, text: string, lock
           continue;
         }
         usedBy.set(target.id, p.row);
-        // A body identical to the latest version is not added (re-running the same file creates nothing; the same applies when the standard body is imported as is).
+        // 最新の版と同じ本文は足さない（同じファイルを流し直しても何も作られない。標準本文をそのまま入れた場合も同じ）。
         if ((target.latest_body ?? '').replace(/\r\n?/g, '\n').trim() === p.bodyMd) {
           v.issues.push({ row: p.row, column: 'body_md', message: '最新の版と同じ本文です（足す下書きがありません）' });
           continue;
@@ -322,7 +322,7 @@ async function examine(sql: TransactionSql, kind: ImportKind, text: string, lock
   };
 }
 
-/** Checks the contents (writes nothing). */
+/** 内容を確かめる（何も書かない）。 */
 export async function previewImport(_prev: ImportState, form: FormData): Promise<ImportState> {
   const kind = readKind(form);
   const upload = await readUpload(form);
@@ -344,15 +344,15 @@ export async function previewImport(_prev: ImportState, form: FormData): Promise
   };
 }
 
-/** Imports the checked contents. The server checks everything again and writes all rows in one transaction. */
+/** 確かめた中身を取り込む。サーバーでもう一度すべて確かめ、全件を 1 トランザクションで書く。 */
 export async function applyImport(_prev: ImportState, form: FormData): Promise<ImportState> {
   const kind = readKind(form);
   const text = String(form.get('csv') ?? '');
   if (!text) return failed(kind, '確かめた中身がありません。ファイルを選んで、もう一度確かめてください');
   if (new TextEncoder().encode(text).length > IMPORT_LIMITS.maxBytes) return failed(kind, 'ファイルが大きすぎます');
   const sha256 = sha256Hex(text);
-  // Import only exactly what was checked (compare the hash sent back by the screen with the hash of the received contents).
-  // The contents are fully re-checked on the server before import, so this guards against a mismatch between the check result and the imported contents.
+  // 確かめた中身と同じものだけを取り込む（画面が送り返したハッシュと、受け取った中身のハッシュを突き合わせる）。
+  // 中身は取り込む前にサーバーでもう一度すべて確かめるので、ここは「確かめた結果と取り込む中身の食い違い」を防ぐ役。
   if (String(form.get('checked_sha256') ?? '') !== sha256) {
     return failed(kind, '確かめた中身と取り込む中身が違います。ファイルを選んで、もう一度確かめてください');
   }
@@ -360,16 +360,16 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
 
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_records_role('import')`;
-    // Imports for the same tenant run one at a time (department names have no unique constraint, so importing the same name concurrently
-    // would have both see it as "not registered" and create a duplicate). Take the lock before checking (to see the result of an import that finished first).
+    // 同じテナントの取り込みは 1 つずつ（部署の名前には一意制約が無いので、同時に同じ名前を取り込むと、
+    // どちらも「未登録」と確かめて重複を作る）。ロックを取ってから確かめる（先に終わった取り込みの結果を見る）。
     await sql`SELECT pg_advisory_xact_lock(hashtextextended('app.import:' || app.current_tenant()::text, 0))`;
     const ex = await examine(sql, kind, text, true);
-    // If someone registered the same key after the check, this errors here (before writing, so nothing is kept).
+    // 確かめた後に誰かが同じキーを登録していたら、ここで誤りになる（書く前なので何も残らない）。
     if (ex.issues.length > 0) return { issues: ex.issues, created: 0 };
-    // Row count is CSV rows; item count is rows created (for assignments, membership rows updated). An assignment can cover multiple membership rows for one person.
+    // 行数は CSV の行、件数は作った（割り当てでは直した所属の）行。割り当ては 1 人が複数の所属の行を持てる。
     const rowCount = kind === 'assets' ? ex.assets.length : kind === 'risks' ? ex.risks.length
       : kind === 'departments' ? ex.departments.length : kind === 'policies' ? ex.policies.length : ex.assignments.length;
-    // For policies, the details are the number of versions added plus the number of newly created policies.
+    // 規程は、足す版の数に、新しく作る規程の数を足した明細になる。
     const count = kind === 'assignments'
       ? ex.assignments.reduce((n, a) => n + (ex.members.get(a.email)?.length ?? 0), 0)
       : kind === 'policies'
@@ -407,7 +407,7 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
           RETURNING id`;
         const frameworks = r.iso ? [RISK_MANAGEMENT, ISO] : [RISK_MANAGEMENT];
         await sql`SELECT app.set_management_frameworks_for_work('risk_scenario', ${risk.id}::uuid, ${frameworks}::text[])`;
-        // For related assets, the first is primary and the rest secondary (same order as the seed script).
+        // 関連資産は、最初の 1 つを主、残りを従にする（初期投入スクリプトと同じ並び）。
         for (const [index, key] of r.assetKeys.entries()) {
           await sql`
             INSERT INTO app.risk_scenario_assets (tenant_id, risk_scenario_id, asset_id, relation)
@@ -418,7 +418,7 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
           VALUES (app.current_tenant(), ${batch.id}::uuid, ${r.row}, 'risk', ${risk.id}::uuid)`;
       }
     } else if (kind === 'departments') {
-      // Department writes require the same permission as the existing save (the DB's guard_org_department also checks org_manage).
+      // 部署の書き込みは既存の保存と同じ権限（DB の guard_org_department も org_manage を確かめる）。
       await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'org_manage')`;
       const ids = new Map(ex.parentIds);
       for (const d of orderDepartments(ex.departments)) {
@@ -435,9 +435,9 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
           VALUES (app.current_tenant(), ${batch.id}::uuid, ${d.row}, 'department', ${dept.id}::uuid)`;
       }
     } else if (kind === 'policies') {
-      // Only add a draft version. Existing versions are untouched (superseded_at is not set either; expiring is activation's job).
-      // Detail rows are inserted in a statement separate from the one creating the rows (for every kind). The DB's detail guard (0077) checks the record of created rows
-      // (written by an AFTER INSERT trigger at the end of the statement), so creating rows and details in one statement (WITH ... INSERT) is rejected.
+      // 下書きの版を足すだけ。既存の版には触れない（superseded_at も打たない。失効は有効化の役目）。
+      // 明細は、行を作る文とは別の文で入れる（どの種類も同じ）。DB の明細の守り（0077）は、作った行の記録
+      // （AFTER INSERT のトリガが文の終わりに書く）を見るので、作成と明細を 1 つの文（WITH ... INSERT）にすると拒否される。
       for (const p of ex.policies) {
         const target = ex.policyTargets.get(p.row)!;
         let policyId = target.policyId;
@@ -461,13 +461,13 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
           VALUES (app.current_tenant(), ${batch.id}::uuid, ${p.row}, 'policy_version', ${version.id}::uuid)`;
       }
     } else {
-      // Membership assignment writes only the department (not the role). Permission is member_manage, same as the DB's guard_org_membership
-      // (role_manage for the top-management row; at check time this is already an error for imports by non-owners).
+      // 所属の割り当ては部署だけを書く（役割は書かない）。権限は DB の guard_org_membership と同じ member_manage
+      // （最高責任者の行は role_manage。確かめる段階で、オーナー以外の取り込みでは誤りにしてある）。
       await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'member_manage')`;
       for (const a of ex.assignments) {
         const deptId = ex.deptIds.get(a.departmentName)!;
         for (const m of ex.members.get(a.email) ?? []) {
-          // Read the original department after locking the row (so undo does not restore to the wrong place even if it changed after the check).
+          // 元の部署は行をロックしてから読む（確かめた後に変わっていても、取り消しで戻す先を取り違えない）。
           const [cur] = await sql<{ department_id: string | null }[]>`
             SELECT department_id FROM app.memberships
              WHERE tenant_id = app.current_tenant() AND id = ${m.id}::uuid AND revoked_at IS NULL FOR UPDATE`;
@@ -483,8 +483,8 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
         }
       }
     }
-    // On screen, counts for every kind are shown as CSV rows (the import record list also shows row counts; the detail count differs from the row count because for policies one row
-    // becomes two, "create policy" and "add version", and for assignments it becomes one person's multiple memberships).
+    // 画面の件数はどの種類も CSV の行で見せる（取り込みの記録の一覧も行数を出す。明細の数は、規程では 1 行が
+    // 「規程を作る」と「版を足す」の 2 つに、割り当てでは 1 人の複数の所属になり、行数と食い違うため）。
     return { issues: [] as RowIssue[], created: rowCount };
   });
 
@@ -506,16 +506,16 @@ export async function applyImport(_prev: ImportState, form: FormData): Promise<I
 }
 
 /**
- * Undoes an import. Rows are retired, not deleted (evaluation, acceptance, and audit records are append-only, so deleting would break their links).
- * Rows edited after import or referenced by other records are user work, so they are not reverted and are counted as excluded.
- * "Not edited" means updated_at equals the import time (now() of the import transaction).
- * Comparing with "at or before" would misjudge rows edited after import by a transaction that started before the import (now() is the start time, so earlier than the import)
- * as not edited (Codex review 2026-09-12). Equality alone cannot distinguish edits from another transaction that started in the same microsecond
- * as the import, so also require that the last editor (updated_by) is the importer (import writes it at creation and assignment).
- * The only remaining misjudgment is when the importer themselves edited in another transaction started in the same microsecond.
- * Imports made before assets and risks wrote updated_by (before 6a89bd5) are excluded by this condition. That version never reached production,
- * and such imports exist only in verification DBs (no compatibility handling is kept).
- * Only once per import (the DB primary key also rejects it).
+ * 取り込みを取り消す。行は消さず、退役させる（評価・受容・監査の記録は追記だけなので、消すと結び付きが切れる）。
+ * 取り込み後に直された行・他の記録が参照している行は、利用者の成果物なので戻さず、対象外として数える。
+ * 「直されていない」は updated_at が取り込みの時刻（取り込みのトランザクションの now()）と等しいことで見る。
+ * 「以前」で比べると、取り込みより前に始まったトランザクションが取り込み後に直した行（now() は開始時刻なので取り込みより前）を
+ * 直されていないと取り違える（Codex レビュー 2026-09-12）。等しさだけだと、取り込みと同じマイクロ秒に始まった別のトランザクションの
+ * 編集を見分けられないので、最後に直した人（updated_by）が取り込んだ人であることも見る（取り込みは作成・割り当ての時に書く）。
+ * 残る取り違えは「取り込んだ本人が、同じマイクロ秒に始めた別のトランザクションで直した」場合だけ。
+ * 資産・リスクの updated_by を書く前（6a89bd5 より前）の取り込みは、この条件では対象外になる。その版は本番に出ておらず、
+ * 該当する取り込みは検証用の DB にしか無い（互換の処理は置かない）。
+ * 1 回の取り込みに 1 回だけ（DB の主キーでも拒否する）。
  */
 export async function undoImport(form: FormData) {
   const batchId = String(form.get('batch_id') ?? '').trim();
@@ -539,10 +539,10 @@ export async function undoImport(form: FormData) {
       await undoPolicies(sql, batchId);
       return `undone:${batch.kind}:${await recordUndo(sql, batchId)}`;
     }
-    // Retiring goes through the same permission check as the existing save.
+    // 退役は既存の保存と同じ権限の確かめを通す。
     await sql`SELECT app.require_work_permission(${batch.kind === 'assets' ? 'asset' : 'risk'}, NULL::uuid, 'write')`;
-    // Lock the rows to undo first with FOR UPDATE. Anything adding a reference (foreign-key check) takes a share lock on these rows, so
-    // after the lock no references can be added concurrently. Check for references after locking (so nothing slips in between the check and retiring).
+    // 取り消す行を先に FOR UPDATE でロックする。参照を足す側（外部キーの確かめ）はこの行に共有ロックを取るので、
+    // ロックの後は同時に参照が足されない。参照が無いかの確かめはロックの後に行う（確かめと退役の間に割り込ませない）。
     if (batch.kind === 'assets') {
       await sql`
         SELECT a.id FROM app.assets a JOIN app.import_batch_items i ON i.tenant_id = a.tenant_id AND i.target_id = a.id
@@ -598,8 +598,8 @@ export async function undoImport(form: FormData) {
 }
 
 /**
- * Records the undo and returns the counts computed by the DB (undone, excluded).
- * The counts are not the written values; the DB's INSERT trigger computes them (0072 / 0073).
+ * 取り消しの記録を残し、DB が数えた件数（取り消した・対象外）を返す。
+ * 件数は書いた値ではなく DB の INSERT トリガが数える（0072 / 0073）。
  */
 async function recordUndo(sql: TransactionSql, batchId: string): Promise<string> {
   await sql`
@@ -612,18 +612,18 @@ async function recordUndo(sql: TransactionSql, batchId: string): Promise<string>
 }
 
 /**
- * Undoes a department import. Deletes, from the bottom up, only departments not edited after import and not referenced anywhere.
- * department_systems is ON DELETE CASCADE, so deleting without checking would silently delete the department's system usage records too. Always check.
+ * 部署の取り込みを取り消す。取り込み後に直されておらず、どこからも参照されていない部署だけを、下位から消す。
+ * department_systems は ON DELETE CASCADE なので、確かめずに消すと部署の利用システムの記録が黙って一緒に消える。必ず見る。
  */
 async function undoDepartments(sql: TransactionSql, batchId: string): Promise<void> {
   await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'org_manage')`;
-  // Lock the departments to undo first (makes foreign-key checks from referencing sides wait, so nothing slips in between the check and the delete).
+  // 取り消す部署を先にロックする（参照を足す側の外部キーの確かめを待たせ、確かめと削除の間に割り込ませない）。
   await sql`
     SELECT d.id FROM app.departments d
       JOIN app.import_batch_items i ON i.tenant_id = d.tenant_id AND i.target_id = d.id
      WHERE i.tenant_id = app.current_tenant() AND i.batch_id = ${batchId}::uuid AND i.target_type = 'department'
        FOR UPDATE OF d`;
-  // Delete from the bottom up: repeat until no deletable departments remain (a parent becomes deletable on the pass after its children are gone).
+  // 下位から消す: 消せる部署が無くなるまで繰り返す（上位は、下位が消えた次の回に消せるようになる）。
   for (;;) {
     const deleted = await sql`
       DELETE FROM app.departments d
@@ -644,15 +644,15 @@ async function undoDepartments(sql: TransactionSql, batchId: string): Promise<vo
 }
 
 /**
- * Undoes a policy import. Deletes only versions that are unapproved and not activated, not edited after import, have no acknowledgements, and are still
- * the latest version of that policy (deleting a middle version would break sequential version numbers). Policies created by the import are deleted only
- * when no versions remain (do not leave policies without versions). Policies that existed before the import (including standard policies) are not deleted.
- * Tables readable only by the definer (internal_management_*) reference only approved versions, so they are not checked here. If a reference exists anyway,
- * the foreign key rejects the delete and the whole undo fails without changing anything (erring on the side of not deleting silently).
+ * 規程の取り込みを取り消す。版は、未承認・未有効化で、取り込み後に直されておらず、周知確認が付いておらず、まだその規程の
+ * 最新の版であるものだけを消す（途中の版を消すと版の番号の連番が崩れる）。取り込みで作った規程は、版が残っていないときだけ消す
+ * （版の無い規程を残さない）。取り込み前からあった規程（標準規程を含む）は消さない。
+ * 定義者だけが読める表（internal_management_*）が参照するのは承認済みの版なので、ここでは見ない。万一参照があれば
+ * 外部キーが削除を拒否し、取り消し全体が何も変えずに失敗する（黙って消さない側に倒れる）。
  */
 async function undoPolicies(sql: TransactionSql, batchId: string): Promise<void> {
-  // Lock policies and versions first (adding a new version, approval, and acknowledgement each take a lock on the policy or version row,
-  // so nothing slips in between the check and the delete).
+  // 先に規程と版をロックする（新しい版の追加・承認・周知確認は、それぞれ規程か版の行にロックを取るので、
+  // 確かめと削除の間に割り込ませない）。
   await sql`
     SELECT p.id FROM app.policies p
      WHERE p.tenant_id = app.current_tenant()
@@ -689,8 +689,8 @@ async function undoPolicies(sql: TransactionSql, batchId: string): Promise<void>
 }
 
 /**
- * Undoes membership assignments. Restores to the original department only rows still in the imported department, not edited since, and not revoked.
- * Rows whose original department is gone and (when undone by a non-owner) the top-management row are counted as excluded.
+ * 所属の割り当てを取り消す。今も取り込んだ部署のままで、その後に直されておらず、失効していない行だけを元の部署へ戻す。
+ * 元の部署が消えている行・（オーナー以外が取り消すときの）最高責任者の行は対象外として数える。
  */
 async function undoAssignments(sql: TransactionSql, batchId: string): Promise<void> {
   await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'member_manage')`;

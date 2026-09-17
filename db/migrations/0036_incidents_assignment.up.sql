@@ -1,13 +1,13 @@
--- 0036 app: add assignment to a risk owner and related-risk links to incident management
+-- 0036 app: インシデント管理にリスクオーナーへのアサインと関連リスク紐付けを追加
 --
--- app.incidents was created in 0011 but was not used at all from the web side or by individual RLS settings,
--- and had only id/title/occurred_at/detected_at/severity/status
--- (confirmed by reading: no references in web/src/, 0 rows). RLS is already enabled by 0015's bulk application
--- (automatically covered as an app table with tenant_id), so only columns are added here.
+-- app.incidents は 0011 で作成済みだが、Web側からもRLS個別設定からも一切
+-- 使われておらず、id/title/occurred_at/detected_at/severity/status しか
+-- 無かった(実読で確認: web/src/ に参照なし、行数0)。RLSは0015の一括適用で
+-- 既に有効(tenant_idを持つapp表として自動対象)なので、ここでは列追加のみ。
 --
--- Request: "for each incident, allow assigning its risk owner".
--- The existing app.memberships (role_key='risk_owner') and app.departments.owner_user_id
--- can be referenced as-is, so no dedicated assignee master is needed (principle of reusing existing code).
+-- 依頼: 「各インシデントについて、そのリスクオーナーをアサインできるように」。
+-- 既存の app.memberships(role_key='risk_owner') と app.departments.owner_user_id
+-- をそのまま参照先にでき、独自のアサイン先マスタは不要(既存コード再利用の原則)。
 
 ALTER TABLE app.incidents
   ADD COLUMN summary          text NOT NULL DEFAULT '',

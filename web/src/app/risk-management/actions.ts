@@ -17,8 +17,8 @@ const optionalText = (form: FormData, key: string, max = 1000): string | null =>
   return value ? value.slice(0, max) : null;
 };
 
-// Blank is treated as "unset" and becomes NULL. If tampered FormData sends an invalid string,
-// the ::uuid cast causes a DB error, so the format is rejected here (added in 0061).
+// 空欄は「未設定」として NULL にする。改ざんされた FormData で不正な文字列が
+// 来ると ::uuid キャストが DB エラーになるので、形式はここで弾く（0061 追加）。
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const optionalUuid = (form: FormData, key: string): string | null => {
   const value = String(form.get(key) ?? '').trim();
@@ -27,9 +27,9 @@ const optionalUuid = (form: FormData, key: string): string | null => {
   return value;
 };
 
-// Blank is treated as an explicit clear (NULL). Values exceeding the DB numeric(p,s) precision,
-// negative numbers, and non-numeric values are rejected clearly here instead of being left to DB CHECK/precision errors
-// (added 2026-09-02; Codex review finding: fixing an insufficient input parser).
+// 空欄は明示的なクリア（NULL）として扱う。DBの numeric(p,s) 精度を超える／
+// 負数／非数値は、DBのCHECK/精度エラーに丸投げせずここで明確に弾く
+// （2026-09-02 追加。Codexレビュー指摘: 入力パーサー不足の是正）。
 const optionalDecimal = (form: FormData, key: string, pattern: RegExp, label: string): number | null => {
   const raw = String(form.get(key) ?? '').trim();
   if (!raw) return null;
@@ -107,9 +107,9 @@ export async function saveAsset(form: FormData) {
   const description = optionalText(form, 'description', 4000) ?? '';
   const classification = text(form, 'classification', 80);
   const sourceNote = optionalText(form, 'source_note', 4000) ?? '';
-  // Owning department and location (0061). The owner_department_id column has existed since 0027
-  // but was not used by the UI. Location has two parts: a system (FK), and
-  // free text for locations a system can't represent (paper, storage, devices).
+  // 管理部門と所在場所（0061）。列は 0027 から owner_department_id が
+  // あったのに画面から使われていなかった。所在場所はシステム（FK）と、
+  // システムでは表せない所在（紙・保管庫・端末）の自由記述の二本立て。
   const ownerDepartmentId = optionalUuid(form, 'owner_department_id');
   const locationSystemId = optionalUuid(form, 'location_system_id');
   const locationNote = optionalText(form, 'location_note', 500) ?? '';
@@ -159,7 +159,7 @@ export async function saveMeasure(form: FormData) {
   const strategy = text(form, 'strategy', 30);
   if (!['mitigate', 'transfer', 'avoid', 'accept'].includes(strategy)) throw new Error('invalid strategy');
   const sourceNote = optionalText(form, 'source_note', 4000) ?? '';
-  // Match the precision of numeric(12,2) / numeric(4,2) (added 2026-09-02).
+  // numeric(12,2) / numeric(4,2) の精度に合わせる（2026-09-02追加）。
   const budgetAmount = optionalDecimal(form, 'budget_amount', /^\d{1,10}(\.\d{1,2})?$/, '予算');
   const resourceFte = optionalDecimal(form, 'resource_fte', /^\d{1,2}(\.\d{1,2})?$/, '人的リソース（FTE）');
   const frameworkKeys = requiredManagementKeys(keys(form));

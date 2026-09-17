@@ -115,14 +115,14 @@ describe('パスワード管理の非秘密設定', () => {
 
   it('プロバイダー・製品・ヘルスパスは許可リストからだけ選択する', () => {
     expect(readPasswordManagerConfig({
-      PASSWORD_MANAGER_PROVIDER: 'vaultwarden-derived',
-      PASSWORD_MANAGER_PRODUCT: 'vaultwarden-derived',
+      PASSWORD_MANAGER_PROVIDER: 'intelligent-beast-vaultwarden-derived',
+      PASSWORD_MANAGER_PRODUCT: 'intelligent-beast-vaultwarden-derived',
       PASSWORD_MANAGER_HEALTH_PATH: '/alive',
       PASSWORD_MANAGER_URL: 'https://vault.example.com',
       PASSWORD_MANAGER_ALLOWED_ORIGIN: 'https://vault.example.com',
     })).toMatchObject({
-      provider: 'vaultwarden-derived',
-      productId: 'vaultwarden-derived',
+      provider: 'intelligent-beast-vaultwarden-derived',
+      productId: 'intelligent-beast-vaultwarden-derived',
       healthPath: '/alive',
       valid: true,
     });
@@ -137,8 +137,8 @@ describe('パスワード管理の非秘密設定', () => {
   it('自社派生版は切替証跡が無ければ利用可能にしない', async () => {
     const request = vi.fn().mockResolvedValue(true);
     const status = await getPasswordManagerStatus({
-      PASSWORD_MANAGER_PROVIDER: 'vaultwarden-derived',
-      PASSWORD_MANAGER_PRODUCT: 'vaultwarden-derived',
+      PASSWORD_MANAGER_PROVIDER: 'intelligent-beast-vaultwarden-derived',
+      PASSWORD_MANAGER_PRODUCT: 'intelligent-beast-vaultwarden-derived',
       PASSWORD_MANAGER_URL: 'https://vault.example.com',
       PASSWORD_MANAGER_ALLOWED_ORIGIN: 'https://vault.example.com',
     }, request, async () => [{ address: '8.8.8.8', family: 4 }]);
@@ -148,7 +148,7 @@ describe('パスワード管理の非秘密設定', () => {
 
   it('自社派生版はstatus値が整形式でもreview済みrelease lockが空なら利用可能にしない', async () => {
     const body = JSON.stringify({
-      product_id: 'vaultwarden-derived',
+      product_id: 'intelligent-beast-vaultwarden-derived',
       upstream_ref: '1.37.2',
       upstream_commit: '46d71107f5094460dd5ecbe1dbac6e6c71e5189a',
       fork_commit: '1111111111111111111111111111111111111111',
@@ -161,8 +161,8 @@ describe('パスワード管理の非秘密設定', () => {
       client_sync_status: 'synced',
     });
     const status = await getPasswordManagerStatus({
-      PASSWORD_MANAGER_PROVIDER: 'vaultwarden-derived',
-      PASSWORD_MANAGER_PRODUCT: 'vaultwarden-derived',
+      PASSWORD_MANAGER_PROVIDER: 'intelligent-beast-vaultwarden-derived',
+      PASSWORD_MANAGER_PRODUCT: 'intelligent-beast-vaultwarden-derived',
       PASSWORD_MANAGER_URL: 'https://vault.example.com',
       PASSWORD_MANAGER_ALLOWED_ORIGIN: 'https://vault.example.com',
       PASSWORD_MANAGER_STATUS_FILE: '/var/lib/vaultwarden/status/management-status.json',

@@ -1,31 +1,14 @@
-# Sample catalog CSVs
+# Isolated-test CSV snapshots
 
-These two files are a **small, fictional sample catalog**. They exist so that
-`make seed`, `make ci` and `tests/run_isolated.sh` work out of the box. Every row
-was written for this repository and is marked as a sample (`サンプル`); none of it
-is a real control framework or risk library.
+These files are immutable fixtures for `tests/run_isolated.sh`; they are not the
+production seed source of truth. Production `make seed` and
+`record_provenance.py` read the configured catalog directory.
 
-- `control_check/control_requirements_master.csv` (8 rows) -> `catalog.controls`
-  (`framework_key = 'IPO-KARTE'`)
-  - columns: `大項目記号,大項目,中項目,小項目コード,小項目,要請No,要請事項`
-- `risk_map/risk_map_master.csv` (9 rows) -> `catalog.risk_scenario_templates`
-  - columns: `RiskItem,Big,Mid,Frame,Summary,Action`
+- Source: fictional sample data for tests and local development
+- `control_check/control_requirements_master.csv`: SHA-256 `56e0b4a0419f49d172edab1ebacf054cf4477a796e6c03d98cffc54d2ef92ef3`
+- `risk_map/risk_map_master.csv`: SHA-256 `140b484a48eb619f194eda7fa8a804ec4a5814b7f20aa042a8c9c2c38805b544`
 
-To use your own catalog, put CSVs with the same columns under the same relative
-paths in another directory and point `LEGAL_SCRIPTS_DIR` at it:
+When the upstream inputs change, update both fixtures, this manifest, and the
+isolated-test expectations in one reviewed commit.
 
-```bash
-LEGAL_SCRIPTS_DIR=/path/to/my-catalog make seed
-```
-
-`db/seeds/load_csv.py` validates the files before loading (UTF-8, required
-columns, no empty values, unique codes / business keys, `RiskItem` ending in
-`（PhaseN）` with N = 1..5, `Frame` one of `管理可能性` / `精度` / `スピード`).
-
-`SHA256SUMS` pins the bundled files; `tests/run_isolated.sh` and
-`scripts/ci/run.sh` verify it before loading. When you change the sample files,
-regenerate it:
-
-```bash
-cd db/seeds/snapshots && shasum -a 256 control_check/control_requirements_master.csv risk_map/risk_map_master.csv > SHA256SUMS
-```
+`tests/run_isolated.sh` verifies `SHA256SUMS` before loading either fixture.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Confirm that the SHA-256 gate rejects tampering with recorded responses."""
+"""記録済み応答の改変を SHA-256 ゲートが拒否することを確認する。"""
 
 from __future__ import annotations
 

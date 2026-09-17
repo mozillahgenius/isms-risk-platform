@@ -1,9 +1,9 @@
-// Layout computation for the hierarchy pyramid (pure functions, no DOM dependency).
-// The three views flat (orthographic) / persp (perspective) / webgl (three.js) share the same coordinates, levels, and edges;
-// this is the single source of truth so the views don't look different. Coordinates are 3D reference coordinates "before rotation".
+// 階層ピラミッドのレイアウト計算（純関数・DOM非依存）。
+// flat(正射影) / persp(遠近) / webgl(three.js) の3表示で同一の座標・階層・エッジを共有し、
+// 表示間で見た目がズレないための単一の真実源。座標は「回転前」の3D基準座標。
 
-// derived=true means "a grouping derived from a classification (not a DB row)". Drawn hollow so it can be told apart from real rows.
-// Derived nodes are intermediate headings bundling controls or risks; there is no corresponding DB row.
+// derived=true は「分類から導出したまとまり（DB の行ではない）」。実体の行と区別できるよう白抜きで描く。
+// 導出ノードは統制やリスクを束ねる中間の見出しであり、DB に対応する行は無い。
 export type PyramidNode = {
   id: string;
   title: string;
@@ -21,41 +21,41 @@ export type PyramidLayout = {
   adj: Set<number>[];
   maxLevel: number;
   levelMid: number;
-  // Reference coordinates before rotation (y is positive upward: the apex = level0 is at the top). Length N.
+  // 回転前の基準座標（y は上向き正: 頂点=level0 が上）。長さ N。
   bx: Float64Array;
   by: Float64Array;
   bz: Float64Array;
   maxR: number;
-  // Radii of the concentric rings actually used per level. Overflowing levels have several. The renderer's ring lines use these.
+  // 階層ごとに実際に使った同心リングの半径。溢れた階層は複数持つ。描画側のリング線はこれを使う。
   tierRings: number[][];
   LEVEL_GAP: number;
   R0: number;
   RSTEP: number;
 };
 
-const LEVEL_GAP = 74; // Height between levels
-const R0 = 34; // Radius near the apex
-const RSTEP = 66; // Amount the radius widens per level of depth
-// Node draw radius. Larger for nodes with more connections. Both the layout spacing computation and each view's rendering
-// use the same value, so this is the single definition (keeping separate copies makes spacing and actual size drift apart and nodes overlap).
+const LEVEL_GAP = 74; // 階層間の高さ
+const R0 = 34; // 頂点付近の半径
+const RSTEP = 66; // 1階層深くなるごとに広がる量
+// ノードの描画半径。接続本数が大きいほど大きい。レイアウトの間隔計算と各ビューの描画で
+// 同じ値を使うため、ここを単一の定義とする（別々に持つと間隔と実寸がずれて重なる）。
 export function nodeRadius(deg: number): number {
   return 4 + Math.sqrt(deg) * 2.1;
 }
 
-// Lower bound of the minimum spacing (world units) between adjacent nodes on the same ring.
-// The actual spacing is derived from the diameter of the largest node in that level (high-degree nodes have larger radii,
-// so with a fixed value the diameter exceeds the spacing and nodes overlap).
+// 同一リング上で隣り合うノードの最小間隔（ワールド単位）の下限。
+// 実際の間隔はその階層で最も大きいノードの直径から決める（次数の大きいノードは半径も大きく、
+// 固定値だと直径が間隔を上回って重なるため）。
 const MIN_ARC = 16;
-// Lower bound of the spacing between concentric rings added outward for levels that don't fit on a single ring.
+// 1本のリングに収まらない階層を、外側へ増やしていく同心リングの間隔の下限。
 const SUB_GAP = 24;
 
-// Number of nodes that fit on a ring of radius R while keeping center-to-center distance `spacing` between neighbors.
-// Checked by chord length, not arc length (center-to-center distance for n evenly spaced nodes is 2R*sin(π/n)).
-// Counting by arc length, when the radius is small and the spacing large, the actual distance falls short and nodes overlap.
-// Minimum is 1 (what doesn't fit is sent to an outer ring).
+// 半径 R のリングに、隣り合う中心間距離 spacing を保って置けるノード数。
+// 判定は弧長ではなく弦長で行う（n 個を等間隔に置いたときの中心間距離は 2R*sin(π/n)）。
+// 弧長で数えると、半径が小さく間隔が大きいときに実距離が足りず重なる。
+// 下限は 1（入らない分は外側のリングへ送る）。
 function ringCapacity(R: number, spacing: number): number {
   const s = spacing / (2 * R);
-  if (s >= 1) return 1; // Not enough room even with 2 nodes (center distance 2R) = only 1 node fits
+  if (s >= 1) return 1; // 2個置いた時点（中心間 2R）で足りない＝1個しか置けない
   return Math.max(1, Math.floor(Math.PI / Math.asin(s)));
 }
 
@@ -64,7 +64,7 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
   const idx = new Map<string, number>();
   nodes.forEach((n, i) => idx.set(n.id, i));
 
-  // Hierarchy edges (both ends in the set, self-loops excluded). Direction is parent (upper) -> child (lower).
+  // 階層エッジ（両端が集合内・自己ループ除外）。方向は parent(上位) → child(下位)。
   const edges: PyramidEdge[] = [];
   for (const l of links) {
     const p = idx.get(l.parent);
@@ -72,7 +72,7 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
     if (p === undefined || c === undefined || p === c) continue;
     edges.push({ p, c, section: l.section });
   }
-  // Adjacency (parents, children) for hover, plus a child -> parent reverse lookup (precomputed into a Map so angle sorting doesn't scan all edges every time).
+  // hover 用の隣接（親・子）と、子→親の逆引き（角度ソートで毎回 edges 全走査しないため事前 Map 化）。
   const adj: Set<number>[] = nodes.map(() => new Set<number>());
   const parentsByChild: number[][] = nodes.map(() => []);
   for (const e of edges) {
@@ -86,10 +86,10 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
   const byLevel: number[][] = Array.from({ length: maxLevel + 1 }, () => []);
   nodes.forEach((n, i) => byLevel[n.level].push(i));
 
-  // Reorder children by their parents' mean angle to reduce edge crossings between levels (finalized top level first).
-  // Levels that don't fit on a single ring overflow onto additional concentric rings outward.
-  // (If the radius were determined by level alone, nodes in levels with many children would overlap and become indistinguishable.
-  //   e.g. a ring of radius 232 with minimum spacing 16 fits up to 91 nodes; beyond that they overlap)
+  // 親の平均角度で子を並べ替え、上下でエッジ交差を減らす（上の階層から順に確定）。
+  // 1本のリングに収まらない階層は、外側へ同心リングを足して溢れさせる。
+  // （半径を level だけで決めると、子の多い階層でノードが重なり判別できなくなる。
+  //   例: 半径232のリングは最小間隔16なら91件までで、それを超えると重なる）
   const angle = new Float64Array(N);
   const radiusOf = new Float64Array(N);
   const tierRings: number[][] = [];
@@ -105,13 +105,13 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
             cnt++;
           }
         }
-        return cnt ? sum / cnt : Math.PI; // Near the center if there is no parent
+        return cnt ? sum / cnt : Math.PI; // 親が無ければ中央付近
       };
       arr.sort((a, b) => keyOf(a) - keyOf(b));
     }
     const base = R0 + L * RSTEP;
-    // Match the spacing to the diameter of the largest node in this level (it's evaluated per level, so
-    // a single hub in one level doesn't needlessly widen every level).
+    // 間隔はこの階層で最も大きいノードの直径に合わせる（階層ごとに見るので、
+    // ハブが1つある階層のために全階層をむやみに広げない）。
     let tierMaxDeg = 0;
     for (const i of arr) tierMaxDeg = Math.max(tierMaxDeg, nodes[i].deg);
     const tierDiameter = 2 * nodeRadius(tierMaxDeg);
@@ -126,7 +126,7 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
       rings.push(R);
       for (let k = 0; k < take && placed + k < arr.length; k++) {
         const i = arr[placed + k];
-        // Rotate slightly per level and per concentric ring to avoid overlap directly below and between inner/outer rings
+        // 階層ごと・同心リングごとに少し回して、真下・内外の重なりを避ける
         angle[i] = (k / take) * Math.PI * 2 + L * 0.5 + ring * 0.31;
         radiusOf[i] = R;
       }
@@ -146,7 +146,7 @@ export function buildPyramidLayout(nodes: PyramidNode[], links: PyramidLink[]): 
     bz[i] = Math.sin(angle[i]) * R;
     by[i] = (levelMid - L) * LEVEL_GAP;
   }
-  // Maximum radius including rings that spread outward from overflow (the basis for scale and camera distance).
+  // 溢れで外側に広がったリングも含めた最大半径（scale・カメラ距離の基準）。
   let maxR = R0;
   for (const rs of tierRings) for (const r of rs) maxR = Math.max(maxR, r);
 

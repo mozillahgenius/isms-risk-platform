@@ -1,6 +1,6 @@
--- T-09: The entry to ⑦ (independent verification) is fixed to an append that returns a receipt only.
--- app_rw / app_ro cannot read, rewrite, or delete the original records;
--- they use only app.accept_verification_receipt() and execution records in check_runs.
+-- T-09: ⑦（独立検証）への入口は receipt を返す追記だけに固定する。
+-- app_rw / app_ro は元レコードを読んだり書き換えたり消したりできず、
+-- app.accept_verification_receipt() と check_runs への実行記録だけを使う。
 
 SET ROLE schema_owner;
 
@@ -17,7 +17,7 @@ ALTER TABLE app.verification_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.verification_receipts FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON app.verification_receipts FROM PUBLIC, app_rw, app_ro;
 
--- Only the SECURITY DEFINER intake function appends. Past receipts are not updated or deleted even by the definer.
+-- SECURITY DEFINER の受付関数だけが追記する。過去の受付は定義者からも更新・削除しない。
 CREATE POLICY verification_receipt_definer_insert ON app.verification_receipts
   FOR INSERT TO schema_owner WITH CHECK (tenant_id = app.current_tenant());
 CREATE POLICY verification_receipt_definer_read ON app.verification_receipts

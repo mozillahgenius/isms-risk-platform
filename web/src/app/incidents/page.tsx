@@ -17,12 +17,12 @@ function formatDate(value: string | Date | null): string {
   return new Date(value).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-// A datetime-local input's defaultValue needs the "YYYY-MM-DDTHH:mm[:ss]" format
-// (with a time zone designator the value is not set). Without this input in the edit form,
-// occurred_at/detected_at would be overwritten with NULL on every update
-// (Codex review 2026-09-02 finding). Seconds are included because rounding to minutes would drop the seconds of existing
-// values that have them (entered via paths other than this UI) when merely editing the title etc.
-// (second finding in the same review). The input gets step="1" so seconds can be preserved.
+// datetime-local inputのdefaultValueは "YYYY-MM-DDTHH:mm[:ss]" 形式が要る
+// (タイムゾーン表記があると値が入らない)。編集フォームにこの入力欄が無いと、
+// 更新のたびにoccurred_at/detected_atがNULLへ上書きされてしまう
+// (Codexレビュー2026-09-02指摘)。秒まで含めるのは、分単位に丸めると既存の
+// 秒を持つ値(このUI以外の経路で入った値)がタイトル等の編集だけで欠けるため
+// (同レビュー2回目の指摘)。inputには step="1" を付けて秒を保持できるようにする。
 function toDatetimeLocal(value: string | Date | null): string {
   if (!value) return '';
   const d = new Date(value);

@@ -1,18 +1,18 @@
-// Node IDs for the diagrams (graph, pyramid).
+// 図（グラフ・ピラミッド）のノード ID。
 //
-// Why not use the raw values directly:
-//   Natural node keys contain ' / ', spaces, and full-width parentheses (e.g. a control theme
-//   "Category / Subcategory / Item", a risk domain "Department (Phase1)" with full-width parentheses).
-//   The diagram implementation just pushes `/n/<id>` on click, so a '/' in the ID
-//   splits the path and jumps to a different route. So the ID side is fixed to a URL-safe form.
+// なぜ素の値をそのまま使わないか:
+//   ノードの自然キーには ' / ' やスペース、全角括弧が入る（例: 統制の theme
+//   「運営基盤 / 機関設計 / 取締役会」、リスクの domain「経理・税務（Phase1）」）。
+//   図の実装はクリック時に `/n/<id>` へ push するだけなので、ID に '/' が入ると
+//   パスが割れて別のルートに飛ぶ。だから ID の側を URL 安全な形に固定する。
 //
-// Format: `<type>.<base64url(utf8(key))>`
-//   - The base64url alphabet is only A-Z a-z 0-9 - _. It collides with neither path separators nor query syntax
-//   - Reversible. The resolver can recover the original natural key (no separate lookup table needed)
-//   - Types come from a fixed allowlist. Unknown types are rejected by decode
+// 形式: `<type>.<base64url(utf8(key))>`
+//   - base64url の文字集合は A-Z a-z 0-9 - _ のみ。パス区切りにも query にもぶつからない
+//   - 可逆。resolver 側で元の自然キーへ戻せる（別表を持たなくてよい）
+//   - 型は固定の許可リスト。未知の型は decode で弾く
 
 export const NODE_TYPES = [
-  'dom', // The DOM edition itself
+  'dom', // DOM 版そのもの
   'framework', // catalog.frameworks.key
   'control', // catalog.controls.id (uuid)
   'risk', // catalog.risk_scenario_templates.id (uuid)
@@ -20,19 +20,19 @@ export const NODE_TYPES = [
   'role', // catalog.roles_default.key
   'asset', // catalog.asset_classes_default.key
   'calendar', // catalog.calendar_events_default.key
-  'frame', // Risk perspective (manageability / accuracy / speed)
-  'group', // Intermediate node derived from a classification (not a DB row)
+  'frame', // リスクの観点（管理可能性 / 精度 / スピード）
+  'group', // 分類から導出した中間ノード（DB の行ではない）
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
 
-// Maximum length of the whole ID. A gate so overly long input doesn't hit the router or DB.
+// ID 全体の長さ上限。長すぎる入力でルータや DB を叩かないための門。
 //
-// Measured (DOM 2026.1, 2026-08-13): the longest key is 231 bytes, in the risk measure group.
-// base64url inflates 3 bytes -> 4 characters, so the ID is about 314 characters. 1024 accommodates keys up to about 760 bytes
-// and still fits within the practical URL limit (roughly 2000 characters).
-// **The generating side (encodeNodeId) also enforces this limit.** Applying it on only one side
-// produces "nodes that can be created but return 404 when clicked".
+// 実測（2026-08-13 の DOM 2026.1）での最長キーは、リスクの measure 群で 231 バイト。
+// base64url は 3 バイト → 4 文字に膨らむので ID は約 314 文字。1024 なら約 760 バイトの
+// キーまで入り、URL の実用上限（おおむね 2000 文字）にも収まる。
+// **生成側（encodeNodeId）もこの上限を守る。** 片側だけに掛けると、
+// 「作れるがクリックすると 404 になるノード」ができる。
 export const MAX_NODE_ID_LENGTH = 1024;
 
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -50,12 +50,12 @@ function bytesToBase64Url(bytes: Uint8Array): string {
     if (b2 === undefined) break;
     out += B64_CHARS[b2 & 0x3f];
   }
-  return out; // No '=' padding (because it goes into URLs)
+  return out; // パディング '=' は付けない（URL に入れないため）
 }
 
 function base64UrlToBytes(s: string): Uint8Array | null {
   const n = s.length;
-  // base64 encodes 3 bytes per 4 characters. A remainder of 1 character is not valid base64.
+  // base64 は 4 文字で 3 バイト。余り 1 文字は base64 として成立しない。
   if (n % 4 === 1) return null;
   const bytes: number[] = [];
   let acc = 0;
@@ -73,7 +73,7 @@ function base64UrlToBytes(s: string): Uint8Array | null {
   return Uint8Array.from(bytes);
 }
 
-/** Thrown when a key is found to be unencodable. A guard against silently producing broken IDs. */
+/** 符号化できないキーだと分かったときに投げる。黙って壊れた ID を作らないための番人。 */
 export class UnencodableNodeKey extends Error {
   constructor(reason: string) {
     super(`ノード ID を作れません: ${reason}`);
@@ -81,17 +81,17 @@ export class UnencodableNodeKey extends Error {
   }
 }
 
-// An unpaired surrogate. TextEncoder replaces it with U+FFFD,
-// so different keys become the same bytes = the same ID, breaking link identity.
-// It doesn't appear in values coming from PostgreSQL text, but we reject it explicitly as part of the generator's contract.
+// 対になっていないサロゲート。TextEncoder はこれを U+FFFD に置き換えるため、
+// 別々のキーが同じバイト列＝同じ ID になり、リンクの同一性が崩れる。
+// PostgreSQL の text から来る値には現れないが、生成側の契約として明示的に弾く。
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 export function encodeNodeId(type: NodeType, key: string): string {
   if (key.length === 0) throw new UnencodableNodeKey('キーが空です');
   if (LONE_SURROGATE.test(key)) throw new UnencodableNodeKey('対になっていないサロゲートを含みます');
   const id = `${type}.${bytesToBase64Url(new TextEncoder().encode(key))}`;
-  // If the limits differ between generator and decoder, you get "nodes that can be created but return 404 when clicked".
-  // Over the limit, fail here instead of silently not creating it (so we notice the data is longer than expected).
+  // 生成側と復号側で上限が食い違うと、「作れるがクリックすると 404 になるノード」ができる。
+  // 上限を超えたら黙って作らず、ここで落とす（データが想定より長いことに気づけるように）。
   if (id.length > MAX_NODE_ID_LENGTH) {
     throw new UnencodableNodeKey(`ID が上限 ${MAX_NODE_ID_LENGTH} 文字を超えます（${id.length} 文字）`);
   }
@@ -100,7 +100,7 @@ export function encodeNodeId(type: NodeType, key: string): string {
 
 export type DecodedNodeId = { type: NodeType; key: string };
 
-/** Invalid, unknown, or corrupt IDs return null. Callers translate this into a 404. */
+/** 不正・未知・壊れた ID は null。呼び出し側はこれを 404 に翻訳する。 */
 export function decodeNodeId(id: string): DecodedNodeId | null {
   if (typeof id !== 'string' || id.length === 0 || id.length > MAX_NODE_ID_LENGTH) return null;
   const dot = id.indexOf('.');
@@ -111,18 +111,18 @@ export function decodeNodeId(id: string): DecodedNodeId | null {
   if (!bytes) return null;
   let key: string;
   try {
-    // Reject invalid UTF-8 instead of substituting replacement characters (it would pass as a different key).
+    // 不正な UTF-8 は置換文字にせず落とす（別のキーとして通ってしまうため）。
     key = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     return null;
   }
   if (key.length === 0) return null;
-  // Reject non-canonical base64 (e.g. garbage in the trailing bits).
-  // If multiple IDs exist for the same key, link identity breaks.
+  // 正規形でない base64（末尾ビットにゴミがある等）を弾く。
+  // 同じキーに複数の ID が存在すると、リンクの同一性が崩れる。
   //
-  // encodeNodeId throws on unencodable keys. By this point length and UTF-8 have
-  // already been checked, so it normally won't throw, but decoding is the entry point for user input, so
-  // even if it throws, don't return 500; fall back to null as an "unreadable ID".
+  // encodeNodeId は符号化できないキーで例外を投げる。ここへ来る時点で長さも UTF-8 も
+  // 検査済みなので通常は投げないが、復号は利用者の入力を受ける入口なので、
+  // 投げられても 500 にせず「読めない ID」として null に倒す。
   try {
     if (encodeNodeId(type as NodeType, key) !== id) return null;
   } catch {
@@ -131,25 +131,25 @@ export function decodeNodeId(id: string): DecodedNodeId | null {
   return { type: type as NodeType, key };
 }
 
-// Note that decodeNodeId does not check the per-type shape of the key (whether it's a uuid, the literal form of a natural key, etc.).
-// That is the job of the side that decides the destination (lib/nodeDestination.ts); the two-stage design is intentional.
-// "Can it be read as an ID?" and "Is the target in a shape that could exist?" are separate judgments;
-// the former is checked here, the latter when deciding the destination. Failing either results in a 404.
+// なお、decodeNodeId は型ごとのキーの形までは見ない（uuid か、自然キーの字面か等）。
+// それは行き先を決める側（lib/nodeDestination.ts）の仕事で、意図的に二段構えにしている。
+// 「ID として読めるか」と「その対象が存在しうる形か」は別の判断で、
+// 前者をここで、後者を遷移先の決定時に見る。どちらで落ちても 404 になる。
 
 /**
- * Key for a derived intermediate node (not a DB row).
- * kind is the classification axis, path is the position within that axis. The joiner is U+001F (Unit Separator).
- * Theme paths contain ' / ' and spaces,
- * so using a visible character as the separator would split a theme like "Operations base / Governance design" in the middle into a different node.
- * A control character never appears in real data.
+ * 導出した中間ノード（DB の行ではない）のキー。
+ * kind は分類の軸、path はその軸の中での位置。継ぎ目は U+001F（Unit Separator）。
+ * theme パスには ' / ' も空白も入るため、
+ * 見える文字を区切りにすると「運営基盤 / 機関設計」の途中で割れて別ノードになる。
+ * 制御文字なら実データに現れない。
  */
 export const GROUP_SEP = '\u001F';
 
 export function groupKey(kind: string, path: string[]): string {
   const parts = [kind, ...path];
-  // If a component contains the separator, re-splitting shifts the levels and produces a different grouping
-  // (groupKey('a', ['b\u001Fc']) and groupKey('a', ['b','c']) would produce the same key).
-  // Don't swallow it via escaping; fail it as an anomaly on the input side.
+  // 構成要素が区切り文字を含んでいると、割り直したときに段がずれて別のまとまりになる
+  // （groupKey('a', ['b\u001Fc']) と groupKey('a', ['b','c']) が同じキーになる）。
+  // エスケープで飲み込まず、投入側の異常として落とす。
   for (const part of parts) {
     if (part.includes(GROUP_SEP)) {
       throw new UnencodableNodeKey('分類の値に区切り文字（U+001F）が含まれています');

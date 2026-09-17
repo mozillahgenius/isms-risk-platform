@@ -1,6 +1,6 @@
--- Standard checks for Phase 2 (a minimal executable set for A/B/C/F/G).
--- Every check has query_sql (returns violating rows) and negative_fixture (breaks it with one statement).
--- Reverse verification is run by scripts/checker.py on a throwaway DB.
+-- Phase 2 の標準チェック（A/B/C/F/G の実行可能な最小セット）。
+-- すべて query_sql（違反行を返す）と negative_fixture（1 文で壊す）を持つ。
+-- 逆向き検証は scripts/checker.py が使い捨て DB で実行する。
 
 BEGIN;
 SELECT pg_advisory_xact_lock(8891234503);

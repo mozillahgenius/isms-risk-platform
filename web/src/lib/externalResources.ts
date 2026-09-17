@@ -123,8 +123,8 @@ export async function getExternalResourceWorkspace(
           FROM app.vendors v
          WHERE v.tenant_id=app.current_tenant() ORDER BY v.name`,
       loadTemplates(sql),
-      // Send status is authoritative in app.mail_outbox. Looking only at the questionnaire's status
-      // hides "we thought it was sent but it failed" from the UI.
+      // 送信状態は app.mail_outbox が正本。質問票側の status だけを見ていると
+      // 「送ったつもりで失敗している」が画面から分からない。
       sql<QuestionnaireRow[]>`
         SELECT q.id, q.vendor_id, v.name AS vendor_name, t.name AS template_name,
                q.title, q.purpose, q.recipient_name, q.recipient_email::text,

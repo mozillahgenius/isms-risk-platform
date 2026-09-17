@@ -50,7 +50,7 @@ function statusBadge(status: string): string {
   return 'badge-on-hold';
 }
 
-/** Group assignee candidates by permission. Show who is a manager at the time of choosing. */
+/** 依頼先の候補を権限ごとにまとめる。誰がマネージャーなのかを選ぶ時点で見せる。 */
 function memberGroups(users: MemberOption[]) {
   const order = ['owner', 'admin', 'manager', 'member', 'none'] as const;
   return order
@@ -152,7 +152,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Link className={`btn px-3 py-1.5 text-[12px] ${scope === 'mine' ? 'btn-primary' : ''}`} href={linkFor({ scope: 'mine' })}>
               自分の担当（{data.mineCount}）
             </Link>
-            <span className="ms-2 text-[12px] text-[var(--muted)]">絞り込み:</span>
+            <span className="ml-2 text-[12px] text-[var(--muted)]">絞り込み:</span>
             <Link className={`badge ${workType === '' ? 'badge-note' : ''}`} href={linkFor({ work_type: '' })}>すべての種別</Link>
             {data.workTypes.map((type) => (
               <Link key={type.value} className={`badge ${workType === type.value ? 'badge-note' : ''}`} href={linkFor({ work_type: type.value })}>

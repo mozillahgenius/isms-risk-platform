@@ -13,10 +13,10 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: '収集設定' };
 
-// Connector settings screen of the external connector hub. Differs per deployment, so read from env (design doc 2026-09-11 §9.2).
-// Writing a specific URL as the default would show links to that domain in other deployments. If unset, the button is not shown.
-function connectorHubUrl(): string | null {
-  const configured = process.env.ISMS_CONNECTOR_HUB_URL;
+// Kaname のコネクタ設定画面。デプロイごとに違うので env から読む（設計書 2026-09-11 §9.2）。
+// 自社の URL を既定値に書くと、他社のデプロイで自社ドメインへのリンクが出る。未設定ならボタンを出さない。
+function kanameConnectorsUrl(): string | null {
+  const configured = process.env.ISMS_KANAME_CONNECTORS_URL;
   return configured && /^https:\/\//.test(configured) ? configured : null;
 }
 
@@ -83,7 +83,7 @@ export default async function SettingsPage({
 }) {
   const params = await searchParams;
   const mode = params.mode === 'isms' || params.mode === 'risk' ? params.mode : null;
-  const hubUrl = connectorHubUrl();
+  const kanameUrl = kanameConnectorsUrl();
   const [manifests, settings] = await Promise.all([getConnectorManifests(), getIntegrationSettings()]);
   const data = settings.ok
     ? { manifests, ...settings.data }
@@ -99,7 +99,7 @@ export default async function SettingsPage({
         </div>
         <h1 className="mt-2 text-[22px] font-semibold tracking-tight">収集設定</h1>
         <p className="mt-1 max-w-[900px] text-[13px] leading-6 text-[var(--muted)]">
-          外部サービスの接続は外部のコネクタハブで行い、ここでは ISMS 側の収集定義と実行証跡を確認します。
+          外部サービスの接続は Kaname の既存コネクタで行い、ここでは ISMS 側の収集定義と実行証跡を確認します。
           接続済み・設定済み・取得成功は別の状態として表示します。
         </p>
       </header>
@@ -123,30 +123,30 @@ export default async function SettingsPage({
       <section className="card border-[var(--accent-line)] bg-[var(--accent-weak)] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <span className="badge badge-note">コネクタハブ</span>
-            <h2 className="mt-3 text-[16px] font-semibold">接続と自動取得はコネクタハブで管理</h2>
+            <span className="badge badge-note">Kaname</span>
+            <h2 className="mt-3 text-[16px] font-semibold">接続と自動取得は Kaname で管理</h2>
             <p className="mt-1 max-w-[760px] text-[13px] leading-6 text-[var(--fg-2)]">
-              Google／Slack の認証情報、接続テスト、取得スケジュールはコネクタハブ側を正本にします。
+              Google／Slack の認証情報、接続テスト、取得スケジュールは Kaname の既存コネクタを正本にします。
               この画面にトークンや OAuth の値を入力しないでください。
             </p>
           </div>
-          {hubUrl ? (
+          {kanameUrl ? (
             <a
-              href={hubUrl}
+              href={kanameUrl}
               target="_blank"
               rel="noreferrer"
               className="btn btn-primary shrink-0 px-3 py-2 text-sm"
             >
-              コネクタハブの設定を開く ↗
+              Kaname のコネクタ設定を開く ↗
             </a>
           ) : (
             <span className="shrink-0 text-[12px] text-[var(--muted)]">
-              コネクタハブの URL が未設定です（ISMS_CONNECTOR_HUB_URL）
+              Kaname の URL が未設定です（ISMS_KANAME_CONNECTORS_URL）
             </span>
           )}
         </div>
         <p className="mt-4 text-[12px] text-[var(--muted)]">
-          コネクタハブの取得結果を ISMS ポスチャへ反映する橋渡しは、別の実行ワーカー/API連携として扱います。
+          Kaname の取得結果を ISMS ポスチャへ反映する橋渡しは、別の実行ワーカー/API連携として扱います。
           ここで設定を保存しただけでは、実データ取得済みとは判定しません。
         </p>
       </section>
@@ -233,7 +233,7 @@ export default async function SettingsPage({
           <section className="card p-5">
             <h2 className="text-[15px] font-semibold">ISMS側の設定を登録</h2>
             <p className="mt-1 max-w-[820px] text-[12px] leading-5 text-[var(--muted)]">
-              ここで入力するのは資格情報の値ではなく、コネクタハブの保管先を指す参照名だけです。
+              ここで入力するのは資格情報の値ではなく、Kanameの保管先を指す参照名だけです。
               状態を「有効」にしても、接続テストと橋渡しワーカーが実際に成功するまで自動取得済みとは扱いません。
             </p>
             {!writeEnabled ? (
@@ -257,7 +257,7 @@ export default async function SettingsPage({
                 </div>
                 <div>
                   <label className="mb-1.5 block text-[12px] font-medium text-[var(--fg-2)]" htmlFor="secret-ref">
-                    コネクタハブ参照URI
+                    Kaname参照URI
                   </label>
                   <input
                     id="secret-ref"
@@ -265,7 +265,7 @@ export default async function SettingsPage({
                     required
                     maxLength={200}
                     autoComplete="off"
-                    placeholder="connector-hub://connector/<UUID>"
+                    placeholder="kaname://connector/<UUID>"
                     className="input w-full font-mono"
                   />
                 </div>

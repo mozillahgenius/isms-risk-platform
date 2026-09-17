@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Apply and roll back migrations.
+# マイグレーション適用・巻き戻し。
 #
-#   scripts/migrate.sh up            apply all pending
-#   scripts/migrate.sh down [N]      roll back the latest N (default 1)
-#   scripts/migrate.sh down all      roll back everything
-#   scripts/migrate.sh status        show status
+#   scripts/migrate.sh up            未適用を全て適用
+#   scripts/migrate.sh down [N]      直近 N 個（既定 1）を巻き戻す
+#   scripts/migrate.sh down all      全て巻き戻す
+#   scripts/migrate.sh status        適用状況
 #
-# Target is DATABASE_URL (default postgres:///isms_dev).
-# Each file runs in one transaction. If it fails, none of that file's changes remain.
+# 接続先は DATABASE_URL（既定 postgres:///isms_dev）。
+# 各ファイルは 1 トランザクションで流す。失敗したらそのファイルの変更は残らない。
 #
-# Executing role:
-#   If the file starts with `-- @run-as: admin`, it runs as the connecting user (superuser).
-#   Otherwise it runs after `SET ROLE schema_owner`, to pin the owner to schema_owner.
+# 実行ロール:
+#   ファイル先頭に `-- @run-as: admin` があれば接続ユーザー（superuser）のまま。
+#   無ければ `SET ROLE schema_owner` して流す。所有者を schema_owner に固定するため。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIGDIR="$ROOT/db/migrations"
 DB_URL="${DATABASE_URL:-postgres:///${ISMS_DB:-isms_dev}}"
 
-# -w: never prompt for a password. A connection lacking credentials fails immediately instead of hanging
-# (in an unattended deploy psql waited for a password and the acceptance tests stalled for 30 minutes, 2026-09-13).
+# -w: パスワードを聞かない。資格情報が足りない接続は、止まらずにすぐ落とす
+# （無人の配備で psql がパスワードの入力を待ち、受入試験が30分止まった。2026-09-13）。
 psql_run() { psql -w -v ON_ERROR_STOP=1 -q "$DB_URL" "$@"; }
 
 die() { printf '\033[31m[migrate] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -35,7 +35,7 @@ ensure_table() {
                  ADD COLUMN IF NOT EXISTS down_checksum text" >/dev/null
 }
 
-# Prevent concurrent runs (seeds use the same lock number)
+# 同時実行を防ぐ（seed も同じロック番号を使う）
 LOCK_ID=8891234501
 
 version_of() { basename "$1" | sed -E 's/^([0-9]+)_.*/\1/'; }
@@ -47,8 +47,8 @@ applied_versions() {
 checksum_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 
 verify_checksums() {
-  # Check that applied migration files have not been rewritten afterwards.
-  # Looking only at version would silently skip rewritten content as "already applied".
+  # 適用済みの migration ファイルが後から書き換えられていないか確かめる。
+  # version だけを見ていると、中身を書き換えても「適用済み」として黙って飛ばす。
   local bad=0 v c
   while IFS='|' read -r v c; do
     [ -z "${v:-}" ] && continue
@@ -70,8 +70,8 @@ verify_checksums() {
 }
 
 verify_down_checksums() {
-  # down files are also recorded in the ledger and checked for rewrites after applying.
-  # Verifying only up is pointless if the rollback content has been swapped.
+  # down ファイルも台帳へ記録し、適用後に書き換えられていないか確かめる。
+  # up だけ検証しても、巻き戻しの中身が差し替えられていれば意味が無い。
   local bad=0 v c
   while IFS='|' read -r v c; do
     [ -z "${v:-}" ] && continue
@@ -80,7 +80,7 @@ verify_down_checksums() {
       printf '\033[31m[migrate] 適用済み %s の down ファイルが見つかりません\033[0m\n' "$v" >&2
       bad=1; continue
     fi
-    [ -z "${c:-}" ] && continue     # old records (no down_checksum recorded) pass through
+    [ -z "${c:-}" ] && continue     # 旧レコード（down_checksum 未記録）は素通し
     local now; now=$(checksum_of "$f")
     if [ "$now" != "$c" ]; then
       printf '\033[31m[migrate] 適用済み %s の down が変わっています\033[0m\n' "$v" >&2
@@ -101,9 +101,9 @@ run_file() {
   else
     role_line="SET ROLE schema_owner;"
   fi
-  # Guard against concurrent runs. After taking the lock, confirm inside the transaction that
-  # it is still unapplied. The list of targets is read outside the lock, so without re-checking here
-  # two processes would try to run the same migration twice.
+  # 同時実行への備え。ロックを取った後に「まだ未適用か」をトランザクション内で
+  # 確かめる。適用対象の一覧はロックの外で読んでいるので、ここで再確認しないと
+  # 2 つのプロセスが同じ migration を二重に流そうとする。
   if [ "$direction" = "up" ]; then
     guard=$(printf "DO \$mig\$ BEGIN
       IF EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '%s') THEN
@@ -118,9 +118,9 @@ run_file() {
     END \$mig\$;" "$version")
   fi
   info "$direction $version  $(basename "$f")"
-  # Put lock → re-check → role switch → body → ledger update in one transaction.
-  # If the ledger update is not in the same transaction, a half-done state
-  # "the DDL succeeded but it is not in the ledger" can occur.
+  # ロック → 再確認 → ロール切替 → 本体 → 台帳更新 を 1 トランザクションに入れる。
+  # 台帳更新を同一トランザクションにしないと「DDL は通ったが台帳に載っていない」
+  # 中途半端な状態が起きる。
   local out rc
   out=$({
     echo "BEGIN;"
@@ -171,7 +171,7 @@ cmd_up() {
 
 cmd_down() {
   ensure_table
-  verify_checksums          # detect tampering of up files before down as well
+  verify_checksums          # down の前にも up ファイルの改変を検知する
   verify_down_checksums
   local n="${1:-1}"
   local versions; versions=$(psql_run -At -c \

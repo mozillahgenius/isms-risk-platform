@@ -15,8 +15,8 @@ const optionalText = (form: FormData, key: string, max = 4000): string | null =>
   return value ? value.slice(0, max) : null;
 };
 
-// Allow only decimals that fit the precision of numeric(p,s). Values exceeding the digits, NaN, and negatives are
-// rejected explicitly here rather than delegated to DB CHECK/precision errors (same policy as 0035).
+// numeric(p,s) の精度に収まる小数のみ許可する。桁数を超える・NaN・負数を
+// DBのCHECK/精度エラーに丸投げせずここで明確に弾く(0035と同じ方針)。
 const decimal = (
   form: FormData, key: string, pattern: RegExp, label: string,
   allowZero: boolean,
@@ -32,9 +32,9 @@ const decimal = (
   return n;
 };
 
-// An HTML5 date input guarantees YYYY-MM-DD, but forms can be tampered with, so
-// validate the format and that the date actually exists on the server side too. Avoid delegating to DateStyle-dependent behavior
-// or DB errors (Codex review 2026-09-02 finding).
+// HTML5の date input は YYYY-MM-DD を保証するが、フォームは改ざん可能なので
+// サーバー側でも形式と実在日付を検証する。DateStyle依存やDB側エラーへの
+// 丸投げを避ける(Codexレビュー2026-09-02指摘)。
 const isoDate = (form: FormData, key: string, label: string): string => {
   const raw = text(form, key, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error(`${label} はYYYY-MM-DD形式で入力してください`);
@@ -55,20 +55,20 @@ const route = (form: FormData, value: string): string => {
 
 export async function saveRate(form: FormData) {
   const role = text(form, 'role', 100);
-  // Hourly rate allows 0 yen, matching the DB CHECK (hourly_rate >= 0) (e.g. free-of-charge work).
-  // Effort (hours) is time actually spent on an activity, so 0 is not allowed; the two are distinguished
-  // (Codex review 2026-09-02 finding: a >0 constraint had mistakenly been imposed on the rate as well).
+  // 時間単価はDBのCHECK(hourly_rate >= 0)と同じく0円を許容する(無償対応等)。
+  // 工数(hours)は実体のある活動時間なので0を許容しない、と区別する
+  // (Codexレビュー2026-09-02指摘: 単価にも>0の制約を誤って課していた)。
   const hourlyRate = decimal(form, 'hourly_rate', /^\d{1,8}(\.\d{1,2})?$/, '時間単価', true);
   const effectiveFrom = isoDate(form, 'effective_from', '適用開始日');
   const sourceNote = optionalText(form, 'source_note', 2000) ?? '';
   const result = await withTenantWrite(async (sql) => {
-    // rate_master is append-only (past training costs look up the rate as of the execution date via LATERAL JOIN
-    // each time, so rewriting existing rows would silently change past costs).
-    // Re-registering the same (role, effective_from) is treated as a mistake, not a revision,
-    // and detected atomically with ON CONFLICT DO NOTHING + RETURNING (SELECT->INSERT would
-    // be a TOCTOU under concurrent requests. Codex review 2026-09-02 finding).
-    // Do not call redirect() inside this callback (withTenantWrite's catch would
-    // catch Next.js's redirect control flow as an ordinary error).
+    // rate_master は追記型(過去の教育コストは実施日時点の単価をLATERAL JOINで
+    // 都度引くため、既存行を書き換えると過去のコストが黙って変わる)。
+    // 同じ(role, effective_from)への再登録は改定ではなく取り違えとみなし、
+    // ON CONFLICT DO NOTHING + RETURNING で原子的に検知する(SELECT→INSERTだと
+    // 並行リクエストでTOCTOUになる。Codexレビュー2026-09-02指摘)。
+    // redirect()はこのコールバック内では呼ばない(withTenantWriteのcatchが
+    // Next.jsのリダイレクト制御を通常のエラーとして拾ってしまうため)。
     const rows = await sql<{ id: string }[]>`
       INSERT INTO app.rate_master (tenant_id, role, hourly_rate, effective_from, source_note)
       VALUES (app.current_tenant(), ${role}, ${hourlyRate}, ${effectiveFrom}::date, ${sourceNote})

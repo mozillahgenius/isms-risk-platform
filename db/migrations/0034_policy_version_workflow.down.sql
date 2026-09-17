@@ -1,4 +1,4 @@
--- 0034 down: remove the version management / approval / activation workflow for policy documents
+-- 0034 down: 規程文書の版管理・承認・有効化ワークフローを取り除く
 
 DROP FUNCTION IF EXISTS app.activate_policy_version(uuid, date);
 DROP FUNCTION IF EXISTS app.approve_policy_version(uuid, text);
@@ -13,7 +13,7 @@ DROP INDEX IF EXISTS app.policy_versions_current;
 
 DROP FUNCTION IF EXISTS app.current_session_user();
 
--- Revert set_tenant_context to 0006's original definition (the version that does not set the session-user GUC).
+-- set_tenant_context を 0006 の元の定義へ戻す（セッション利用者 GUC を張らない版）。
 CREATE OR REPLACE FUNCTION app.set_tenant_context(p_token text) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog AS $$

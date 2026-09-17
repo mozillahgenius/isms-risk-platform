@@ -59,7 +59,7 @@ export default async function OrgPage() {
                   <td className="px-4 py-2 text-[var(--muted)]">{a.rank}</td>
                   <td className="px-4 py-2">
                     {a.name_ja}
-                    <span className="ms-2 font-[family-name:var(--font-geist-mono)] text-[11px] text-[var(--muted)]">
+                    <span className="ml-2 font-[family-name:var(--font-geist-mono)] text-[11px] text-[var(--muted)]">
                       {a.key}
                     </span>
                   </td>

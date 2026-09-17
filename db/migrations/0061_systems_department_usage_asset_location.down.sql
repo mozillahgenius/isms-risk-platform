@@ -17,9 +17,9 @@ DROP TRIGGER IF EXISTS trg_guard_application_catalog ON app.application_catalog;
 DROP FUNCTION IF EXISTS app.guard_application_catalog();
 DROP FUNCTION IF EXISTS app.require_system_edit_permission();
 
--- Remove the comments the up added. 0045 doesn't comment application_catalog
--- (only provisioning_requests has one; measured), so
--- restoring NULL matches the original state.
+-- up が付けたコメントを外す。0045 は application_catalog にコメントを
+-- 付けていない（付けているのは provisioning_requests だけ。実測）ので、
+-- NULL に戻すのが元の状態と一致する。
 COMMENT ON TABLE app.application_catalog IS NULL;
 
 RESET ROLE;

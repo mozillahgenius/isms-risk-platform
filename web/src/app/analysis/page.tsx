@@ -1,5 +1,7 @@
 import { getAnalysisWorkspace } from '@/lib/analysisRegister';
 import { runSimulation } from '@/app/analysis/actions';
+import { ISMS_ANALYSIS_SCOPE, type AnalysisScope } from '@/lib/analysisQueries';
+import { frameworkForMode, ISMS_FRAMEWORK_KEY } from '@/lib/navigation';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'AI分析・シミュレーション' };
@@ -9,6 +11,7 @@ const ERROR_LABEL: Record<string, string> = {
   no_token: 'テナントセッションが必要です。',
   invalid_input: '入力内容を確認してください。',
   measure_not_found: '対象の施策が見つかりません。',
+  out_of_scope: 'この施策には ISMS のタグ(ISO 27001:2022)が付いていないため、ISMS の範囲では実行できません。',
   insufficient_data: 'リスク評価データが不足しているため、シミュレーションを実行できません。画面①でこの施策の対策後(after_measure)評価を記録すると利用できるようになります。',
   inconsistent_data: '対策前後のリスク評価値が逆転しており(対策後の方が高い)、シミュレーションを実行できません。画面①のリスク評価記録を確認してください。',
   missing_baseline_data: 'この施策が関わるリスクシナリオの一部に、対策前(before_measure)・固有(inherent)の評価が記録されていないため、シミュレーションを実行できません。画面①でリスク評価を記録すると利用できるようになります。',
@@ -20,15 +23,34 @@ const SCORE_BADGE: Record<string, string> = {
   低: 'badge badge-lead',
 };
 
-export default async function AnalysisPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
-  const [result, sp] = await Promise.all([getAnalysisWorkspace(), searchParams]);
+type SearchParams = Promise<{ saved?: string; error?: string; mode?: string | string[]; framework?: string | string[] }>;
+
+/** URL の mode / framework から範囲を決める(ISMS モードなら ISO 27001、それ以外は全体)。 */
+function scopeFromSearch(sp: Awaited<SearchParams>): AnalysisScope {
+  return frameworkForMode(sp.framework, sp.mode) === ISMS_FRAMEWORK_KEY ? ISMS_ANALYSIS_SCOPE : 'ALL';
+}
+
+export default async function AnalysisPage({ searchParams }: { searchParams: SearchParams }) {
+  const sp = await searchParams;
+  const scope = scopeFromSearch(sp);
+  const isms = scope === ISMS_ANALYSIS_SCOPE;
+  const result = await getAnalysisWorkspace(scope);
   const data = result.ok ? result.data : null;
+  const noScopedMeasures = isms && data !== null && data.scopedMeasureCount === 0;
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h1 className="text-[21px] font-semibold">AI分析・シミュレーション</h1>
         <p className="mt-1 text-[13px] text-[var(--muted)]">
           施策・ルールの重複分析と、施策を外した場合のリスク影響シミュレーションを行います。
+        </p>
+        <p className="mt-2 text-[12px]" data-testid="analysis-scope">
+          <span className="badge badge-lead">{isms ? 'ISMS' : 'リスクマネジメント全体'}</span>{' '}
+          <span className="text-[var(--muted)]">
+            {isms
+              ? 'ISO 27001:2022 のタグ(ISMS のタグ)が付いた施策・リスク・資産だけで算出しています。'
+              : '範囲で絞らず、登録済みのすべての施策・リスク・資産で算出しています。'}
+          </span>
         </p>
       </div>
       {sp.saved === '1' && (
@@ -43,6 +65,13 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
         </section>
       )}
       {!data ? <div className="card p-5 text-[13px] text-[var(--muted)]">テナントセッションが必要です。</div> : <>
+        {noScopedMeasures && (
+          <section className="card border-[var(--warning)] bg-[var(--warning-weak)] p-4" role="status">
+            <p className="text-[12px] font-medium text-[var(--badge-warning-fg)]">
+              ISMS のタグ(ISO 27001:2022)が付いた施策が無いため、ISMS の範囲では分析できません。画面①で施策に ISMS のタグを付けると利用できます。
+            </p>
+          </section>
+        )}
         <section className="card p-4">
           <h2 className="text-[15px] font-semibold">施策・ルールの重複分析</h2>
           <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -84,6 +113,7 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
           <h2 className="text-[15px] font-semibold">施策除外シミュレーション</h2>
           <p className="mt-1 text-[12px] text-[var(--muted)]">
             画面①のリスク評価スナップショット(対策前/対策後)にもとづき、指定した施策を除外した場合のリスク値を再計算します。除外後のリスク値は、その施策が無い状態(対策前、無ければ固有リスク)の評価と同じです。
+            {isms && ' 合計は、ISMS のタグが付いたリスクシナリオだけで出します。'}
           </p>
           <p className="mt-1 text-[11px] text-[var(--warning)]">
             対策前(before_measure)・固有(inherent)の評価はリスクシナリオ単位の記録です。1つのリスクシナリオに複数の施策が紐づいている場合、この計算は「対象施策だけを外す」ではなく「そのシナリオに紐づく施策すべてを外す」場合の値になります(下表で「他施策と共通」と表示されます)。
@@ -91,9 +121,11 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
           {data.simulatableMeasures.length === 0 ? (
             <div className="mt-3 card border-[var(--warning)] bg-[var(--warning-weak)] p-3" role="status">
               <p className="text-[12px] font-medium text-[var(--badge-warning-fg)]">
-                {data.hasAnyAfterMeasureCandidate
-                  ? '対策後(after_measure)の評価がある施策はあるものの、比較に必要な対策前(before_measure)・固有(inherent)の評価が記録されていないため、この機能は無効化されています。不確かな数値を表示しないための措置です。画面①でリスク評価を記録すると利用できます。'
-                  : '対策後(after_measure)のリスク評価が記録されている施策が無いため、この機能は無効化されています。不確かな数値を表示しないための措置です。画面①でリスク評価(対策前・対策後)を記録すると利用できます。'}
+                {noScopedMeasures
+                  ? 'ISMS のタグ(ISO 27001:2022)が付いた施策が無いため、この機能は無効化されています。画面①で施策に ISMS のタグを付けると利用できます。'
+                  : data.hasAnyAfterMeasureCandidate
+                    ? '対策後(after_measure)の評価がある施策はあるものの、比較に必要な対策前(before_measure)・固有(inherent)の評価が記録されていないため、この機能は無効化されています。不確かな数値を表示しないための措置です。画面①でリスク評価を記録すると利用できます。'
+                    : '対策後(after_measure)のリスク評価が記録されている施策が無いため、この機能は無効化されています。不確かな数値を表示しないための措置です。画面①でリスク評価(対策前・対策後)を記録すると利用できます。'}
               </p>
             </div>
           ) : (
@@ -102,6 +134,7 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
                 すべての実行結果は「実データに基づく推定」です(サンプル値は使用していません)。
               </p>
               <form action={runSimulation} className="mt-3 flex flex-wrap items-end gap-2">
+                <input type="hidden" name="scope" value={scope} />
                 <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
                   除外する施策
                   <select className="input" name="excluded_measure_id" required>
@@ -144,7 +177,9 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
               </tbody>
             </table>
             {data.simulationRuns.length === 0 && (
-              <p className="mt-2 text-[13px] text-[var(--muted)]">まだ実行履歴がありません。</p>
+              <p className="mt-2 text-[13px] text-[var(--muted)]">
+                {isms ? 'ISMS の範囲での実行履歴はまだありません。' : 'まだ実行履歴がありません。'}
+              </p>
             )}
           </div>
         </section>
@@ -152,7 +187,9 @@ export default async function AnalysisPage({ searchParams }: { searchParams: Pro
         <section className="card p-4">
           <h2 className="text-[15px] font-semibold">参考: 施策別インシデント紐づけ</h2>
           <p className="mt-1 text-[12px] text-[var(--muted)]">
-            画面⑦のインシデント実績(現在{data.totalIncidentCount}件)のうち、各施策に紐づいている件数の実測です。施策を外した場合の増減を予測するものではありません。
+            {isms
+              ? `画面⑦のインシデント実績(全体の件数: ${data.totalIncidentCount}件。インシデントには ISMS のタグが無いため、範囲で絞らない件数です)のうち、ISMS のタグが付いた各施策に紐づいている件数の実測です。施策を外した場合の増減を予測するものではありません。`
+              : `画面⑦のインシデント実績(現在${data.totalIncidentCount}件)のうち、各施策に紐づいている件数の実測です。施策を外した場合の増減を予測するものではありません。`}
           </p>
           {data.measureIncidentLinks.length === 0 ? (
             <p className="mt-3 text-[13px] text-[var(--muted)]">いずれの施策にもインシデントが紐づいていません。</p>

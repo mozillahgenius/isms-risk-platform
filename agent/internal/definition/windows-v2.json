@@ -1,0 +1,298 @@
+{
+  "version": 2,
+  "platform": "windows",
+  "items": [
+    {
+      "name": "disk_encrypted",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $d=$env:SystemDrive; $s=$null; $c=$null; try { $s=(New-Object -ComObject Shell.Application).NameSpace($d+'\\').Self.ExtendedProperty('System.Volume.BitLockerProtection') } catch {}; try { $c=(Get-CimInstance -Namespace 'root/cimv2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -Filter ('DriveLetter='''+$d+'''') -ErrorAction Stop).ProtectionStatus } catch {}; [pscustomobject]@{shell_protection=$s; cim_protection_status=$c} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "boolean"
+    },
+    {
+      "name": "screen_lock",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { function IbReg($p,$n) { try { (Get-ItemProperty -LiteralPath $p -Name $n -ErrorAction Stop).$n } catch { $null } }; $u='HKCU:\\Control Panel\\Desktop'; $g='HKCU:\\Software\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop'; $m='HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System'; [pscustomobject]@{user_active=(IbReg $u 'ScreenSaveActive'); user_secure=(IbReg $u 'ScreenSaverIsSecure'); user_timeout=(IbReg $u 'ScreenSaveTimeOut'); user_saver=(IbReg $u 'SCRNSAVE.EXE'); policy_active=(IbReg $g 'ScreenSaveActive'); policy_secure=(IbReg $g 'ScreenSaverIsSecure'); policy_timeout=(IbReg $g 'ScreenSaveTimeOut'); policy_saver=(IbReg $g 'SCRNSAVE.EXE'); inactivity_timeout_secs=(IbReg $m 'InactivityTimeoutSecs')} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "screen_lock"
+    },
+    {
+      "name": "os_version",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $v=$null; try { $v=(Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).Version } catch {}; if (-not $v) { $o=[Environment]::OSVersion.Version; $v=[string]$o.Major+'.'+[string]$o.Minor+'.'+[string]$o.Build }; [pscustomobject]@{version=$v} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "os_version"
+    },
+    {
+      "name": "patch_current",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $n=$null; try { $q=(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher(); $q.Online=$false; $n=$q.Search('IsInstalled=0 and IsHidden=0 and BrowseOnly=0 and Type=''Software''').Updates.Count } catch {}; [pscustomobject]@{pending_count=$n} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "boolean"
+    },
+    {
+      "name": "auto_update_checks_enabled",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $ErrorActionPreference='Stop'; $r=$false; $a=$null; $o=$null; $m=$null; try { $b=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64'); $k=$b.OpenSubKey('SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU'); if ($null -ne $k) { $a=$k.GetValue('NoAutoUpdate'); $o=$k.GetValue('AUOptions'); $k.Close() }; $r=$true } catch {}; try { $m=[string](Get-CimInstance -ClassName Win32_Service -Filter 'Name=''wuauserv''' -ErrorAction Stop).StartMode } catch {}; [pscustomobject]@{policy_read=$r; no_auto_update=$a; au_options=$o; wuauserv_start_mode=$m} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "boolean"
+    },
+    {
+      "name": "firewall_enabled",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $r=$null; try { $r=@(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop) } catch { try { $r=@(Get-NetFirewallProfile -ErrorAction Stop) } catch {} }; if ($null -eq $r) { [pscustomobject]@{profile_count=$null; enabled_profiles=$null; disabled_profiles=$null} } else { [pscustomobject]@{profile_count=$r.Count; enabled_profiles=@($r | Where-Object { [string]$_.Enabled -eq 'True' } | ForEach-Object { [string]$_.Name }); disabled_profiles=@($r | Where-Object { [string]$_.Enabled -ne 'True' } | ForEach-Object { [string]$_.Name })} } } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "boolean"
+    },
+    {
+      "name": "edr_running",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $p=$null; $s=$null; try { $p=@(Get-Process -ErrorAction Stop | ForEach-Object { $_.Path } | Where-Object { $_ } | Sort-Object -Unique) } catch {}; try { $s=@(Get-CimInstance -ClassName Win32_Service -Filter 'State=''Running''' -ErrorAction Stop | ForEach-Object { $_.PathName } | Where-Object { $_ } | Sort-Object -Unique) } catch {}; [pscustomobject]@{process_paths=$p; service_paths=$s} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "executable_path_prefixes": {
+        "crowdstrike": [
+          "C:\\Program Files\\CrowdStrike\\"
+        ],
+        "sentinelone": [
+          "C:\\Program Files\\SentinelOne\\"
+        ]
+      },
+      "process_path_lookup": "process_path_and_running_service_image",
+      "kind": "presence"
+    },
+    {
+      "name": "edr_vendor",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $p=$null; $s=$null; try { $p=@(Get-Process -ErrorAction Stop | ForEach-Object { $_.Path } | Where-Object { $_ } | Sort-Object -Unique) } catch {}; try { $s=@(Get-CimInstance -ClassName Win32_Service -Filter 'State=''Running''' -ErrorAction Stop | ForEach-Object { $_.PathName } | Where-Object { $_ } | Sort-Object -Unique) } catch {}; [pscustomobject]@{process_paths=$p; service_paths=$s} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "executable_path_prefixes": {
+        "crowdstrike": [
+          "C:\\Program Files\\CrowdStrike\\"
+        ],
+        "sentinelone": [
+          "C:\\Program Files\\SentinelOne\\"
+        ]
+      },
+      "process_path_lookup": "process_path_and_running_service_image",
+      "kind": "edr_vendor"
+    },
+    {
+      "name": "builtin_protection",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $m=$null; $sp=$null; $se=$null; try { $m=Get-MpComputerStatus -ErrorAction Stop } catch {}; try { $sp=(Get-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System' -Name 'EnableSmartScreen' -ErrorAction Stop).EnableSmartScreen } catch {}; try { $se=(Get-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name 'SmartScreenEnabled' -ErrorAction Stop).SmartScreenEnabled } catch {}; [pscustomobject]@{antivirus_enabled=$m.AntivirusEnabled; realtime_protection_enabled=$m.RealTimeProtectionEnabled; antivirus_signature_version=$m.AntivirusSignatureVersion; is_tamper_protected=$m.IsTamperProtected; smartscreen_policy=$sp; smartscreen_explorer=$se} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "promotes_to": [
+        "edr_running"
+      ],
+      "kind": "builtin_protection"
+    },
+    {
+      "name": "admin_account_count",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $r=$null; try { $n=(New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([System.Security.Principal.NTAccount]).Value.Split('\\')[-1]; $g=[ADSI]('WinNT://'+$env:COMPUTERNAME+'/'+$n+',group'); $r=@(foreach ($x in @($g.psbase.Invoke('Members'))) { $t=$x.GetType(); $a=[string]$t.InvokeMember('ADsPath','GetProperty',$null,$x,$null); $c=[string]$t.InvokeMember('Class','GetProperty',$null,$x,$null); $f=0; if ($c -eq 'User') { try { $f=[int]$t.InvokeMember('UserFlags','GetProperty',$null,$x,$null) } catch {} }; $u=($a -split '/')[-1]; if (($f -band 2) -ne 0) { 'disabled:'+$u } else { $u } }) } catch {}; [pscustomobject]@{members=$r} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "admin_exclusions": {
+        "prefixes": [
+          "disabled:"
+        ]
+      },
+      "kind": "count"
+    },
+    {
+      "name": "password_manager_installed",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $ErrorActionPreference='Stop'; function IbApps($h,$p) { $k=$null; try { $k=$h.OpenSubKey($p) } catch { 'f:'; return }; if ($null -eq $k) { return }; $s=$null; try { $s=$k.GetSubKeyNames() } catch { 'f:'; $k.Close(); return }; foreach ($x in $s) { try { $c=$k.OpenSubKey($x); if ($null -eq $c) { continue }; $d=[string]$c.GetValue('DisplayName'); $sc=$c.GetValue('SystemComponent'); $pk=[string]$c.GetValue('ParentKeyName'); $rt=[string]$c.GetValue('ReleaseType'); $c.Close(); if ($d -and $sc -ne 1 -and -not $pk -and $rt -notin @('Security Update','Update Rollup','Hotfix')) { 'n:'+$d } } catch { 'f:' } }; $k.Close() }; $o=$null; try { $lm=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64'); $cu=[Microsoft.Win32.RegistryKey]::OpenBaseKey('CurrentUser','Registry64'); $o=@(IbApps $lm 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; IbApps $lm 'SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; IbApps $cu 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall') } catch {}; if ($null -eq $o) { [pscustomobject]@{display_names=$null; unreadable_keys=$null} } else { [pscustomobject]@{display_names=@($o | Where-Object { $_.StartsWith('n:') } | ForEach-Object { $_.Substring(2) } | Sort-Object -Unique); unreadable_keys=@($o | Where-Object { $_ -eq 'f:' }).Count} } } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "approved_names": [
+        "1Password",
+        "Bitwarden",
+        "KeePassXC"
+      ],
+      "kind": "presence"
+    },
+    {
+      "name": "unapproved_apps",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $ErrorActionPreference='Stop'; function IbApps($h,$p) { $k=$null; try { $k=$h.OpenSubKey($p) } catch { 'f:'; return }; if ($null -eq $k) { return }; $s=$null; try { $s=$k.GetSubKeyNames() } catch { 'f:'; $k.Close(); return }; foreach ($x in $s) { try { $c=$k.OpenSubKey($x); if ($null -eq $c) { continue }; $d=[string]$c.GetValue('DisplayName'); $sc=$c.GetValue('SystemComponent'); $pk=[string]$c.GetValue('ParentKeyName'); $rt=[string]$c.GetValue('ReleaseType'); $c.Close(); if ($d -and $sc -ne 1 -and -not $pk -and $rt -notin @('Security Update','Update Rollup','Hotfix')) { 'n:'+$d } } catch { 'f:' } }; $k.Close() }; $o=$null; try { $lm=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64'); $cu=[Microsoft.Win32.RegistryKey]::OpenBaseKey('CurrentUser','Registry64'); $o=@(IbApps $lm 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; IbApps $lm 'SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; IbApps $cu 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall') } catch {}; if ($null -eq $o) { [pscustomobject]@{display_names=$null; unreadable_keys=$null} } else { [pscustomobject]@{display_names=@($o | Where-Object { $_.StartsWith('n:') } | ForEach-Object { $_.Substring(2) } | Sort-Object -Unique); unreadable_keys=@($o | Where-Object { $_ -eq 'f:' }).Count} } } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "approved_names": [
+        "1Password",
+        "Bitwarden",
+        "KeePassXC",
+        "Google Chrome",
+        "Microsoft Edge",
+        "Firefox"
+      ],
+      "kind": "names"
+    },
+    {
+      "name": "device_identity",
+      "collector": "native",
+      "commands": [
+        {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); & { $m=$null; $s=$null; try { $m=(Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).Model } catch {}; try { $s=(Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop).SerialNumber } catch {}; [pscustomobject]@{model=$m; serial=$s; hostname=[System.Net.Dns]::GetHostName()} } | ConvertTo-Json -Compress"
+          ]
+        }
+      ],
+      "output": "json",
+      "kind": "identity"
+    },
+    {
+      "name": "off_premise",
+      "collector": "metadata",
+      "commands": [],
+      "kind": "enrollment"
+    }
+  ]
+}

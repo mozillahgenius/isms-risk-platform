@@ -23,7 +23,7 @@ function parseRequest(body: ReceiptRequest): { checkKeys: string[]; requester: s
   return { checkKeys: body.check_keys.map((key) => key.trim()), requester: body.requester.trim() };
 }
 
-// Export only POST. No GET that returns accepted content, and no entry points for update or delete.
+// POST だけを export する。受付済みの内容を返す GET や変更・削除の入口は作らない。
 export async function POST(request: Request) {
   if (!isAuthorized(request)) return NextResponse.json({ error: 'receipt rejected' }, { status: 401 });
   try {

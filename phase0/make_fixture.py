@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Build the Phase 0 input fixture.
+"""Phase 0 の入力 fixture を作る。
 
-**Does not use build_risk_map.py.** If the generator and the verifier share code,
-a round trip only confirms self-consistency, not interoperability.
-This writes directly with openpyxl, using the same 4-sheet layout as the real template and
-the real template's column names (BigCategory / MidCategory / SmallFrame / ActionPlan).
+**build_risk_map.py は使わない。** 生成器と検証器が同じコードだと、
+往復で確かめられるのは自己整合性だけで、相互運用性の検証にならない。
+ここは openpyxl で直接書き、実テンプレートと同じ 4 シート構成・
+実テンプレート側の列名（BigCategory / MidCategory / SmallFrame / ActionPlan）にする。
 
-No real customer data is used. What is written here is everything.
+データは顧客の実データを使わない。ここに書いてあるものが全て。
 
-  python3 phase0/make_fixture.py <output.xlsx>
+  python3 phase0/make_fixture.py <出力.xlsx>
 """
 from __future__ import annotations
 
@@ -19,42 +19,41 @@ import openpyxl
 TEMPLATE_HEADERS = ['RiskItem', 'BigCategory', 'MidCategory', 'SmallFrame', 'Summary',
                     'ProbBefore', 'ImpactBefore', 'ActionPlan', 'ProbAfter', 'ImpactAfter']
 
-# Deliberately included:
-#   - all 3 perspective frames
-#   - values with leading/trailing whitespace (should be removed by normalization)
-#   - values containing full-width spaces and NBSP
-#   - action plans containing line breaks
-#   - rows where multiple risks hang off the same measure (exercises the cross-tab join)
-#   - departments, themes, and measures use fictional sample names (no values from real registers/catalogs)
+# 意図的に含めたもの:
+#   - 3 つの観点フレーム全て
+#   - 前後に空白を含む値（正規化で消えること）
+#   - 全角空白・NBSP を含む値
+#   - 改行を含む対応策
+#   - 同じ施策に複数のリスクがぶら下がる行（クロス集計の連結を通す）
 ROWS = [
-    ['サンプル部門D（Phase1）', 'サンプルテーマD2', 'サンプル施策D2', 'スピード',
-     '手作業の転記で誤りが入り、集計が遅れる',
-     3, 4, '転記を自動化し、週次で差分を確かめる', 2, 2],
-    ['サンプル部門D（Phase1）', 'サンプルテーマD2', 'サンプル施策D2', '精度',
-     '分類の付け方が担当者ごとに違い、比較ができない',
-     4, 3, '分類ルールを文書にし\n四半期ごとに見直す', 2, 3],
-    ['サンプル部門D（Phase1）', 'サンプルテーマD1', 'サンプル施策D1', '管理可能性',
-     '  共有フォルダの権限を把握できていない  ',
-     2, 5, '共有設定を月次で一覧にして確かめる', 1, 5],
-    ['サンプル部門C（Phase3）', 'サンプルテーマC', 'サンプル施策C', '精度',
-     '古い雛形が使われ、記載が現状と合わない',
-     3, 4, '雛形に改訂日を付け、年次で見直す', 1, 2],
-    ['サンプル部門A（Phase1）', 'サンプルテーマA', 'サンプル施策A', '管理可能性',
-     '退職者のアカウントが残り、社内データへ到達できる',
-     4, 5, '退職時のチェックリストと月次のアカウント棚卸', 2, 4],
-    ['サンプル部門B（Phase2）', 'サンプルテーマB', 'サンプル施策B', 'スピード',
-     '暗号化されていない端末を把握できない',
-     3, 5, '端末の状態を集め、未対応を月次で確かめる', 2, 3],
+    ['経理・税務（Phase1）', 'クラウド会計ソフト活用', '仕訳入力・チェック', 'スピード',
+     '操作ミスで誤ったデータ入力により月次損益が不正確になる',
+     3, 4, '週次で簡易レビューと自動仕訳機能の活用', 2, 2],
+    ['経理・税務（Phase1）', 'クラウド会計ソフト活用', '仕訳入力・チェック', '精度',
+     '勘定科目の付け方が担当者ごとに揺れ、期間比較ができなくなる',
+     4, 3, '科目定義書の整備と\n四半期ごとの棚卸', 2, 3],
+    ['経理・税務（Phase1）', 'キャッシュフローの監視', '日次残高チェック', '管理可能性',
+     '  残高把握の遅れで資金ショートを検知できない  ',
+     2, 5, '自動リマインダを設定して日次レビュー実施', 1, 5],
+    ['法務（Phase3）', '契約書の標準化', '契約テンプレート管理', '精度',
+     'テンプレート未更新で最新法令を反映できず契約無効や紛争のリスク',
+     3, 4, '法令チェックリスト作成と年次改訂プロセス、法務レビュー必須化', 1, 2],
+    ['人事・労務（Phase1）', '入退社手続きの整備', '権限付与・剥奪フロー', '管理可能性',
+     '退職者のアカウントが残存し、情報資産へ到達できる状態が続く',
+     4, 5, '入退社チェックリストと月次のアカウント棚卸', 2, 4],
+    ['情報システム（Phase2）', '端末管理の強化', '端末ポスチャの可視化', 'スピード',
+     '暗号化未設定の端末を把握できず、紛失時の影響を評価できない',
+     3, 5, 'エージェント配布と未達一覧の月次確認', 2, 3],
 ]
 
 MASTER_HEADERS = ['RiskItem', 'Big', 'Mid', 'Frame', 'Summary', 'Action']
 MASTER_ROWS = [
-    ['サンプル部門D（Phase1）', 'サンプルテーマD2', 'サンプル施策D2', 'スピード',
-     '手作業の転記で誤りが入り、集計が遅れる',
-     '転記を自動化し、週次で差分を確かめる'],
-    ['サンプル部門C（Phase3）', 'サンプルテーマC', 'サンプル施策C', '精度',
-     '古い雛形が使われ、記載が現状と合わない',
-     '雛形に改訂日を付け、年次で見直す'],
+    ['経理・税務（Phase1）', 'クラウド会計ソフト活用', '仕訳入力・チェック', 'スピード',
+     '操作ミスで誤ったデータ入力により月次損益が不正確になる',
+     '週次で簡易レビューと自動仕訳機能の活用'],
+    ['法務（Phase3）', '契約書の標準化', '契約テンプレート管理', '精度',
+     'テンプレート未更新で最新法令を反映できず契約無効や紛争のリスク',
+     '法令チェックリスト作成と年次改訂プロセス'],
 ]
 
 
@@ -70,8 +69,8 @@ def main():
     for r in ROWS:
         ws.append(r)
 
-    # The 2 AUTO sheets are placed as empty shells, as "derivatives that also exist on the input side".
-    # They are not part of the round-trip comparison (rule: "out of scope" in NORMALIZATION.md).
+    # AUTO 2 シートは「入力側にも存在する派生物」として器だけ置く。
+    # 往復の比較対象にはしない（規則は NORMALIZATION.md の「対象外」）。
     wb.create_sheet('リスクマップ_AUTO').append(['この入力では未生成'])
     wb.create_sheet('ヒートマップ_AUTO').append(['この入力では未生成'])
 

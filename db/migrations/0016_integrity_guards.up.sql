@@ -1,16 +1,16 @@
--- 0016 Validation of deviation override values, and immutability of risk criteria versions.
+-- 0016 逸脱の上書き値の検証と、リスク基準版の不変化。
 --
--- Added under a new number instead of rewriting 0013 / 0008 directly. In already-applied environments,
--- rewriting an existing migration is rejected by the checksum check (scripts/migrate.sh), so
--- fixes must always ship as a subsequent migration.
+-- 0013 / 0008 を直接書き換えず新しい番号で足す。適用済みの環境では
+-- 既存 migration の書き換えが checksum 検査で拒否される（scripts/migrate.sh）ため、
+-- 修正は必ず後続の migration として届ける。
 
 -- ------------------------------------------------------------------
--- 1. Validate deviation overrides
+-- 1. 逸脱の override を検証する
 --
--- 0013 accepted override as plain jsonb, so even values like `{"band_accept":[99]}`,
--- impossible in a 5x5, could be registered. app.effective_risk_criteria
--- returns them as-is as "effective criteria", which breaks acceptance decisions.
--- Also, non-array values silently fall back to the standard values via coalesce (the error is invisible).
+-- 0013 は override を素の jsonb で受けており、`{"band_accept":[99]}` のような
+-- 5x5 では起こり得ない値でも登録できた。app.effective_risk_criteria は
+-- それをそのまま「有効な基準」として返すため、受容判断が壊れる。
+-- また配列でない値は coalesce で黙って標準値へ落ちる（誤りが見えない）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.validate_deviation_override() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
@@ -29,7 +29,7 @@ BEGIN
     RAISE EXCEPTION 'risk_band の override はオブジェクトでなければならない';
   END IF;
 
-  -- Don't silently ignore unknown keys (a typo would remain as a "deviation that has no effect")
+  -- 知らないキーを黙って無視しない（誤字が「効いていない逸脱」として残る）
   IF EXISTS (SELECT 1 FROM jsonb_object_keys(NEW.override) k
               WHERE k <> ALL(v_bands)) THEN
     RAISE EXCEPTION 'risk_band の override に想定外のキーがある: %',
@@ -56,8 +56,8 @@ BEGIN
       END IF;
       v_all := v_all || v_arr;
     ELSE
-      -- Unspecified bands use the standard values as-is (the view's coalesce).
-      -- Add the standard values here too, so coverage can be checked.
+      -- 指定されなかった区分は標準値がそのまま使われる（ビューの coalesce）。
+      -- 覆いの検査をするため、ここでも標準値を足しておく。
       EXECUTE format('SELECT c.%I FROM catalog.risk_criteria_default c
                         JOIN app.tenants t ON t.dom_version_id = c.dom_version_id
                        WHERE t.id = $1', b)
@@ -73,7 +73,7 @@ BEGIN
     RAISE EXCEPTION 'risk_band の逸脱なのに上書きする区分が 1 つも無い';
   END IF;
 
-  -- The 4 bands together must cover the 14 values exactly, with no duplicates
+  -- 4 区分を合わせて 14 値を過不足なく覆い、重複が無いこと
   IF (SELECT count(DISTINCT x) FROM unnest(v_all) x) <> 14
      OR cardinality(v_all) <> 14 THEN
     RAISE EXCEPTION '上書き後の区分が 14 値を過不足なく覆っていない（重複または欠落）';
@@ -88,12 +88,12 @@ CREATE TRIGGER trg_validate_deviation_override
   FOR EACH ROW EXECUTE FUNCTION app.validate_deviation_override();
 
 -- ------------------------------------------------------------------
--- 2. Make risk criteria versions immutable
+-- 2. リスク基準版を不変にする
 --
--- app.risk_criteria is "a frozen version of the criteria effective for the tenant" (design doc 2.7).
--- Yet the formula and bands could be UPDATEd afterwards, and existing risk_assessments are
--- not re-validated, so stored impact_sec and the formula would remain inconsistent.
--- Versions are meant to be recreated (close valid_to and create a new row), so rewriting their contents is forbidden.
+-- app.risk_criteria は「テナントで有効な基準の版を凍結したもの」（設計書 2.7）。
+-- ところが算定式やバンドを後から UPDATE でき、既存の risk_assessments は
+-- 再検証されないため、保存済み impact_sec と算定式が食い違ったまま残る。
+-- 版は作り直す（valid_to を閉じて新しい行を作る）ものなので、中身の書き換えを禁じる。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.risk_criteria_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$

@@ -82,7 +82,7 @@ export default async function DashboardPage() {
         <h2 className="text-[13px] font-semibold">標準カタログ</h2>
         <p className="mt-1 text-[12px] text-[var(--muted)]">
           統制 {counts.controls}件、リスク雛形 {counts.risk_scenario_templates}件、規程 {counts.policies}本、チェック {counts.checks}本。
-          <Link className="ms-2 underline underline-offset-2" href="/catalog">カタログを開く</Link>
+          <Link className="ml-2 underline underline-offset-2" href="/catalog">カタログを開く</Link>
         </p>
       </section>
     </div>

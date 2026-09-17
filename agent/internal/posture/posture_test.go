@@ -18,7 +18,7 @@ func TestCanonicalPostureSignsAndRejectsMutation(t *testing.T) {
 	delay := 300
 	admins := 1
 	snapshot := Snapshot{
-		DeviceID: "d0000000-0000-4000-8000-000000000001", CollectedAt: "2026-08-14T00:00:00Z",
+		DeviceID: "00000000-0000-4000-8000-000000000007", CollectedAt: "2026-08-14T00:00:00Z",
 		AgentVersion: "test", DefinitionVersion: 2, DefinitionHash: hex.EncodeToString(hash[:]),
 		ExternalID: "serial", Hostname: "mac", Model: "Mac mini", OSFamily: "macos", OSVersion: "14.6.1",
 		OffPremise: false, DiskEncrypted: &good, ScreenLockEnabled: &good, ScreenLockDelaySec: &delay,

@@ -1,19 +1,19 @@
 -- @run-as: admin
--- 0065: storage for organizational issues (4.1) and interested parties (4.2) (the 1st table of design doc 2026-09-11 §4).
+-- 0065: 組織の課題（4.1）と利害関係者（4.2）の受け皿（設計書 2026-09-11 §4 の 1 本目）。
 --
--- 4.1 requires "determining" external and internal issues affecting the ISMS's intended outcomes;
--- 4.2 requires "determining" interested parties, their requirements, and which of those the ISMS addresses.
--- Neither unconditionally requires documented information, so the stage screen only shows a count and does not make them mandatory
--- (design decision of 2026-09-12; only clauses requiring documented information, like 9.1, are mandatory).
+-- 4.1 は ISMS の意図した成果に影響する外部・内部の課題を「決定する」こと、
+-- 4.2 は利害関係者とその要求、そのうち ISMS で扱うものを「決定する」ことを求める。
+-- どちらも文書化情報を無条件には求めないので、段階の画面では件数を出すだけで必須にしない
+-- （2026-09-12 goto-twin 決定。必須は 9.1 のように文書化情報を求める箇条だけ）。
 --
--- Formatting follows 0055 (tenant FK, (tenant_id, id) primary key, CHECK rejecting whitespace-only mandatory fields,
--- no FK on created_by, down refuses if data exists). RLS is the same two policies as 0063
--- (writes are done by web server actions as app_rw, so no definer policy is needed).
--- No approval (the standard's text does not require it). No version table either. No content data is inserted.
+-- 書式は 0055 に揃える（テナント FK・(tenant_id, id) の主キー・必須欄は空白だけを CHECK で拒否・
+-- created_by に FK を付けない・down はデータがあれば拒否）。RLS は 0063 と同じ 2 枚だけ
+-- （書き込みは Web のサーバーアクションが app_rw で行うので、定義者向けのポリシーは要らない）。
+-- 承認は付けない（規格の本文が求めていない）。版の表も作らない。中身のデータは入れない。
 
 SET ROLE schema_owner;
 
--- Organizational issues (4.1). An issue whose effect on the ISMS (isms_impact) cannot be written is not a 4.1 issue, so empty is not allowed.
+-- 組織の課題（4.1）。ISMS にどう効くか（isms_impact）が書けない課題は、4.1 の課題ではないので空を許さない。
 CREATE TABLE app.context_issues (
   id             uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id      uuid NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE app.context_issues (
   description    text NOT NULL DEFAULT '',
   isms_impact    text NOT NULL,
   owner_user_id  uuid,
-  -- Date of the last review. Empty if never reviewed.
+  -- 最後に見直した日。見直していなければ空。
   reviewed_on    date,
   status         text NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
   created_at     timestamptz NOT NULL DEFAULT now(),
@@ -36,8 +36,8 @@ CREATE TABLE app.context_issues (
   CHECK (isms_impact ~ '[^[:space:]]')
 );
 
--- Interested parties (4.2). requirements are the information-security requirements (4.2 b) and are mandatory.
--- addressed_in_isms is the subset the ISMS addresses (4.2 c). Empty means "not decided yet".
+-- 利害関係者（4.2）。requirements は情報セキュリティに関する要求（4.2 b）で必須。
+-- addressed_in_isms はそのうち ISMS で扱うもの（4.2 c）。空は「まだ決めていない」。
 CREATE TABLE app.interested_parties (
   id                 uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id          uuid NOT NULL,
@@ -79,8 +79,8 @@ COMMENT ON TABLE app.context_issues IS
 COMMENT ON TABLE app.interested_parties IS
   '利害関係者（4.2）。requirements（情報セキュリティに関する要求）は必須。addressed_in_isms はそのうち ISMS で扱うもの。';
 
--- Add context (organizational issues, interested parties) to the writable roles: owner / admin (same tier as information security objectives).
--- Auditors may not write. This is 0064's version with one kind added (down restores 0064's version).
+-- 書いてよい役割に context（組織の課題・利害関係者）を足す: owner / admin（情報セキュリティ目的と同じ段）。
+-- 監査人には書かせない。0064 の版に種類を 1 つ足しただけ（down で 0064 の版へ戻す）。
 CREATE OR REPLACE FUNCTION app.require_records_role(p_kind text) RETURNS text
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE

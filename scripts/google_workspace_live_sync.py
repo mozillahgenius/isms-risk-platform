@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""One live collection run of the Google Workspace DWD reader.
+"""Google Workspace DWD reader の一回分の実収集。
 
-The private key is only referenced via an argument at run time and is never stored in the DB, stdout or logs.
-Only GET is used against the external API, reusing the normalization and evidence SQL of the existing connector_sync.py.
+実行時の秘密鍵は引数で参照するだけで、DB・標準出力・ログには保存しない。
+外部APIはGETだけを使い、既存の connector_sync.py の正規化・証跡SQLを再利用する。
 """
 
 from __future__ import annotations

@@ -4,17 +4,17 @@ import type { TransactionSql } from 'postgres';
 import { getDb, getProxyWriteDb, getWriteDb, DbUnavailable } from './db';
 import { trustedProxyEmail } from './deviceControlAuth';
 
-// Where the tenant context is established and reads happen.
+// テナント文脈を確立して読むところ。
 //
-// **Always establish and use it within a single transaction.**
-// app.set_tenant_context() sets the GUC with set_config(..., true) (= equivalent to SET LOCAL), so
-// it disappears when the transaction ends. Connections are reused from a pool, so
-// sending the "establishing query" and the "business query" separately can route them to different connections and run without context.
-// Doing both inside sql.begin() confines them to the same connection and the same transaction.
+// **必ず 1 つのトランザクションの中で確立して使う。**
+// app.set_tenant_context() は set_config(..., true)（= SET LOCAL 相当）で GUC を置くので、
+// トランザクションが終われば消える。接続はプールで使い回されるため、
+// 「確立するクエリ」と「業務クエリ」を別々に投げると、別の接続に流れて文脈が無いまま実行される。
+// sql.begin() の中で両方やることで、同じ接続・同じトランザクションに閉じ込める。
 //
-// The token is read **only from server-side environment variables**. No NEXT_PUBLIC_ prefix.
-// Never exposed in URLs, HTML, or logs. Reads use this tenant boundary, and web writes
-// additionally bind the trusted oauth2-proxy email to an actual user in the same tenant.
+// トークンは **サーバ側の環境変数だけ**から読む。NEXT_PUBLIC_ を付けない。
+// URL にも HTML にもログにも出さない。読み取りはこのテナント境界を使い、Web書き込みは
+// さらに信頼済み oauth2-proxy のメールを同一テナントの実利用者へ束縛する。
 
 export function tenantToken(): string | null {
   const t = process.env.ISMS_WEB_TENANT_TOKEN;
@@ -24,7 +24,7 @@ export function tenantToken(): string | null {
 export async function trustedWebActorEmail(): Promise<string | null> {
   const requestHeaders = await headers();
   return trustedProxyEmail(
-    requestHeaders.get('x-isms-device-control-proxy-secret'),
+    requestHeaders.get('x-ib-device-control-proxy-secret'),
     process.env.ISMS_DEVICE_CONTROL_PROXY_SECRET,
     requestHeaders.get('x-forwarded-email'),
   );
@@ -49,8 +49,8 @@ function domainError(message: string): string | null {
 }
 
 /**
- * Establish the tenant context and run fn. Read-only (the connection is read only).
- * When the token is missing or ineffective, return that as a type (do not throw and turn it into a 500).
+ * テナント文脈を確立して fn を走らせる。読み取り専用（接続が read only）。
+ * トークンが無い・効かないときは、それを型で返す（例外にして 500 にしない）。
  */
 export async function withTenant<T>(
   fn: (sql: TransactionSql) => Promise<T>,
@@ -66,19 +66,19 @@ export async function withTenant<T>(
     return { ok: true, data: data as T };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // Expired, revoked, or suspended users end up here. Report it distinctly from a configuration mistake.
+    // 期限切れ・失効・停止済みの利用者はここに来る。設定の間違いと区別して出す。
     if (/invalid session/i.test(msg)) {
       console.error('[tenant] セッションが無効です（期限切れ・失効・停止のいずれか）');
       return { ok: false, reason: 'invalid_session' };
     }
-    // Only the kind is shown on screen. The details are kept only in the server log.
-    // Wrapped in DbUnavailable so it can be handled the same way as other DB failures.
+    // 画面に出すのは種別だけ。中身はサーバのログにだけ残す。
+    // DbUnavailable に包むのは、他の DB 失敗と同じ形で扱えるようにするため。
     console.error('[tenant] テナント文脈での読み取りに失敗:', new DbUnavailable(e));
     return { ok: false, reason: 'error' };
   }
 }
 
-/** For registering/updating the register. Even on a write connection, always establish the same tenant boundary as reads first. */
+/** 台帳の登録・更新用。書き込み接続でも、読み取りと同じテナント境界を必ず先に確立する。 */
 export async function withTenantWrite<T>(
   fn: (sql: TransactionSql) => Promise<T>,
 ): Promise<TenantReadResult<T>> {

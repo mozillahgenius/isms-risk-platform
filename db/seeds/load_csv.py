@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Load the control catalog CSV into catalog.
+"""既存 CSV マスタを catalog へ投入する（設計書 Part XIII の既存資産再利用）。
 
   python3 db/seeds/load_csv.py [--scripts-dir <dir>]
 
---scripts-dir (or env var LEGAL_SCRIPTS_DIR) defaults to db/seeds/snapshots.
+投入するもの:
+--scripts-dir (or env var CATALOG_SCRIPTS_DIR) defaults to db/seeds/snapshots.
 Only a small fictional sample is bundled. Put your own catalog in another directory
 with the same columns and relative paths, and point to it.
 
@@ -11,11 +12,11 @@ Loads:
   control_check/control_requirements_master.csv -> catalog.controls（framework_key='IPO-KARTE'）
   risk_map/risk_map_master.csv                  -> catalog.risk_scenario_templates
 
-Policy:
-  - Validate the CSV before loading (encoding, column count, empty values, duplicates). Load nothing if even one row is broken
-  - Idempotent. ON CONFLICT DO UPDATE on natural keys
-  - **Set retired_at on rows that disappeared from the input** (DO UPDATE alone would leave the old rows)
-  - Verify representative records, not just counts (verify_seeds.sql cross-checks after loading)
+方針:
+  - 投入前に CSV を検査する（文字コード・列数・空値・重複）。1 件でも壊れていたら投入しない
+  - 冪等。自然キーで ON CONFLICT DO UPDATE
+  - **入力から消えた行は retired_at を立てる**（DO UPDATE だけだと旧行が残るため）
+  - 件数だけでなく代表レコードを検証する（load 後に verify_seeds.sql が突合）
 """
 from __future__ import annotations
 
@@ -38,7 +39,7 @@ def db_url():
 
 
 def read_csv_checked(path, required_cols, label):
-    """Read and validate the CSV. Raises if broken."""
+    """CSV を読んで検査する。壊れていたら例外。"""
     with open(path, 'rb') as f:
         raw = f.read()
     try:
@@ -79,7 +80,7 @@ def load_controls(scripts_dir):
     seen = set()
     out = []
     for i, r in enumerate(rows, start=2):
-        # code = <category symbol>-<subitem code>(<requirement No>) e.g. A-30-10-10(3)
+        # code = 大項目記号-小項目コード(要請No) 例: A-30-10-10(3)
         req_no = r['要請No'].strip().strip('()（）')
         code = f"{r['大項目記号'].strip()}-{r['小項目コード'].strip()}({req_no})"
         if code in seen:
@@ -117,7 +118,7 @@ def load_templates(scripts_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--scripts-dir', default=os.environ.get('LEGAL_SCRIPTS_DIR', DEFAULT_SCRIPTS))
+    ap.add_argument('--scripts-dir', default=os.environ.get('CATALOG_SCRIPTS_DIR', DEFAULT_SCRIPTS))
     args = ap.parse_args()
     if not os.path.isdir(args.scripts_dir):
         raise SystemExit(f'カタログ CSV のディレクトリが見つかりません: {args.scripts_dir}')
@@ -157,7 +158,7 @@ SELECT c.id, 'IPO-KARTE'
  WHERE c.framework_key = 'IPO-KARTE'
 ON CONFLICT DO NOTHING;
 
--- Controls removed from the input are retired (not physically deleted, because the app side references them via FK)
+-- 入力から消えた統制は retire する（物理削除しない。app 側が FK で参照しているため）
 UPDATE catalog.controls c SET retired_at = now()
  WHERE c.framework_key = 'IPO-KARTE' AND c.retired_at IS NULL
    AND NOT EXISTS (SELECT 1 FROM ctl_in i WHERE i.code = c.code);

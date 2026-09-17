@@ -1,22 +1,22 @@
--- 0035: Add budget and human resources to the measure master (app.measures).
+-- 0035: 施策マスタ（app.measures）に予算・人的リソースを追加。
 --
--- Addresses the acceptance criteria for screens ② and ③ of the "management platform extension spec". Before implementing, app.measures /
--- app.risk_treatments were actually read, confirming that no budget/resource fields exist,
--- before adding these (principle of reusing existing code: don't reimplement what already exists).
+-- 「IB管理基盤 拡張仕様書」画面②③の受入条件対応。実装前に app.measures /
+-- app.risk_treatments を実読し、budget/resource 系フィールドが存在しないことを
+-- 確認した上での新設（既存コード再利用の原則：既にあるものを重複実装しない）。
 --
--- Scope of meaning (assumes screen ⑤'s ROI cost calculation simply sums this one row. No period, fiscal year,
--- currency, or actual-vs-budget distinction. If multi-period budget management becomes necessary, extend to a
--- dedicated table rather than these two columns):
---   budget_amount … expected budget allocated to the measure (JPY, one-off).
---   resource_fte  … human resources allocated to the measure (in FTE, e.g. 0.15).
+-- 意味の範囲（画面⑤のROIコスト計算がこの1行を単純合算する前提。期間・年度・
+-- 通貨・実績と予算の別は持たない。多期間の予算管理が必要になったら、この2列
+-- ではなく専用テーブルへ拡張する）：
+--   budget_amount … その施策に充てる予算の想定額（円、単発）。
+--   resource_fte  … その施策に充てる人的リソース（FTE換算、例 0.15）。
 --
--- Both columns are nullable additions only, to avoid affecting existing rows. No data migration needed.
--- In Postgres, numeric NaN compares true against itself and passes `>= 0`, so
--- NaN is rejected explicitly (Codex review finding: a plain >= 0 that lets NaN through is insufficient).
+-- 既存行への影響を避けるため両列とも NULL 許容の追加のみ。データ移行は不要。
+-- numeric の NaN は Postgres では自己比較で真になり `>= 0` を通過するため、
+-- NaN を明示的に拒否する（Codexレビュー指摘: NaN が通過する単純な >= 0 は不十分）。
 --
--- Numbering note: 0034 is already used by the unmerged branch feature/policy-version-workflow-local
--- (commit b5db3fb, not yet merged into main). To avoid a number collision,
--- this change is 0035.
+-- 採番メモ: 0034 は未マージブランチ feature/policy-version-workflow-local が
+-- 既に使用済み（commit b5db3fb、まだ main 未マージ）。番号の衝突を避けるため
+-- この変更は 0035 とする。
 
 ALTER TABLE app.measures
   ADD COLUMN budget_amount numeric(12,2)

@@ -1,6 +1,6 @@
-// Simple line-based diff. Implemented in-house because of the policy of not adding a new diff library.
-// LCS-based: maximizes "unchanged lines" and outputs only additions and deletions
-// (reordering is not detected; that is sufficient for comparing versions of policy text).
+// 行単位の簡易差分。新規に diff ライブラリを入れない方針のため自前で持つ。
+// LCS ベースで「変わっていない行」を最大化し、追加・削除だけを出す
+// （並べ替えは検出しない。規程本文の版比較にはそれで十分）。
 
 export type DiffLine = { kind: 'same' | 'added' | 'removed'; text: string };
 
@@ -9,7 +9,7 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   const b = (after ?? '').split('\n');
   const n = a.length;
   const m = b.length;
-  // lcs[i][j] = length of the longest common subsequence of a[i..] and b[j..]
+  // lcs[i][j] = a[i..] と b[j..] の最長共通部分列の長さ
   const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {

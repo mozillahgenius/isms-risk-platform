@@ -1,6 +1,6 @@
--- 0025: keep per-resource sync results as first-class evidence.
--- The aggregates in integration_runs alone cannot reproduce which resource was
--- unreadable / gone, so keep one row per resource using the same vocabulary.
+-- 0025: 同期の資源別結果を第一級の証跡として残す。
+-- integration_runs の集計だけでは、どの resource が unreadable / gone だったか
+-- 再現できないため、同じ語彙で一行ずつ保持する。
 
 SET ROLE schema_owner;
 

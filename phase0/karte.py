@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Reading and normalizing the karte risk-map sheet (KARTE_SHEET) (rule version norm/v1).
+"""カルテ_リスクマップ シートの読み取りと正規化（規則バージョン norm/v1）。
 
-Phase 0 acceptance is "load the existing xlsx -> DB -> the re-exported xlsx matches the input".
-Matching cannot be judged by binary comparison (creation time, XML ordering and styles always differ).
-What counts as a match is fixed as rules, and the rules themselves are under test.
-The full rules are in phase0/NORMALIZATION.md; this is their implementation.
+Phase 0 の受入は「既存 xlsx を投入 → DB → 再出力した xlsx の内容が入力と一致」。
+一致の判定はバイナリ比較ではできない（作成日時・XML の順序・スタイルで必ず差が出る）。
+何を一致と見なすかを規則として固定し、規則自体をテスト対象にする。
+規則の全文は phase0/NORMALIZATION.md。ここはその実装。
 """
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ KARTE_SHEET = 'カルテ_リスクマップ'
 MASTER_SHEET = 'リスクマップマスタ'
 AUTO_SHEETS = ('リスクマップ_AUTO', 'ヒートマップ_AUTO')
 
-# Canonical column names follow the input spec of build_risk_map.py (an existing asset, reused unmodified).
+# 正準列名は build_risk_map.py（既存資産・無改変で流用）の入力仕様に合わせる。
 CANONICAL = ['RiskItem', 'Big', 'Mid', 'Frame', 'Summary',
              'ProbBefore', 'ImpactBefore', 'Action', 'ProbAfter', 'ImpactAfter']
 
-# The real template's column names differ from the builder's. Absorb them via aliases.
-# Two columns mapping to the same canonical name, unknown columns, or missing required columns are all errors.
+# 実テンプレートの列名は builder と食い違う。別名で吸収する。
+# 同じ正準名へ 2 列が写る／未知の列がある／必須列が無い場合は全てエラーにする。
 ALIASES = {
     'RiskItem': 'RiskItem',
     'Big': 'Big', 'BigCategory': 'Big',
@@ -41,7 +41,7 @@ ALIASES = {
 
 INT_COLS = ('ProbBefore', 'ImpactBefore', 'ProbAfter', 'ImpactAfter')
 TEXT_COLS = ('RiskItem', 'Big', 'Mid', 'Frame', 'Summary', 'Action')
-# Business key. Corresponds to (domain, theme, measure, frame, summary) on the DB side.
+# 業務キー。DB 側の (domain, theme, measure, frame, summary) に対応する。
 BUSINESS_KEY = ('RiskItem', 'Big', 'Mid', 'Frame', 'Summary')
 FRAMES = ('管理可能性', '精度', 'スピード')
 
@@ -50,36 +50,35 @@ _EXCEL_ERRORS = ('#REF!', '#VALUE!', '#DIV/0!', '#NAME?', '#N/A', '#NULL!', '#NU
 
 
 class KarteError(Exception):
-    """The input violates the normalization rules. Always raised; never silently dropped."""
+    """入力が正規化規則に反している。黙って落とさず必ず送出する。"""
 
 
 def norm_text(v, where):
-    """String normalization. NFC -> unify whitespace -> strip ends -> collapse internal runs of whitespace to one.
+    """文字列の正規化。NFC → 空白の統一 → 前後除去 → 内部の連続空白を 1 個へ。
 
-    **NFKC is not used.** NFKC folds full-width parentheses 「（）」 and full-width
-    alphanumerics to half-width, rewriting the register values themselves (e.g.
-    'Sample Dept A（Phase1）' becomes 'Sample Dept A(Phase1)'). The round trip would still
-    agree, but a DB value differing from the original is alteration, not normalization,
-    so it is rejected. Use NFC, which only folds composed/decomposed variation (dakuten etc.),
-    and handle whitespace explicitly below.
+    **NFKC は使わない。** NFKC は全角括弧「（）」を半角へ、全角英数字を半角へ
+    畳んでしまい、台帳の値そのものを書き換える（実測: '人事・労務（Phase1）' が
+    '人事・労務(Phase1)' になった）。往復では辻褄が合うが、DB に入る値が
+    原本と変わるのは正規化ではなく改変なので採らない。
+    合成済み・分解済みの揺れ（濁点等）だけを畳む NFC を使い、空白は下で明示的に扱う。
 
-    Case is not converted (mis-conversion is costly in a mostly-Japanese register).
-    NULL and the empty string are treated alike and return ''.
+    大小文字は変換しない（日本語主体の台帳で誤変換の害が大きい）。
+    NULL と空文字は同一視して '' を返す。
     """
     if v is None:
         return ''
     if isinstance(v, bool):
         raise KarteError(f'{where}: 真偽値は想定していない')
     if isinstance(v, (int, float)):
-        # A text field stored in a numeric cell. Treated as a string even if written as a number.
+        # 数値セルに入った文字列項目。数値として書かれていても文字列として扱う。
         v = format_number(v, where)
     if not isinstance(v, str):
         raise KarteError(f'{where}: 想定外の型 {type(v).__name__}')
     if v in _EXCEL_ERRORS:
         raise KarteError(f'{where}: Excel のエラー値 {v}')
     s = unicodedata.normalize('NFC', v)
-    s = s.replace(' ', ' ').replace('　', ' ')   # NBSP / full-width space
-    s = s.replace('\r\n', '\n').replace('\r', '\n')       # newlines to LF
+    s = s.replace(' ', ' ').replace('　', ' ')   # NBSP / 全角空白
+    s = s.replace('\r\n', '\n').replace('\r', '\n')       # 改行は LF へ
     s = '\n'.join(_WS_RUN.sub(' ', line).strip() for line in s.split('\n'))
     return s.strip()
 
@@ -93,7 +92,7 @@ def format_number(v, where):
 
 
 def norm_int_1_5(v, where):
-    """An integer 1-5. No truncation. Non-integer, out-of-range or empty is an error."""
+    """1〜5 の整数。切り捨てない。非整数・範囲外・空はエラー。"""
     if v is None or (isinstance(v, str) and v.strip() == ''):
         raise KarteError(f'{where}: 必須の数値が空')
     if isinstance(v, bool):
@@ -118,11 +117,11 @@ def norm_int_1_5(v, where):
 
 
 def resolve_headers(raw_headers):
-    """Map the header row to canonical names. Unknown, missing, colliding or duplicate columns are all errors."""
-    mapping = {}          # column index -> canonical name
-    seen = {}             # canonical name -> original column name
-    # The rule is "ignore only fully empty trailing columns". Skipping empty headers regardless
-    # of position would silently drop a whole column when one in the middle has an empty header.
+    """ヘッダ行を正準名へ写す。未知・不足・衝突・重複は全てエラー。"""
+    mapping = {}          # 列インデックス -> 正準名
+    seen = {}             # 正準名 -> 元の列名
+    # 規則は「末尾の完全に空の列だけ無視」。位置を見ずに空ヘッダを飛ばすと、
+    # 途中に空ヘッダの列があったとき、その列を丸ごと黙って取りこぼす。
     last_named = -1
     for idx, h in enumerate(raw_headers):
         if h is not None and str(h).strip() != '':
@@ -131,7 +130,7 @@ def resolve_headers(raw_headers):
         if h is None or str(h).strip() == '':
             if idx < last_named:
                 raise KarteError(f'{idx + 1} 列目のヘッダが空（末尾以外の空ヘッダは許さない）')
-            continue      # ignore only trailing empty columns
+            continue      # 末尾の空列だけ無視する
         name = unicodedata.normalize('NFKC', str(h)).strip()
         if name not in ALIASES:
             raise KarteError(f'未知の列: {name!r}')
@@ -147,7 +146,7 @@ def resolve_headers(raw_headers):
 
 
 def read_karte(path):
-    """Return the karte risk-map sheet (KARTE_SHEET) as a list of normalized rows."""
+    """カルテ_リスクマップ シートを正規化済みの行リストとして返す。"""
     wb = openpyxl.load_workbook(path, data_only=True)
     if KARTE_SHEET not in wb.sheetnames:
         raise KarteError(f'シートが無い: {KARTE_SHEET}')
@@ -160,8 +159,8 @@ def read_karte(path):
         raise KarteError('カルテシートが空')
     mapping = resolve_headers(header)
 
-    # Formula cells are rejected. data_only=True only reads the cached value and
-    # cannot detect a stale cache (= silently passes old values).
+    # 数式セルは受け付けない。data_only=True はキャッシュを読むだけで、
+    # キャッシュが古くても検知できない（＝黙って古い値を通す）。
     formula_wb = openpyxl.load_workbook(path, data_only=False)
     fws = formula_wb[KARTE_SHEET]
     for row in fws.iter_rows():
@@ -172,7 +171,7 @@ def read_karte(path):
     out = []
     for rno, raw in enumerate(rows_iter, start=2):
         if raw is None or all(c is None or str(c).strip() == '' for c in raw):
-            continue      # rows with every column empty are not counted as rows
+            continue      # 全列空の行は行として数えない
         rec = {}
         for idx, canon in mapping.items():
             v = raw[idx] if idx < len(raw) else None
@@ -195,12 +194,12 @@ def read_karte(path):
 
 
 def sort_key(rec):
-    """Sort by code point to avoid locale differences."""
+    """ロケール差を避けるため、コードポイント順で並べる。"""
     return tuple(rec[k] for k in BUSINESS_KEY)
 
 
 def serialize(rows):
-    """Serialize normalized data. JSON Lines, fixed key order, non-ASCII kept as-is."""
+    """正規化済みデータの直列化。JSON Lines・キー順固定・非 ASCII はそのまま。"""
     lines = []
     for rec in sorted(rows, key=sort_key):
         ordered = {k: rec[k] for k in CANONICAL}
@@ -210,12 +209,12 @@ def serialize(rows):
 
 
 def digest(rows):
-    """SHA-256 (lowercase hex) of the serialized UTF-8 bytes."""
+    """直列化した UTF-8 バイト列の SHA-256（16 進小文字）。"""
     return hashlib.sha256(serialize(rows).encode('utf-8')).hexdigest()
 
 
 def compare(left_rows, right_rows):
-    """Return the list of differences. An empty list means "0 differences"."""
+    """差分の一覧を返す。空リストなら「差分 0 件」。"""
     li = {sort_key(r): r for r in left_rows}
     ri = {sort_key(r): r for r in right_rows}
     diffs = []

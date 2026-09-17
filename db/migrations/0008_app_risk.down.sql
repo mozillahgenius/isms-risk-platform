@@ -1,4 +1,4 @@
--- Rollback of 0008
+-- 0008 の巻き戻し
 DROP TRIGGER IF EXISTS trg_validate_residual ON app.risk_treatments;
 DROP TABLE IF EXISTS app.risk_treatments;
 DROP FUNCTION IF EXISTS app.validate_residual();

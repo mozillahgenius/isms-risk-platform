@@ -1,15 +1,15 @@
 -- @run-as: admin
--- 0071: Records of initial data import (design doc 2026-09-11 §8). Starting with CSV import of assets and risks (design decision 2026-09-12).
+-- 0071: 初期データの取り込み（設計書 2026-09-11 §8）の記録。資産とリスクの CSV 取り込みから始める（2026-09-12 goto-twin 決定）。
 --
--- The import itself is written by a web server action in one transaction (all or nothing), via the same path as existing saves (app_rw, require_work_permission,
--- set_management_frameworks_for_work). This migration is the home for its records:
---   import_batches      one import (kind, file hash, row count, created count, who and when)
---   import_batch_items  rows created by that import (row number -> created asset/risk)
---   import_undos        undo of an import (only once per import; number retired, number skipped)
--- The file itself is not stored (only hash, counts and per-row results; nothing leaves the tenant boundary, nothing is executed).
--- All are append-only; app_rw gets no UPDATE / DELETE. Who and when are filled in by a trigger with the actual user and now (no impersonation).
--- Undo does not delete rows; it compensates by retiring (status = 'retired'). Rows edited after import or referenced by other records are not reverted.
--- Writable by owner / admin (bulk-creating ledgers is the same tier as deciding the organization's context). The 0067 role policies are applied too.
+-- 取り込みそのものは Web のサーバーアクションが、既存の保存と同じ経路（app_rw・require_work_permission・
+-- set_management_frameworks_for_work）で 1 トランザクションに書く（全件か、何もしないか）。この migration はその記録の受け皿:
+--   import_batches      取り込み 1 回分（種類・ファイルのハッシュ・行数・作った件数・誰がいつ）
+--   import_batch_items  その取り込みで作った行（行番号 → 作った資産・リスク）
+--   import_undos        取り込みの取り消し（1 回の取り込みに 1 回だけ。退役した件数・対象外にした件数）
+-- ファイルそのものは保存しない（ハッシュ・件数・行の結果だけ。テナント境界の外へ出さず、実行もしない）。
+-- どれも追記だけで、app_rw に UPDATE / DELETE を渡さない。誰がいつ、はトリガが本人と今で埋める（なりすまさせない）。
+-- 取り消しは行を消さず、退役（status = 'retired'）で補償する。取り込み後に直された行・他の記録が参照している行は戻さない。
+-- 書けるのは owner / admin（台帳を一括で作るので、組織の状況の決定と同じ段）。0067 の役割ポリシーも張る。
 
 SET ROLE schema_owner;
 
@@ -34,7 +34,7 @@ CREATE TABLE app.import_batch_items (
   target_type  text NOT NULL CHECK (target_type IN ('asset','risk')),
   target_id    uuid NOT NULL,
   PRIMARY KEY (tenant_id, batch_id, row_no),
-  -- A row is created by only one import (makes the undo target unique).
+  -- 1 つの行は 1 回の取り込みでしか作られない（取り消しの対象を一意にする）。
   UNIQUE (tenant_id, target_type, target_id),
   FOREIGN KEY (tenant_id, batch_id) REFERENCES app.import_batches(tenant_id, id)
 );
@@ -51,7 +51,7 @@ CREATE TABLE app.import_undos (
   FOREIGN KEY (tenant_id, undone_by) REFERENCES app.users(tenant_id, id)
 );
 
--- Who and when are filled with the actual user and now (screens or direct writes cannot use another's name or a past time).
+-- 誰がいつ、は本人と今で埋める（画面や直接の書き込みで他人の名義・過去の日時にさせない）。
 CREATE FUNCTION app.import_log_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -69,8 +69,8 @@ CREATE TRIGGER import_batches_stamp BEFORE INSERT ON app.import_batches
 CREATE TRIGGER import_undos_stamp BEFORE INSERT ON app.import_undos
   FOR EACH ROW EXECUTE FUNCTION app.import_log_stamp();
 
--- Items can be attached only to an import the user created in the same transaction, and only to rows created in the same transaction.
--- Prevents the bypass of adding other rows to an old import and then undoing it to retire them (now() is constant within a transaction).
+-- 明細は、同じトランザクションで本人が作った取り込みと、同じトランザクションで作った行にだけ付けられる。
+-- 古い取り込みに他の行を足してから取り消し、その行を退役させる迂回を防ぐ（now() はトランザクションの中で同じ値）。
 CREATE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -106,9 +106,9 @@ BEGIN
     EXECUTE format('CREATE POLICY tenant_read ON app.%I FOR SELECT TO app_ro USING (tenant_id=app.current_tenant())',t);
     EXECUTE format('REVOKE ALL ON app.%I FROM PUBLIC',t);
     EXECUTE format('GRANT SELECT ON app.%I TO app_ro',t);
-    -- Append-only. No editing or deleting (import records are audit records).
+    -- 追記だけ。直したり消したりさせない（取り込みの記録は監査の記録）。
     EXECUTE format('GRANT SELECT,INSERT ON app.%I TO app_rw',t);
-    -- Same role policies as 0067 (names, shape and target tables are fixed by check_rls.sql; there is no UPDATE / DELETE privilege, but the shape is kept consistent).
+    -- 0067 と同じ役割ポリシー（名前・形・対象表は check_rls.sql が固定する。UPDATE / DELETE は権限が無いが形をそろえる）。
     EXECUTE format('CREATE POLICY records_role_insert ON app.%I AS RESTRICTIVE FOR INSERT TO app_rw '
                    'WITH CHECK ((SELECT app.records_role_allows(%L)))', t, 'import');
     EXECUTE format('CREATE POLICY records_role_update ON app.%I AS RESTRICTIVE FOR UPDATE TO app_rw '
@@ -126,7 +126,7 @@ COMMENT ON TABLE app.import_batch_items IS
 COMMENT ON TABLE app.import_undos IS
   '取り込みの取り消し（退役による補償）。1 回の取り込みに 1 回だけ。取り込み後に直された行・参照されている行は対象外として数える。';
 
--- Add import to the permission table: owner / admin (bulk ledger creation). This only adds one kind to the 0070 version (down restores the 0070 version).
+-- 許可の表に import を足す: owner / admin（台帳の一括作成）。0070 の版に種類を 1 つ足しただけ（down で 0070 の版へ戻す）。
 CREATE OR REPLACE FUNCTION app.records_role_allows(p_kind text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE

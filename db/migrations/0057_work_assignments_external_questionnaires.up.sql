@@ -1,7 +1,7 @@
--- 0057: Work requests, permission mapping, external resource questionnaires
+-- 0057: 作業依頼・権限マッピング・外部リソース質問票
 --
--- Without adding ISMS-specific columns, assets, risks, incidents, education, etc. are
--- handled in a common request register. External questionnaires are likewise a common feature rooted in vendors.
+-- ISMS固有の列を増やさず、資産・リスク・インシデント・教育などを
+-- 共通の依頼台帳で扱う。外部質問票も vendor を起点にした共通機能とする。
 
 SET ROLE schema_owner;
 

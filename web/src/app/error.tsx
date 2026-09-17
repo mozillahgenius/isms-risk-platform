@@ -2,13 +2,13 @@
 
 import { useEffect } from 'react';
 
-// On fetch failure, say "could not read" instead of disguising it as a plausible empty display.
-// 0 items and unreadable are different things. Confusing them would, for as long as the DB is down,
-// show a screen saying "there are no rules".
+// 取得に失敗したら、それらしい空表示に化けさせず「読めなかった」と出す。
+// 0 件と読めないは別のこと。ここを取り違えると、DB が落ちている間ずっと
+// 「ルールが 1 件も無い」画面を見せることになる。
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    // This is the browser console. We want to see the contents during development, but on a deployed screen
-    // there is no reason to log to the console only what we decided not to show on screen (the same audience reads it).
+    // ここはブラウザのコンソール。開発中は中身を見たいが、配備した画面では
+    // 画面に出さないと決めたものをコンソールにだけ出す理由が無い（同じ相手が読む）。
     if (process.env.NODE_ENV === 'development') {
       console.error(error);
     } else {
@@ -22,9 +22,9 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
       <p className="mt-2 text-sm text-[var(--fg-2)]">
         DB から読めなかった可能性があります。<b>0 件ではありません。</b>
       </p>
-      {/* We cannot choose what the failure contains. A connection failure puts the connection target into the text,
-          an auth failure the user name. Show only the identifier (digest) on screen and see the contents in server logs.
-          Production Next builds hide message anyway, but we do not rely on that and do not show it. */}
+      {/* 失敗の中身は選べない。接続に失敗すれば接続先が、認証に失敗すれば利用者名が
+          文面に混ざる。画面には識別子（digest）だけ出し、中身はサーバのログで見る。
+          本番ビルドの Next はそもそも message を伏せるが、それに頼らず出さない。 */}
       {error.digest && (
         <p className="mt-4 font-[family-name:var(--font-geist-mono)] text-[12px] text-[var(--muted)]">
           digest: {error.digest}

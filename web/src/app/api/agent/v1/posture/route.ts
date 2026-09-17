@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const definitionRows = await db`
       SELECT definition_hash
         FROM catalog.agent_definitions
-       WHERE platform = 'macos' AND version = ${payload.definition_version} AND active
+       WHERE platform = ${payload.os_family} AND version = ${payload.definition_version} AND active
     `;
     if (definitionRows.length !== 1) return NextResponse.json({ error: 'definition rejected' }, { status: 409 });
     const expectedHash = Buffer.from(definitionRows[0].definition_hash);

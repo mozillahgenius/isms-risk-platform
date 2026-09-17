@@ -1,4 +1,4 @@
-# Never commit real customer data
+# 顧客の実データは絶対にコミットしない
 *.xlsx
 !phase0/golden/*.json
 *.csv
@@ -6,7 +6,24 @@
 !db/seeds/snapshots/
 !db/seeds/snapshots/**/*.csv
 
-# ---- Dependencies / build output (regenerable) ----
+.env
+.env.*
+*.pem
+*.key
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+.DS_Store
+*.tmp
+tmp/
+.claude/settings.local.json
+
+# ---- RUNTIME local-llm 移行時に追加 ----
+
+# ---- 依存・生成物（再生成可能） ----
 node_modules/
 .venv/
 venv/
@@ -19,7 +36,7 @@ build/
 coverage/
 *.tsbuildinfo
 
-# ---- Secrets (never track) ----
+# ---- 秘匿情報（絶対に追跡しない） ----
 .env
 .env.*
 !.env.example
@@ -31,15 +48,16 @@ coverage/
 credentials*.json
 service-account*.json
 
-# ---- Runtime state, logs, backups ----
-.DS_Store
-*.tmp
-tmp/
+# ---- 実行時状態・ログ・バックアップ ----
 *.log
 logs/
 *.bak
 *.bak-*
 *.pre-*
+.deploy-backups/
+.local-llm-backups/
+.codex-point-policy-backup-*/
+*.pre-full-source-*
 *.dump
 *.sql.gz
 *.tar.gz

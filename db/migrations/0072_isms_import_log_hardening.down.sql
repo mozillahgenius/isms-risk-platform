@@ -1,5 +1,5 @@
 -- @run-as: admin
--- Rollback of 0072. Restores the import record guards to the 0071 version (triggers and functions only; no data is lost).
+-- 0072 の巻き戻し。取り込みの記録の守りを 0071 の版へ戻す（トリガと関数だけで、データは失われない）。
 
 DROP TRIGGER IF EXISTS assets_keep_created_at ON app.assets;
 DROP TRIGGER IF EXISTS risk_scenarios_keep_created_at ON app.risk_scenarios;
