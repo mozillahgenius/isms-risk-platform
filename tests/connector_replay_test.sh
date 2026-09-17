@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Acceptance by replaying recorded Google Workspace reader responses.
-# Doesn't call the real API; measures normalization, idempotency, and unreadable/gone/coverage.
+# Google Workspace reader の記録済みレスポンス再生受入。
+# 実 API は呼ばず、正規化・冪等性・unreadable/gone/coverage を実測する。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

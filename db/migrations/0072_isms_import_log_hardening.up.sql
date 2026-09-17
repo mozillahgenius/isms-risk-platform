@@ -1,23 +1,23 @@
 -- @run-as: admin
--- 0072: Harden the import records (0071) (Codex review 2026-09-12).
---   1. Do not let updates change created_at of assets and risks. 0071's item guard identifies "rows created in this transaction"
---      by "created_at is now (this transaction)", so if app_rw rewrote an existing row's created_at to now, a pre-existing row could
---      be attached to the import's items and retired by an undo.
---   2. Consistency between items and import records: kind matches target (no risks on an asset import), row numbers within row count,
---      item count equals created count (checked at commit).
---   3. The DB counts undo totals (written values are not trusted). Rows retired in this transaction are "retired"; the rest "not applicable".
+-- 0072: 取り込みの記録（0071）を固める（Codex レビュー 2026-09-12）。
+--   1. 資産・リスクの created_at を更新で変えさせない。0071 の明細の守りは「created_at が今（このトランザクション）」で
+--      「このトランザクションで作った行」を見分けるので、app_rw が既存行の created_at を今に書き換えると、前からある行を
+--      取り込みの明細に付けて、取り消しで退役させられた。
+--   2. 明細と取り込みの記録の整合: 種類と対象の一致（資産の取り込みにリスクを付けない）・行番号は行数以内・
+--      明細の数は作った件数と同じ（コミットの時に確かめる）。
+--   3. 取り消しの件数は DB が数える（書かれた値を信じない）。このトランザクションで退役にした行を「退役」、残りを「対象外」。
 
 SET ROLE schema_owner;
 
 CREATE FUNCTION app.keep_created_at() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
-  -- Creation time is when it was created. Updates do not change it (silently restored).
+  -- 作った日時は作った時のもの。更新では変えない（黙って元に戻す）。
   NEW.created_at := OLD.created_at;
   RETURN NEW;
 END $$;
 
--- Item guard (0071's version plus kind match, row-number range, and count upper bound).
+-- 明細の守り（0071 の版に、種類の一致・行番号の範囲・件数の上限を足した）。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -56,7 +56,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- At commit, check that the item count equals the created count (do not leave imports that forgot to add items midway).
+-- コミットの時に、明細の数が作った件数と同じか確かめる（途中で明細を足し忘れた取り込みを残さない）。
 CREATE FUNCTION app.import_batch_complete() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -72,8 +72,8 @@ END $$;
 CREATE CONSTRAINT TRIGGER import_batches_complete AFTER INSERT ON app.import_batches
   DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION app.import_batch_complete();
 
--- Who/when (0071's version) plus DB-side counting of undo totals.
--- Retired: rows among this import's items retired in this transaction (xmin is the current transaction). Not applicable: the rest.
+-- 誰がいつ（0071 の版）に、取り消しの件数を DB が数える処理を足した。
+-- 退役: この取り込みの明細の行のうち、このトランザクションで退役にした行（xmin が今のトランザクション）。対象外: 残り。
 CREATE OR REPLACE FUNCTION app.import_log_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -109,7 +109,7 @@ END $$;
 
 RESET ROLE;
 
--- Asset/risk tables are not necessarily owned by schema_owner, so the trigger is attached as superuser (same as 0063's corrective action constraint).
+-- 資産・リスクの表は schema_owner の持ち物とは限らないので、トリガは superuser のまま付ける（0063 の是正処置の制約と同じ）。
 CREATE TRIGGER assets_keep_created_at BEFORE UPDATE ON app.assets
   FOR EACH ROW EXECUTE FUNCTION app.keep_created_at();
 CREATE TRIGGER risk_scenarios_keep_created_at BEFORE UPDATE ON app.risk_scenarios

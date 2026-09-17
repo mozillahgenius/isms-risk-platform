@@ -1,7 +1,7 @@
 import { CatalogTabs } from '@/components/CatalogTabs';
 
-// Catalog pages are one level down, so the sub-navigation is rendered here.
-// Placing it in the layout shows where you are not only on lists but also on detail pages (individual controls, policies, risks).
+// カタログ配下は 1 段下がるので、ここで副ナビを出す。
+// レイアウトに置くことで、一覧だけでなく詳細ページ（統制・規程・リスクの個別）にも現在地が出る。
 export default function CatalogLayout({ children }: { children: React.ReactNode }) {
   return (
     <div>

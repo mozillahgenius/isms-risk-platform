@@ -1,9 +1,9 @@
--- 0035 rollback.
--- Caution: running down loses any budget_amount / resource_fte values already entered
--- (the columns themselves are dropped). If this change ever needs to be undone in
--- production, it is usually safer to revert only the app code to the previous revision and
--- not run this down (Codex review finding). To disable while keeping the values, just
--- hide the fields on the app side.
+-- 0035 巻き戻し。
+-- 注意: down を実行すると、既に入力された budget_amount / resource_fte の値は
+-- 失われる（列そのものを削除するため）。本番でこの変更を取り消す必要が生じた
+-- 場合、通常はアプリのコードだけを前のリビジョンへ戻し、この down は流さない
+-- 方が安全（Codexレビュー指摘）。値を保持したまま無効化したい場合は、アプリ側
+-- でフィールドを非表示にするだけにとどめる。
 
 ALTER TABLE app.measures
   DROP COLUMN IF EXISTS budget_amount,

@@ -1,29 +1,29 @@
--- 0018 Close holes in the checks from 0017.
---   1. The pre-check of existing rows saw 0 rows due to FORCE RLS, so it effectively checked nothing
---   2. Immutability of the standard criteria covered only some columns
---   3. No check ran when a deviation's status was set back to active
---   4. A DOM version switch and a deviation registration running concurrently could both pass without seeing each other
+-- 0018 0017 の検査の穴を塞ぐ。
+--   1. 既存行の事前検査が FORCE RLS で 0 行しか見ておらず、実質空振りだった
+--   2. 標準基準の不変化が一部の列しか見ていなかった
+--   3. 逸脱の status を active へ戻すときに検査が走らなかった
+--   4. DOM 版切替と逸脱登録が同時に走ると、互いを見ずに両方通り得た
 
 -- ------------------------------------------------------------------
--- 1. Let the definer (schema_owner) read app.deviations across tenants.
+-- 1. 定義者（schema_owner）が app.deviations を横断で読めるようにする。
 --
---    0017's pre-check runs as schema_owner, but app.deviations has
---    FORCE RLS and no schema_owner policy, so it **appeared to have 0 rows**.
---    The check "stop if there are existing invalid rows" succeeded without looking at anything.
---    Treat it the same as sessions / memberships / users / tenants.
+--    0017 の事前検査は schema_owner で実行されるが、app.deviations は
+--    FORCE RLS で schema_owner 向けポリシーが無いため **0 行に見えていた**。
+--    「既存の不正な行があれば止める」という検査が、何も見ずに成功していた。
+--    sessions / memberships / users / tenants と同じ扱いにする。
 -- ------------------------------------------------------------------
 CREATE POLICY ctx_deviation_lookup ON app.deviations FOR SELECT TO schema_owner
   USING (true);
 
--- Check existing rows again (this time they are actually visible)
+-- 改めて既存行を検査する（今度は実際に見える）
 DO $$
 DECLARE r record; v_bad text := '';
 BEGIN
   FOR r IN SELECT id, tenant_id, override FROM app.deviations
             WHERE kind = 'risk_band'
               AND status IN ('requested','active','expired','withdrawn') LOOP
-    -- Include expired / withdrawn too. Since there is a path to set status back to active,
-    -- we don't accept "it's inactive now, so it may stay invalid".
+    -- expired / withdrawn も対象にする。status を active へ戻す経路があるため、
+    -- 「今は無効だから不正なままでよい」とはしない。
     BEGIN
       PERFORM app.check_risk_band_override(r.tenant_id, r.override);
     EXCEPTION WHEN others THEN
@@ -36,14 +36,14 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------
--- 2. Extend immutability of the standard criteria to all columns.
---    0017 checked only the formula and the 4 bands, so the deadlines (due_days_*) and
---    the primary key dom_version_id could be changed.
+-- 2. 標準基準の不変化を全列へ広げる。
+--    0017 は算定式と 4 区分しか見ておらず、期限（due_days_*）と
+--    主キーの dom_version_id を動かせた。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION catalog.risk_criteria_default_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, catalog AS $$
 BEGIN
-  -- Re-pointing the primary key is always forbidden (it would change which DOM version the criteria belong to)
+  -- 主キーの付け替えは常に禁止（どの DOM 版の基準なのかが変わってしまう）
   IF NEW.dom_version_id IS DISTINCT FROM OLD.dom_version_id THEN
     RAISE EXCEPTION '標準リスク基準の dom_version_id は変更できない';
   END IF;
@@ -63,18 +63,18 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------
--- 3. Also check when status becomes active.
---    0017 fired only when override / kind / tenant_id changed, so
---    the path "set a row that expired while invalid back to active" was open.
---    Also serialize with DOM version switches via a per-tenant advisory lock (4).
+-- 3. status が active になるときも検査する。
+--    0017 は override / kind / tenant_id が動いたときだけ発火するので、
+--    「不正なまま expired になっている行を active へ戻す」経路が空いていた。
+--    あわせて、テナント単位の advisory lock で DOM 版切替と直列化する（4）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.validate_deviation_override() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
   IF NEW.kind = 'risk_band' THEN
-    -- Serialize per tenant. Without this, when a DOM version switch and
-    -- a deviation registration run concurrently, neither sees the other's uncommitted rows,
-    -- leaving the combination "new standard x override validated against the old standard".
+    -- テナント単位で直列化する。これを取らないと、DOM 版の切替と
+    -- 逸脱の登録が同時に走ったとき互いの未コミット行が見えず、
+    -- 「新しい標準 × 旧標準で検証した override」という組合せが残る。
     PERFORM pg_advisory_xact_lock(hashtext('isms.tenant.' || NEW.tenant_id::text));
     PERFORM app.check_risk_band_override(NEW.tenant_id, NEW.override);
   END IF;
@@ -92,7 +92,7 @@ CREATE TRIGGER trg_validate_deviation_override_upd
   EXECUTE FUNCTION app.validate_deviation_override();
 
 -- ------------------------------------------------------------------
--- 4. Take the same lock on the DOM version switch side too.
+-- 4. DOM 版切替側も同じロックを取る。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.guard_tenant_dom_version() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$

@@ -22,8 +22,8 @@ import { IsmsStepRail } from '@/components/IsmsStepRail';
 
 export const dynamic = 'force-dynamic';
 
-// Each stage is a different page, so make them distinguishable in browser tabs too.
-// For unknown keys, fall back to the default without reading the DB (no 404 here; the main body calls notFound).
+// 段階ごとに違うページなので、ブラウザのタブでも見分けられるようにする。
+// 未知のキーでは DB を読まずに既定へ落とす（ここで 404 にはしない。本体側で notFound する）。
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   const step = getStep(key);
@@ -42,7 +42,7 @@ function ClauseList({ clauses }: { clauses: Clause[] }) {
           <span className="min-w-0 flex-1">
             <span className="text-[13px]">{c.title}</span>
             {c.scope === 'cross' && (
-              <span className="ms-2 badge badge-lead">この段階だけのものではない</span>
+              <span className="ml-2 badge badge-lead">この段階だけのものではない</span>
             )}
             {c.note && <span className="mt-0.5 block text-[12px] text-[var(--muted)]">{c.note}</span>}
           </span>
@@ -55,13 +55,13 @@ function ClauseList({ clauses }: { clauses: Clause[] }) {
 export default async function StepPage({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
 
-  // **Validate the key before reading the DB.**
-  // Reading the DB first would make even unknown keys return 500 when the DB is down,
-  // making "no such page" indistinguishable from "cannot read right now".
+  // **DB を読む前にキーを検証する。**
+  // 先に DB を読むと、DB が落ちているときに未知のキーまで 500 になり、
+  // 「そんなページは無い」と「いま読めない」が区別できなくなる。
   const step = getStep(key);
   if (!step) notFound();
 
-  // Do not read the same table twice for decision and display. Get both in one read.
+  // 判定用と表示用で同じ表を二度読まない。1 回で両方を取る。
   const { facts, policies, calendar, roles } = await getStepBundle();
 
   const a = assessStep(step, facts);
@@ -70,7 +70,7 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
   const stepPolicies = policies.filter((p) => step.policyKeys.includes(p.key));
   const stepCalendar = calendar.filter((e) => step.calendarKeys.includes(e.key));
   const stepRoles = roles.filter((r) => (step.roleKeys as string[]).includes(r.key));
-  // Items in the assignment table but missing from the DB are named rather than silently dropped.
+  // 割り当て表にあるのに DB に無いものは、黙って落とさず名前を出す。
   const missingPolicyKeys = step.policyKeys.filter((k) => !policies.some((p) => p.key === k));
   const missingCalendarKeys = step.calendarKeys.filter((k) => !calendar.some((e) => e.key === k));
   const missingRoleKeys = step.roleKeys.filter((k) => !roles.some((r) => r.key === k));
@@ -82,12 +82,12 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
   const assessmentByKey = new Map(ISO_STEPS.map((item) => [item.key, assessStep(item, facts)]));
 
   return (
-    // This is a screen for reading, so narrow the width (same reason as the top page).
+    // 読むための画面なので幅を詰める（トップと同じ理由）。
     <div className="grid max-w-[1040px] gap-7 lg:grid-cols-[minmax(0,1fr)_126px] lg:items-start">
       <div className="flex min-w-0 flex-col gap-7">
-      {/* The breadcrumb holds only ancestors that have a destination, plus the current location.
-          Phases (plan, do, check, act) have no dedicated page, so
-          inserting them here would create "levels you cannot go back to". Phases are shown in the heading below instead. */}
+      {/* パンくずに置くのは、行き先のある先祖と現在地だけ。
+          フェーズ（計画・実施・点検・改善）には専用のページが無いので、
+          ここに挟むと「戻れない階層」ができる。フェーズは下の見出し側で出す。 */}
       <nav aria-label="現在位置" className="text-[12px] text-[var(--muted)]">
         <Link className="underline" href="/">
           ISMS の進め方
@@ -127,7 +127,7 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
             <p className="mt-2 text-[12px] text-[var(--muted)]">
               先にそろえるもの: {nextRequiredTool.label}
               {nextRequiredTool.href ? (
-                <Link className="ms-2 underline" href={nextRequiredTool.href}>
+                <Link className="ml-2 underline" href={nextRequiredTool.href}>
                   開く
                 </Link>
               ) : (
@@ -140,7 +140,7 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
 
       <section>
         <h2 className="mb-1 text-[15px] font-semibold">この段階で行うこと</h2>
-        <ol className="ms-4 list-decimal text-[13px] leading-relaxed marker:text-[var(--muted)]">
+        <ol className="ml-4 list-decimal text-[13px] leading-relaxed marker:text-[var(--muted)]">
           {step.actions.map((s) => (
             <li key={s} className="py-0.5">
               {s}
@@ -260,7 +260,7 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
         </section>
       )}
 
-      {/* The arrow is decorative, so the direction is also written in words (screen readers do not read arrows). */}
+      {/* 矢印は装飾なので、方向は言葉でも書く（読み上げでは矢印が読まれない）。 */}
       <nav aria-label="前後の段階" className="flex flex-wrap gap-3 border-t border-[var(--border)] pt-5">
         {prev && (
           <Link href={`/steps/${prev.key}`} className="btn">
@@ -277,8 +277,8 @@ export default async function StepPage({ params }: { params: Promise<{ key: stri
       </nav>
       </div>
 
-      {/* Placed in the body flow, this long navigation would push the next section down.
-          On desktop it is an independent sticky aside; on narrow screens it stays hidden as before. */}
+      {/* 本文のフローに入れると、この長い導線が次の節を押し下げる。
+          デスクトップでは独立した sticky aside とし、狭い画面では従来どおり非表示にする。 */}
       <aside className="hidden lg:sticky lg:top-[92px] lg:block">
         <IsmsStepRail assessments={assessmentByKey} currentKey={step.key} compact />
       </aside>

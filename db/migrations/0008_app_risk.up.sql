@@ -1,17 +1,17 @@
--- 0008 app: risk (design doc 2.7)
+-- 0008 app: リスク（設計書 2.7）
 -- risk_criteria → risk_scenarios → risk_assessments → risk_treatments
 
-CREATE TABLE app.risk_criteria (              -- criteria version effective for the tenant (freezes the result of resolving deviations)
+CREATE TABLE app.risk_criteria (              -- テナントで有効な基準の版（逸脱を解決した結果を凍結）
   id             uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id      uuid NOT NULL,
   dom_version_id uuid NOT NULL REFERENCES catalog.dom_versions(id),
-  -- Same CHECK as the catalog side. If this were free text, for an unknown formula
-  -- validate_impact_sec below would expect NULL and an invalid impact_sec would slip through.
+  -- catalog 側と同じ CHECK を張る。ここが自由文字列だと、未知の式のとき
+  -- 下の validate_impact_sec が期待値 NULL になり、不正な impact_sec が素通りする。
   impact_sec_formula text NOT NULL
                  CHECK (impact_sec_formula IN ('max_cia','avg_cia')),
   band_top_priority int[] NOT NULL, band_action int[] NOT NULL,
   band_consider     int[] NOT NULL, band_accept int[] NOT NULL,
-  deviation_id   uuid,                             -- when derived from a deviation
+  deviation_id   uuid,                             -- 逸脱に由来する場合
   approved_by    uuid, approved_at timestamptz,
   valid_from     date NOT NULL, valid_to date,
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
@@ -27,7 +27,7 @@ CREATE TABLE app.risk_scenarios (
   domain        text NOT NULL, theme text NOT NULL, measure text NOT NULL,
   frame         text NOT NULL CHECK (frame IN ('管理可能性','精度','スピード')),
   summary       text NOT NULL,
-  department_id uuid,                              -- risk owner's department
+  department_id uuid,                              -- リスクオーナーの部門
   asset_id      uuid,
   status        text NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active','retired')),
@@ -36,8 +36,8 @@ CREATE TABLE app.risk_scenarios (
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, department_id) REFERENCES app.departments(tenant_id, id)
 );
--- Business key of the register. Prevents duplicate registration of the same scenario (enforces on the DB side
--- the rule "a duplicate business key is an error" defined for the Phase0 round trip).
+-- 台帳としての業務キー。同一シナリオの二重登録を防ぐ（Phase0 の往復で
+-- 「業務キー重複はエラー」と定めた規則を DB 側でも担保する）。
 CREATE UNIQUE INDEX risk_scenarios_business_key
   ON app.risk_scenarios (tenant_id, domain, theme, measure, frame, summary)
   WHERE status = 'active';
@@ -83,7 +83,7 @@ CREATE UNIQUE INDEX risk_assessments_current
   ON app.risk_assessments (tenant_id, risk_scenario_id)
   WHERE valid_to IS NULL AND recorded_until IS NULL;
 
--- The DB rejects impact_sec unless it matches the formula (default max_cia) (acceptance #13)
+-- impact_sec は算定式（既定 max_cia）と一致しなければ DB が拒否する（受入 #13）
 CREATE OR REPLACE FUNCTION app.validate_impact_sec() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE v_formula text; v_expected smallint;
@@ -94,8 +94,8 @@ BEGIN
   IF NEW.confidentiality IS NULL OR NEW.integrity IS NULL OR NEW.availability IS NULL THEN
     RAISE EXCEPTION 'C/I/A are required when impact_sec is set';
   END IF;
-  -- Without an ELSE, an unknown formula makes v_expected NULL, and the comparison below
-  -- becomes NULL (neither false nor true), letting invalid values slip through. Always fail.
+  -- ELSE を書かないと未知の式で v_expected が NULL になり、下の比較が
+  -- NULL（＝偽でも真でもない）になって不正な値が素通りする。必ず落とす。
   v_expected := CASE v_formula
     WHEN 'max_cia' THEN greatest(NEW.confidentiality, NEW.integrity, NEW.availability)
     WHEN 'avg_cia' THEN ceil((NEW.confidentiality + NEW.integrity + NEW.availability)/3.0)
@@ -125,7 +125,7 @@ CREATE TABLE app.risk_treatments (
   impact_biz_after   smallint CHECK (impact_biz_after BETWEEN 1 AND 5),
   level_sec_after    smallint GENERATED ALWAYS AS (prob_after * impact_sec_after) STORED,
   level_biz_after    smallint GENERATED ALWAYS AS (prob_after * impact_biz_after) STORED,
-  increase_reason    text,                          -- required when it increased on reassessment
+  increase_reason    text,                          -- 再評価で上昇した場合は必須
   status             text NOT NULL DEFAULT 'planned'
                        CHECK (status IN ('planned','in_progress','done','cancelled')),
   approved_by        uuid, approved_at timestamptz,
@@ -139,7 +139,7 @@ CREATE TABLE app.risk_treatments (
   CHECK (recorded_until IS NULL OR recorded_until >  recorded_from)
 );
 
--- Within the same cycle, residual > inherent is rejected. An increase on reassessment requires a reason (acceptance #12)
+-- 同一サイクル内で 残存 > 固有 は拒否。再評価での上昇は理由必須（受入 #12）
 CREATE OR REPLACE FUNCTION app.validate_residual() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE v_inherent smallint; v_same_cycle boolean; v_residual smallint;
@@ -147,9 +147,9 @@ BEGIN
   SELECT a.level_sec, (a.valid_from = NEW.valid_from) INTO v_inherent, v_same_cycle
     FROM app.risk_assessments a
    WHERE a.tenant_id = NEW.tenant_id AND a.id = NEW.risk_assessment_id;
-  -- The design doc looks at NEW.level_sec_after, but generated columns are not yet computed
-  -- at BEFORE-trigger time and are always NULL. = This check was being bypassed (measured).
-  -- Compute it ourselves from the source columns. Rationale: docs/DECISIONS.md D-04.
+  -- 設計書は NEW.level_sec_after を見ているが、生成列は BEFORE トリガの時点では
+  -- まだ計算されておらず必ず NULL になる。＝この検査は素通りしていた（実測）。
+  -- 元になる列から自分で計算する。理由は docs/DECISIONS.md D-04。
   v_residual := NEW.prob_after * NEW.impact_sec_after;
   IF v_residual IS NULL OR v_inherent IS NULL THEN RETURN NEW; END IF;
   IF v_residual > v_inherent THEN

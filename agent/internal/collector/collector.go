@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,7 +46,7 @@ func (NativeRunner) Query(ctx context.Context, item definition.Item) ([]map[stri
 	}
 	outputs := make([]string, len(item.Commands))
 	for i, command := range item.Commands {
-		if command.Executable == "" || !strings.HasPrefix(command.Executable, "/") {
+		if !isAbsoluteExecutable(command.Executable) {
 			return nil, fmt.Errorf("item %s has an invalid native executable", item.Name)
 		}
 		commandCtx, cancel := context.WithTimeout(ctx, nativeCommandTimeout)
@@ -64,16 +65,33 @@ func (NativeRunner) Query(ctx context.Context, item definition.Item) ([]map[stri
 		}
 		outputs[i] = string(raw)
 	}
+	if item.Output == "json" {
+		return parseWindowsNative(item, outputs)
+	}
 	if item.Name == "edr_running" || item.Name == "edr_vendor" {
 		return collectEDRProcessRows(outputs[0], item.ExecutablePathPrefixes, item.Name == "edr_vendor")
 	}
 	return parseNative(item, outputs)
 }
 
+// executableGOOS is a variable so tests can check both path rules.
+var executableGOOS = runtime.GOOS
+
+// isAbsoluteExecutable requires an absolute executable path for the running
+// OS: "/..." on macOS (unchanged), a drive-letter path such as
+// "C:\..." on Windows.
+func isAbsoluteExecutable(path string) bool {
+	if executableGOOS == "windows" {
+		return len(path) > 3 && path[1] == ':' && path[2] == '\\' &&
+			((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
+	}
+	return path != "" && strings.HasPrefix(path, "/")
+}
+
 func runNativeCommand(ctx context.Context, command definition.Command, output string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
 	switch output {
-	case "stdout":
+	case "stdout", "json":
 		return cmd.Output()
 	case "stderr":
 		var stderr bytes.Buffer
@@ -97,6 +115,9 @@ func exitStatus(err error) int {
 }
 
 func parseNative(item definition.Item, outputs []string) ([]map[string]any, error) {
+	if item.Output == "json" {
+		return parseWindowsNative(item, outputs)
+	}
 	text := strings.Join(outputs, "\n")
 	switch item.Name {
 	case "disk_encrypted":
@@ -705,6 +726,7 @@ func Collect(ctx context.Context, d definition.Definition, runner QueryRunner, m
 		CollectedAt:       nowUTC(),
 		DefinitionVersion: d.Version,
 	}
+	windows := d.Platform == "windows"
 	for _, item := range d.Items {
 		var rows []map[string]any
 		if item.Collector != "metadata" {
@@ -713,6 +735,12 @@ func Collect(ctx context.Context, d definition.Definition, runner QueryRunner, m
 			if err != nil {
 				return posture.Snapshot{}, err
 			}
+		}
+		if windows {
+			if err := applyWindowsRows(&snapshot, item, rows); err != nil {
+				return posture.Snapshot{}, err
+			}
+			continue
 		}
 		switch item.Name {
 		case "disk_encrypted":
@@ -804,6 +832,9 @@ func Collect(ctx context.Context, d definition.Definition, runner QueryRunner, m
 		case "off_premise":
 			// The value is an explicit enrollment attribute, not a location signal.
 		}
+	}
+	if windows && snapshot.OSFamily != "windows" {
+		return posture.Snapshot{}, fmt.Errorf("windows definition produced os_family %q", snapshot.OSFamily)
 	}
 	if snapshot.UnapprovedApps == nil {
 		snapshot.UnapprovedApps = []string{}

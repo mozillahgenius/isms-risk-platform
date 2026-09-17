@@ -1,11 +1,11 @@
--- Standard operating model DOM 2026.1 (design doc Part I)
--- Idempotent. Running it any number of times does not increase row counts (fixed UUIDs / natural keys + ON CONFLICT DO UPDATE).
+-- 標準運用モデル DOM 2026.1（設計書 Part I）
+-- 冪等。何度流しても件数は増えない（固定 UUID / 自然キー ＋ ON CONFLICT DO UPDATE）。
 
 BEGIN;
 SELECT pg_advisory_xact_lock(8891234501);
 SET ROLE schema_owner;
 
--- 1. DOM version --------------------------------------------------------------
+-- 1. DOM 版 ------------------------------------------------------------------
 INSERT INTO catalog.dom_versions (id, version, released_at, changelog, is_current)
 VALUES ('00000000-0000-0000-0000-000000002026', '2026.1',
         timestamptz '2026-08-13 00:00:00+09',
@@ -13,7 +13,7 @@ VALUES ('00000000-0000-0000-0000-000000002026', '2026.1',
 ON CONFLICT (version) DO UPDATE
   SET changelog = EXCLUDED.changelog, is_current = EXCLUDED.is_current;
 
--- 2. Standard roles (5. Do not add more. design doc 1.3) ----------------------
+-- 2. 標準ロール（5 つ。増やさない。設計書 1.3）-------------------------------
 INSERT INTO catalog.roles_default (key, name_ja, description, sort_order) VALUES
  ('ciso',        '経営責任者', '受容判断、例外・逸脱の承認、マネジメントレビューの主宰', 1),
  ('secretariat', '事務局', '日々の運用。リスク・統制・証跡・是正の管理、コネクタ設定', 2),
@@ -24,7 +24,7 @@ ON CONFLICT (key) DO UPDATE
   SET name_ja = EXCLUDED.name_ja, description = EXCLUDED.description,
       sort_order = EXCLUDED.sort_order;
 
--- 3. Standard asset classes (4 categories. Immutable. design doc 1.7) ---------
+-- 3. 標準資産分類（4 区分。変更不可。設計書 1.7）------------------------------
 INSERT INTO catalog.asset_classes_default (key, name_ja, rank, external_share_policy) VALUES
  ('top_secret',   '極秘',     4, 'forbidden'),
  ('confidential', '機密',     3, 'approval_required'),
@@ -34,8 +34,8 @@ ON CONFLICT (key) DO UPDATE
   SET name_ja = EXCLUDED.name_ja, rank = EXCLUDED.rank,
       external_share_policy = EXCLUDED.external_share_policy;
 
--- 4. Standard risk criteria (design doc 1.5) ----------------------------------
---    Holds the 14 values reachable on a 5x5 grid as a set. Structurally removes ambiguity in boundary interpretation.
+-- 4. 標準リスク基準（設計書 1.5）---------------------------------------------
+--    5x5 で取りうる 14 値を集合で持つ。境界の解釈揺れを構造的に消す。
 INSERT INTO catalog.risk_criteria_default
   (dom_version_id, impact_sec_formula,
    band_top_priority, band_action, band_consider, band_accept,
@@ -49,8 +49,8 @@ ON CONFLICT (dom_version_id) DO UPDATE
       band_consider      = EXCLUDED.band_consider,
       band_accept        = EXCLUDED.band_accept;
 
--- 5. Standard annual calendar (design doc 1.4) --------------------------------
---    offset_months is the number of months from the start of the fiscal year. The start month is a tenant setting (default April).
+-- 5. 標準年間カレンダー（設計書 1.4）-----------------------------------------
+--    offset_months は期首からの月数。期首月はテナント設定（既定 4 月）。
 INSERT INTO catalog.calendar_events_default
   (key, name_ja, cadence, offset_months, owner_role, clause_ref, extendable) VALUES
  ('daily_checks',        '自動チェックの実行・ドリフト通知', 'daily',      NULL, 'secretariat', '9.1',  false),
@@ -72,8 +72,8 @@ ON CONFLICT (key) DO UPDATE
       offset_months = EXCLUDED.offset_months, owner_role = EXCLUDED.owner_role,
       clause_ref = EXCLUDED.clause_ref, extendable = EXCLUDED.extendable;
 
--- 6. Standard document set (12 policies. design doc 1.8) ----------------------
---    body_md is an outline only. Fleshing out the text is separate Phase 1 work.
+-- 6. 標準文書体系（規程 12 本。設計書 1.8）-----------------------------------
+--    body_md は骨子のみ。本文の作り込みは Phase 1 の別作業。
 INSERT INTO catalog.policies_default (key, dom_version_id, title_ja, body_md, clause_refs, sort_order) VALUES
  ('p01_basic',    '00000000-0000-0000-0000-000000002026', '情報セキュリティ基本方針',
   E'# 情報セキュリティ基本方針\n\n（標準本文。差分を持つと逸脱として記録される）', '{5.2}', 1),
@@ -103,7 +103,7 @@ ON CONFLICT (key) DO UPDATE
   SET title_ja = EXCLUDED.title_ja, body_md = EXCLUDED.body_md,
       clause_refs = EXCLUDED.clause_refs, sort_order = EXCLUDED.sort_order;
 
--- 7. Frameworks (design doc 1.10) --------------------------------------------
+-- 7. フレームワーク（設計書 1.10）--------------------------------------------
 INSERT INTO catalog.frameworks (key, name_ja, version, source_note) VALUES
  ('ISO27001:2022', 'ISO/IEC 27001:2022 附属書 A（Amd 1:2024 を含む）', '2022',
   '国際規格。統制の番号と名称は規格本文に従う。'),

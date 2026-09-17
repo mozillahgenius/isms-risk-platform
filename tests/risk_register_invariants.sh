@@ -8,7 +8,7 @@ if [ -z "$TOKEN" ] && [ -f web/.env.local ]; then
 fi
 [ -n "$TOKEN" ] || { echo "risk_register_test: token がありません" >&2; exit 1; }
 
-privileges="$(PGHOST="${PGHOST:-127.0.0.1}" PGUSER="${PGUSER:-$(id -un)}" psql -At -d "$DB" -c "SELECT has_table_privilege('app_rw','app.risk_evaluation_snapshots','UPDATE')::text || '|' || has_table_privilege('app_rw','app.risk_evaluation_snapshots','DELETE')::text || '|' || has_table_privilege('app_rw','app.assets','INSERT')::text")"
+privileges="$(PGHOST="${PGHOST:-127.0.0.1}" PGUSER="${PGUSER:-service-user}" psql -At -d "$DB" -c "SELECT has_table_privilege('app_rw','app.risk_evaluation_snapshots','UPDATE')::text || '|' || has_table_privilege('app_rw','app.risk_evaluation_snapshots','DELETE')::text || '|' || has_table_privilege('app_rw','app.assets','INSERT')::text")"
 [ "$privileges" = "false|false|true" ] || { echo "risk_register_test: 履歴の更新削除禁止または資産登録権限が不正: $privileges" >&2; exit 1; }
 
 PGHOST="${PGHOST:-127.0.0.1}" PGUSER="${PGUSER:-app_rw}" psql -q -v ON_ERROR_STOP=1 -v tenant_token="$TOKEN" -d "$DB" -f - <<'SQL'

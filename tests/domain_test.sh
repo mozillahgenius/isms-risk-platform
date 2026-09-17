@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Acceptance tests for domain constraints (design doc Phase 1 acceptance 2,3,4,5,11,12,13 and risk criteria 1.5).
-# Tests "violations are actually rejected", not "a constraint exists".
+# ドメイン制約の受入試験（設計書 Phase 1 受入 2,3,4,5,11,12,13 と リスク基準 1.5）。
+# 「制約があること」ではなく「違反が実際に拒否されること」を見る。
 set -uo pipefail
 
 DB="${ISMS_DB:-isms_dev}"
@@ -32,13 +32,13 @@ echo "== ドメイン制約の受入試験 =="
 psql -q -v ON_ERROR_STOP=1 "$ADMIN" >/dev/null <<SQL
 BEGIN;
 SELECT app.set_tenant_context('$TOKEN_A');
--- app.risk_criteria is history and cannot be deleted (0017). Align it with upsert instead of recreating.
+-- app.risk_criteria は履歴なので削除できない（0017）。作り直さず upsert で揃える。
 DELETE FROM app.risk_treatments; DELETE FROM app.risk_assessments;
 DELETE FROM app.risk_scenarios;
 DELETE FROM app.control_implementations; DELETE FROM app.deviations;
 DELETE FROM audit.audit_log;
--- A "DOM version no tenant uses", for testing the standard risk criteria.
--- Distributed versions became immutable in 0017, so trigger tests are done on this one.
+-- 標準リスク基準の検査に使う「どのテナントも使っていない DOM 版」。
+-- 配布済み版は 0017 で不変になったので、トリガの試験はこちらで行う。
 INSERT INTO catalog.dom_versions (id, version, released_at, changelog, is_current)
 VALUES ('00000000-0000-0000-0000-0000000000ff','test-unused', now(), '試験用', false)
 ON CONFLICT (version) DO NOTHING;
@@ -85,7 +85,7 @@ BEGIN
   END LOOP; END LOOP;
 END \$\$;"
 
-# Distributed DOM versions became immutable in 0017, so test with a version no tenant uses
+# 配布済み DOM 版は 0017 で不変になったので、どのテナントも使っていない版で試す
 expect_err "14 値を覆わないバンドはトリガが拒否する" "
 UPDATE catalog.risk_criteria_default SET band_accept = '{1,7}'
  WHERE dom_version_id='00000000-0000-0000-0000-0000000000ff';" \
@@ -192,7 +192,7 @@ VALUES ('$TA','check_disable','CHK-X','{}','理由','代替統制',3,'$UA','acti
         now() + interval '10 years');" \
 "violates check constraint"
 
-# Insert two overrides that are each consistent (cover all 14 values) to test the one-at-a-time constraint
+# 上書き自体は整合しているもの（14 値を覆う）を 2 本入れて、同時 1 本の制約を見る
 expect_err "リスク基準の逸脱は 1 テナントに同時 1 本まで" "
 INSERT INTO app.deviations (tenant_id, kind, target_key, override, reason, weight,
   requested_by, status, approved_by, approved_at, expires_at)
@@ -275,7 +275,7 @@ expect_err "不正なまま失効した逸脱を active へ戻せない" "
 DO \$\$
 BEGIN
   DELETE FROM app.deviations WHERE tenant_id='$TA' AND kind='risk_band';
-  -- Create an invalid row via a path that bypasses validation (temporarily disabling the trigger)
+  -- 検査を素通りする経路（トリガを一時的に外す）で不正な行を作る
   ALTER TABLE app.deviations DISABLE TRIGGER trg_validate_deviation_override_ins;
   INSERT INTO app.deviations (id, tenant_id, kind, target_key, override, reason, weight,
     requested_by, status)
@@ -315,7 +315,7 @@ expect_ok "期限切れ処理は override 検査に巻き込まれず走る" "
 DO \$\$
 DECLARE n int;
 BEGIN
-  -- Clear active risk_band deviations left by earlier tests (because of the one-at-a-time constraint)
+  -- 先行のテストが残した active な risk_band 逸脱を畳む（同時 1 本の制約があるため）
   DELETE FROM app.deviations WHERE tenant_id='$TA' AND kind='risk_band';
   INSERT INTO app.deviations (id, tenant_id, kind, target_key, override, reason, weight,
     requested_by, status, approved_by, approved_at, expires_at)
@@ -328,16 +328,16 @@ BEGIN
 END \$\$;"
 
 echo "-- 統制の分類（theme）: 正規形でない値を保存させない（0023）"
-# The definition of "what is this control's classification" was split across 3 places (screen, list, count),
-# and a single value with leading/trailing spaces made them disagree. Pin the value itself to one form.
+# 「その統制の分類は何か」の定義が画面・一覧・件数の 3 か所に分かれていて、
+# 前後に空白の入った値が 1 件在るだけで互いに食い違った。値の側を 1 通りに固定する。
 expect_ok "分類は NULL にできる（分類なしを表す）" "
 INSERT INTO catalog.controls (id, framework_key, code, title_ja, theme)
 VALUES ('99999999-0000-0000-0000-0000000000a1','TEST-FW','T.CANON.NULL','分類なし', NULL);"
 expect_ok "正規形の分類は保存できる" "
 INSERT INTO catalog.controls (id, framework_key, code, title_ja, theme)
 VALUES ('99999999-0000-0000-0000-0000000000a2','TEST-FW','T.CANON.OK','正規形','甲 / 乙');"
-# Use a different code for each row. If reused, without the constraint the first row would be inserted and
-# the rest would fail for a **different reason** (unique violation), making the check look like it worked.
+# code は 1 件ずつ変える。使い回すと、制約が無いときに 1 件目が入ってしまい、
+# 2 件目以降が「一意制約違反」という**別の理由**で落ちて、検査が働いたように見える。
 canon_i=0
 for bad_label in "前後に空白:' 甲 / 乙 '" "空白のみ:'   '" "区切りだけ:' / '" "空文字:''" "空の段:'甲 /  / 乙'"; do
   label="${bad_label%%:*}"; val="${bad_label#*:}"
@@ -471,7 +471,7 @@ BEGIN
     v_tenant := app.set_tenant_context('TOKEN-A-0123456789012345678901234567890123');
     RAISE EXCEPTION '停止した利用者のトークンが通ってしまった';
   EXCEPTION WHEN insufficient_privilege THEN
-    NULL;   -- rejected as expected
+    NULL;   -- 期待どおり拒否された
   END;
   UPDATE app.users SET status='active' WHERE tenant_id='$TA' AND id='$UA';
 END \$\$;"
@@ -520,7 +520,7 @@ expect_ok "1 行改ざんしたコピーでは検証が赤になる（逆向き�
 DO \$\$
 DECLARE v record;
 BEGIN
-  -- Rewrite a single row with owner privileges (app roles have no such path)
+  -- 所有者権限で 1 行だけ書き換える（アプリロールにはこの経路が無い）
   UPDATE audit.audit_log SET action = '改ざん' WHERE chain_seq = 1;
   SELECT * INTO v FROM audit.verify_chain();
   IF v.ok THEN RAISE EXCEPTION '改ざんを検知できていない'; END IF;

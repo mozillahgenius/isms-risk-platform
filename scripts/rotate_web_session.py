@@ -22,26 +22,29 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-# Per-machine differences come in via env. Do not embed host names or paths in code.
-# Operational scripts that span machines take their execution environment via arguments or env.
-ROOT = Path(__file__).resolve().parent.parent
+# 機ごとの違いは env で受ける。既定値は Mac（従来の挙動）のまま。
+#
+# 以前は Mac のパスとラベルがハードコードされていて、RUNTIME では動かなかった。
+# その結果 RUNTIME ではローテーションが一度も回らず、2026-09-08 09:23 JST に
+# セッションが切れて全画面が停止した。機をまたぐ運用スクリプトは
+# 実行環境を引数か env で受ける。
 DB = os.environ.get("ISMS_SESSION_DSN") or os.environ.get("ISMS_DB", "isms_dev")
-PSQL = os.environ.get("ROTATE_PSQL", "psql")
+PSQL = os.environ.get("ROTATE_PSQL", "/opt/homebrew/opt/postgresql@17/bin/psql")
 ENV_PATH = Path(os.environ.get(
     "ISMS_SESSION_ENV_PATH",
-    str(ROOT / "web" / ".env.local"),
+    "/opt/isms-platform/web/.env.local",
 ))
-# How to restart: none (no restart), systemctl (systemctl --user), launchctl (macOS).
-RESTART_MODE = os.environ.get("ISMS_SESSION_RESTART", "none")
-WEB_LABEL = os.environ.get("ISMS_SESSION_SERVICE", "isms-platform-web")
+# 再起動の方法。launchctl（Mac）か systemctl --user（RUNTIME）。
+RESTART_MODE = os.environ.get("ISMS_SESSION_RESTART", "launchctl")
+WEB_LABEL = os.environ.get("ISMS_SESSION_SERVICE", "com.example-org.isms-platform.web")
 LOCAL_URL = os.environ.get("ISMS_SESSION_HEALTH_URL", "http://127.0.0.1:3110/settings")
 SESSION_TTL = os.environ.get("ISMS_SESSION_TTL", "24 hours")
-# The env key to rewrite. Configurable so the mail-send worker token can be rotated by the same
-# mechanism (rather than adding another script).
+# 書き換える env のキー。メール送信ワーカー用トークンも同じ仕組みで回せるように
+# しておく（別スクリプトを増やさない）。
 ENV_KEY = os.environ.get("ISMS_SESSION_ENV_KEY", "ISMS_WEB_TENANT_TOKEN")
-# Tenant and user are carried over from the session row of the token currently in use.
-# Hardcoding them would mean each machine holds its own values, and one would go stale.
-# Connection (app_rw) used to carry over tenant/user. Separate from auth_svc, which issues sessions.
+# テナントと利用者は、いま使っているトークンのセッション行から引き継ぐ。
+# ハードコードすると機ごとに別の値を持つことになり、片方が古くなる。
+# テナント・利用者の引き継ぎに使う接続（app_rw）。セッション発行の auth_svc とは別。
 LOOKUP_DSN = os.environ.get("ISMS_SESSION_LOOKUP_DSN", DB)
 LOOKUP_ROLE = os.environ.get("ISMS_SESSION_LOOKUP_ROLE", "app_rw")
 TENANT_ID = os.environ.get("ISMS_SESSION_TENANT_ID", "")
@@ -53,7 +56,7 @@ def sql_literal(value: str) -> str:
 
 
 def run_psql_as(dsn: str, role: str, sql: str) -> str:
-    """Run psql against an arbitrary connection target and role."""
+    """任意の接続先・ロールで psql を回す。"""
     env = dict(os.environ, PGUSER=role)
     result = subprocess.run(
         [PSQL, "-v", "ON_ERROR_STOP=1", "-Atq", "-d", dsn, "-f", "-"],
@@ -86,20 +89,20 @@ def run_psql(sql: str) -> str:
 
 
 def resolve_identity(current_token: str) -> tuple[str, str]:
-    """Carry over tenant and user from the session row of the token currently in use.
+    """いま使っているトークンのセッション行から、テナントと利用者を引き継ぐ。
 
-    The row remains even after expiry, so it can still be looked up. Explicit env values take precedence.
-    If neither is available, stop rather than guessing and creating a new session.
+    期限切れでも行は残っているので引ける。env で明示されていればそちらを優先する。
+    どちらも取れないときは、当てずっぽうで新しいセッションを作らずに止める。
     """
     if TENANT_ID and USER_ID:
         return TENANT_ID, USER_ID
-    # **Do not read app.sessions directly.** 0005 made app.sessions definer-only,
-    # and none of app_rw / app_ro / auth_svc have table privileges on it
-    # (reading it directly gives permission denied for table sessions).
-    # Instead, set up a context with the token we hold and read
-    # tenant and user from that context. Both are exposed via SECURITY DEFINER functions.
-    # If the token has already expired this fails with invalid session, in which case
-    # they must be given explicitly via env (message below).
+    # **app.sessions を直接読まない。** 0005 で app.sessions は定義者専用と決めて
+    # あり、app_rw / app_ro / auth_svc のいずれにも表の権限が無い
+    # （RUNTIME で permission denied for table sessions を実測）。
+    # 代わりに、いま持っているトークンで文脈を張って、その文脈から
+    # テナントと利用者を読む。両方とも SECURITY DEFINER 関数で公開されている。
+    # トークンが既に切れているとここで invalid session になるので、その場合は
+    # env で明示してもらう（下のメッセージ）。
     row = run_psql_as(
         LOOKUP_DSN,
         LOOKUP_ROLE,
@@ -200,11 +203,11 @@ def wait_until_healthy(timeout: float = 60.0) -> None:
             request = Request(LOCAL_URL, headers={"Cache-Control": "no-cache"})
             with urlopen(request, timeout=3) as response:
                 body = response.read().decode("utf-8", errors="replace")
-                # Treat any message containing the "tenant session" marker as a failure.
-                # What actually appeared on 2026-09-08 was
-                # "a tenant session or trusted user identification is required" (in Japanese);
-                # none of the previous three markers matched it, so the health check
-                # let it through (= it passed even when the session had expired).
+                # 「テナントセッション」を含む文言はすべて失敗とみなす。
+                # 2026-09-08 に実際に出たのは
+                # 「テナントセッションまたは信頼済みの利用者識別が必要です」で、
+                # 従来の3つのマーカーはどれも一致せず、ヘルスチェックを
+                # 素通りしていた（＝切れていても合格と判定していた）。
                 failure_markers = (
                     "テナントセッション",
                     "テナント文脈が無い",
@@ -224,9 +227,9 @@ def wait_until_healthy(timeout: float = 60.0) -> None:
 
 
 def main() -> int:
-    # Do not change the order. **Issue new -> rewrite env -> restart -> health passes -> revoke old.**
-    # If anything fails midway, the old token stays alive and the screens keep working.
-    # Revoking earlier would leave nothing to fall back to on failure.
+    # 順序を崩さない。**新規発行 → env 書き換え → 再起動 → ヘルス合格 → 旧を revoke。**
+    # 途中で失敗しても旧トークンが生きたまま残り、画面は止まらない。
+    # revoke を前に出すと、失敗したときに戻れる先が無くなる。
     old_content, old_token = read_env()
     tenant_id, user_id = resolve_identity(old_token)
     new_token = issue_token(tenant_id, user_id)
@@ -235,10 +238,10 @@ def main() -> int:
         restart_web()
         if RESTART_MODE != "none":
             wait_until_healthy()
-    except Exception as exc:  # noqa: BLE001 - do not take the screens down on failure
-        # **Restore the old token.** Crashing with the new token written would leave
-        # the screens stuck at "tenant session required".
-        # The old token has not been revoked yet, so restoring it brings things back.
+    except Exception as exc:  # noqa: BLE001 - 失敗しても画面を止めない
+        # **旧トークンへ戻す。** 新しいトークンを書いたまま落ちると、
+        # 画面は「テナントセッションが必要です」のまま復旧しない。
+        # 旧トークンはまだ revoke していないので、戻せば生き返る。
         print(f"ローテーションに失敗したため旧トークンへ戻します: {exc}", file=sys.stderr)
         write_env(read_env()[0], old_token)
         try:
@@ -246,7 +249,7 @@ def main() -> int:
         except Exception as restore_exc:  # noqa: BLE001
             print(f"旧トークンでの再起動にも失敗: {restore_exc}", file=sys.stderr)
             return 70
-        # Do not leave the unused new token behind.
+        # 使わなかった新トークンは残さない。
         try:
             revoke_token(new_token)
         except Exception:  # noqa: BLE001

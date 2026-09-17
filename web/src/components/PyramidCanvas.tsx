@@ -4,19 +4,19 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { buildPyramidLayout, nodeRadius, type PyramidNode, type PyramidLink } from '@/lib/pyramidLayout';
 
-// Pyramid of the classification hierarchy (3D).
-// - Height (vertical position) = classification level (level 0 = top rule at the apex; deeper goes lower)
-// - Each level is placed on a circle in the XZ plane, widening with depth = pyramid/cone shape
-// - Directed arrows = direction from upper to lower (upper rule parent -> lower rule child)
-// - Drag to rotate azimuth (left/right) and elevation (up/down) for a 3D view (orthographic projection with no library dependency)
-// - Color = bucket, size = number of connections, fainter toward the back (painter's algorithm)
-// Re-read colors and redraw on the theme change event.
+// 分類階層のピラミッド（3D）。
+// - 高さ（縦位置） = 分類の階層（level 0 = 頂点の上位ルール、深いほど下）
+// - 各階層は XZ 平面の円周上に配置し、深いほど広がる = ピラミッド/円錐状
+// - 有向の矢印 = 上位から下位への向き（上位ルール parent → 下位ルール child）
+// - ドラッグで方位角(左右)・仰角(上下)を回して立体的に見る（依存ライブラリなしの正射影）
+// - 色 = 区分（bucket）、大きさ = 接続本数、奥ほど淡く（painter's algorithm）
+// テーマ切替イベントで色を再取得して再描画する。
 
 export type { PyramidNode, PyramidLink };
 
 const THEME_EVENT = 'isms-theme-change';
 
-// projection: 'ortho' = orthographic (2.5D) / 'persp' = perspective (3D with depth). Coordinates and rotation are shared; only the projection switches.
+// projection: 'ortho'=正射影(2.5D) / 'persp'=透視投影(遠近3D)。座標・回転は共通で、投影のみ切替。
 export function PyramidCanvas({
   nodes,
   links,
@@ -40,21 +40,21 @@ export function PyramidCanvas({
     const wrap = wrapEl;
     const ctx = ctxEl;
 
-    // Layout computation lives in a shared pure function (single source of truth that keeps coordinates identical across flat/persp/webgl).
+    // レイアウト計算は共有の純関数へ（flat/persp/webgl で座標を一致させる単一の真実源）。
     const { N, edges, adj, maxLevel, levelMid, bx, by, bz, maxR, tierRings, LEVEL_GAP } = buildPyramidLayout(nodes, links);
 
-    // ---- Camera (azimuth theta, elevation phi) and projection ----
-    let theta = 0.7;           // left/right rotation
-    let phi = 0.42;            // look-down angle (0 = side view; larger = more from above)
+    // ---- カメラ（方位角 theta・仰角 phi）と投影 ----
+    let theta = 0.7;           // 左右回転
+    let phi = 0.42;            // 見下ろし角（0=真横, 大きいほど上から）
     let W = 0, H = 0, dpr = 1, scale = 1, inited = false;
 
     const sx = new Float64Array(N);
     const sy = new Float64Array(N);
-    const sd = new Float64Array(N); // depth (larger = closer)
+    const sd = new Float64Array(N); // 深度（大きいほど手前）
     const order = new Int32Array(N);
-    const pf = new Float64Array(N).fill(1); // perspective scale factor (persp only: >1 near / <1 far; 1 for ortho)
+    const pf = new Float64Array(N).fill(1); // 透視スケール係数（persp時のみ手前>1/奥<1、ortho時は1）
 
-    // Focal length for perspective projection (relative to scene size). Always clamp the denominator and factor to prevent breakdown near z2 -> FOCAL.
+    // 透視投影の焦点距離（シーンサイズ基準）。分母・係数を必ずクランプして z2→FOCAL 付近の破綻を防ぐ。
     const persp = projection === 'persp';
     const FOCAL = (maxR + LEVEL_GAP) * 3;
     const perspK = (z2: number) =>
@@ -65,12 +65,12 @@ export function PyramidCanvas({
       const cp = Math.cos(phi), sp = Math.sin(phi);
       const cx = W / 2, cy = H / 2;
       for (let i = 0; i < N; i++) {
-        // rotate by theta around the Y axis
+        // Y 軸まわりに theta 回転
         const x1 = bx[i] * ct + bz[i] * st;
         const z1 = -bx[i] * st + bz[i] * ct;
-        // tilt by phi around the X axis (look down)
+        // X 軸まわりに phi 傾ける（見下ろし）
         const y2 = by[i] * cp - z1 * sp;
-        const z2 = by[i] * sp + z1 * cp; // closer is larger
+        const z2 = by[i] * sp + z1 * cp; // 手前ほど大きい
         const k = perspK(z2);
         sx[i] = cx + x1 * scale * k;
         sy[i] = cy - y2 * scale * k;
@@ -78,12 +78,12 @@ export function PyramidCanvas({
         pf[i] = k;
         order[i] = i;
       }
-      // draw back to front (painter's algorithm)
+      // 奥→手前に描く（画家のアルゴリズム）
       order.sort((a, b) => sd[a] - sd[b]);
     }
 
-    // Point list for projecting and drawing level rings (circles in the XZ plane).
-    // Overflowing levels have multiple concentric rings, so the radius is passed in by the caller.
+    // 階層リング（XZ 平面の円）を投影して描くための点列。
+    // 溢れた階層は同心リングを複数持つため、半径は呼び出し側から渡す。
     function tierPath(L: number, R: number): [number, number][] | null {
       const y = (levelMid - L) * LEVEL_GAP;
       const ct = Math.cos(theta), st = Math.sin(theta);
@@ -104,13 +104,13 @@ export function PyramidCanvas({
       return pts;
     }
 
-    // The radius uses the same definition as the layout spacing computation (keeping them separate causes overlap).
-    // Coordinates are mapped to the screen multiplied by scale, so the radius is multiplied by the same scale. A lower bound would
-    // shrink only the spacing and cause overlap, so the drawn radius has no lower bound (clickability is
-    // covered by a hit radius MIN_HIT_R separate from drawing).
+    // 半径はレイアウトの間隔計算と同じ定義を使う（別々に持つと重なる）。
+    // 座標は scale 倍して画面へ写すので、半径も同じ scale を掛ける。下限を置くと
+    // 間隔だけ縮んで重なるため、描画半径には下限を置かない（クリックしやすさは
+    // 描画とは別のヒット半径 MIN_HIT_R で補う）。
     const MIN_HIT_R = 7;
     function radius(i: number) { return nodeRadius(nodes[i].deg) * scale; }
-    // Apparent on-screen radius (larger when closer in perspective). Used for hit testing, node drawing, arrows, and label positions.
+    // 画面上の見かけ半径（透視時は手前ほど大きく）。ヒット判定・ノード描画・矢印・ラベル位置に使う。
     function screenRadius(i: number) { return radius(i) * pf[i]; }
 
     type Palette = { bucket: string[]; line: string; lineHi: string; label: string; halo: string; ring: string; tier: string };
@@ -135,27 +135,27 @@ export function PyramidCanvas({
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     function nodeAt(mx: number, my: number) {
-      // prefer the front (end of order)
+      // 手前（order 末尾）を優先
       for (let k = N - 1; k >= 0; k--) {
         const i = order[k];
         const dx = mx - sx[i], dy = my - sy[i];
-        // Guarantee a minimum size for hit testing only, so nodes can be grabbed even with a small drawn radius.
+        // 描画半径が小さくてもつかめるよう、ヒット判定だけ最小サイズを保証する。
         const rr = Math.max(MIN_HIT_R, screenRadius(i) + 5);
         if (dx * dx + dy * dy <= rr * rr) return i;
       }
       return -1;
     }
 
-    // Opacity by depth (fainter toward the back). sd is normalized roughly to [-maxDepth, maxDepth].
+    // 深度に応じた不透明度（奥ほど淡い）。sd を [-maxDepth, maxDepth] 概算で正規化。
     function depthAlpha(i: number) {
-      const norm = sd[i] / (maxR + 1); // roughly -1.5..1.5
+      const norm = sd[i] / (maxR + 1); // おおよそ -1.5..1.5
       return Math.max(0.35, Math.min(1, 0.72 + norm * 0.28));
     }
 
     function draw() {
       ctx.clearRect(0, 0, W, H);
 
-      // Level rings (faint ellipses that suggest depth), top to bottom
+      // 階層リング（奥行きを感じさせる薄い楕円）を上から下へ
       ctx.lineWidth = 1;
       ctx.strokeStyle = pal.tier;
       for (let L = 0; L <= maxLevel; L++) {
@@ -170,8 +170,8 @@ export function PyramidCanvas({
       }
       ctx.globalAlpha = 1;
 
-      // Merge edges and nodes into one depth list and draw back to front.
-      // (Drawing all edges first would sink front edges beneath back nodes, which is false as a 3D display)
+      // エッジとノードを1つの深度リストにまとめ、奥→手前で描く。
+      // （エッジをまとめて先に描くと前面エッジが背面ノードの下に沈み、3D 表示として嘘になるため）
       const drawEdge = (e: { p: number; c: number; section: string | null }) => {
         const hot = hover >= 0 && (e.p === hover || e.c === hover);
         const a = depthAlpha(e.p) * depthAlpha(e.c);
@@ -183,7 +183,7 @@ export function PyramidCanvas({
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
         ctx.stroke();
-        // Arrow (on the child side, just before it, outside the node radius)
+        // 矢印（child 側の手前・ノード半径の外）
         const dx = x2 - x1, dy = y2 - y1;
         const len = Math.hypot(dx, dy) || 1;
         const ux = dx / len, uy = dy / len;
@@ -208,8 +208,8 @@ export function PyramidCanvas({
         ctx.beginPath();
         ctx.arc(sx[i], sy[i], screenRadius(i), 0, Math.PI * 2);
         if (nodes[i].derived) {
-          // Derived nodes are hollow (fill is the background color, outline only). Distinguishes them at a glance from the filled real entities (DB rows).
-          // Removing the fill lets you see on the ring that it is "a heading, not a DB row".
+          // 導出ノードは白抜き（塗りは背景色・輪郭のみ）。実体（DB の行）の塗りつぶしと一目で区別する。
+          // 塗りを消すとリングの上で「DB の行ではない見出し」だと見て取れる。
           ctx.fillStyle = pal.halo;
           ctx.fill();
           ctx.lineWidth = 1.5;
@@ -226,7 +226,7 @@ export function PyramidCanvas({
           ctx.stroke();
         }
       };
-      // kind: 1 = node, 0 = edge. Edge depth is the midpoint of both ends.
+      // kind: 1=ノード, 0=エッジ。エッジ深度は両端の中点。
       const items: { depth: number; kind: 0 | 1; ref: number }[] = [];
       for (let i = 0; i < N; i++) items.push({ depth: sd[i], kind: 1, ref: i });
       edges.forEach((e, ei) => items.push({ depth: (sd[e.p] + sd[e.c]) / 2, kind: 0, ref: ei }));
@@ -237,7 +237,7 @@ export function PyramidCanvas({
       }
       ctx.globalAlpha = 1;
 
-      // Labels (only the hovered node and its neighbors)
+      // ラベル（hover とその隣接のみ）
       if (hover >= 0) {
         ctx.font = '600 12px -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif';
         ctx.textBaseline = 'middle';
@@ -254,7 +254,7 @@ export function PyramidCanvas({
           ctx.fillStyle = pal.label;
           ctx.fillText(label, tx, ty);
         }
-        // Show the delegation clauses involving the hovered node at edge midpoints
+        // hover ノードに関わる委任の条項をエッジ中点に表示
         ctx.globalAlpha = 1;
         for (const e of edges) {
           if ((e.p === hover || e.c === hover) && e.section) {
@@ -275,8 +275,8 @@ export function PyramidCanvas({
     }
 
     function computeScale() {
-      // Choose scale so the max radius plus margin fits in the frame
-      const margin = persp ? 150 : 90; // In perspective the front bulges, so use a thicker margin to prevent clipping
+      // 最大半径＋余白が枠に収まるよう scale を決める
+      const margin = persp ? 150 : 90; // 透視時は手前が膨らむため余白を厚めに取りクリッピングを防ぐ
       const usable = Math.min(W, H) - margin;
       scale = Math.max(0.2, Math.min(1.4, usable / (maxR * 2 + LEVEL_GAP)));
     }
@@ -325,8 +325,8 @@ export function PyramidCanvas({
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
         if (moved) {
           theta += dx * 0.01;
-          // Allowing the lower bound of the depression angle near 0 flattens level rings sideways into lines, so nodes on the same ring
-          // overlap completely in projection. Stop at an angle where rings still look like ellipses.
+          // 俯角の下限を 0 付近まで許すと、階層リングが真横＝線に潰れて同一リングの
+          // ノードが投影上で完全に重なる。リングが楕円として見える角度までに留める。
           phi = Math.max(0.12, Math.min(1.25, phi + dy * 0.006));
           downX = x; downY = y;
           scheduleDraw();
@@ -345,7 +345,7 @@ export function PyramidCanvas({
         router.push(`/n/${nodes[downIdx].id}`);
       }
       dragging = false; downIdx = -1;
-      try { canvas.releasePointerCapture(e.pointerId); } catch { /* ignore if not captured */ }
+      try { canvas.releasePointerCapture(e.pointerId); } catch { /* capture 済みでない場合は無視 */ }
       canvas.style.cursor = hover >= 0 ? 'pointer' : 'grab';
     }
     function onLeave() {
@@ -364,7 +364,7 @@ export function PyramidCanvas({
 
     canvas.style.cursor = 'grab';
     if (!inited) resize();
-    // Even with reduced-motion, the initial render is a still image (rotation only on user interaction).
+    // reduced-motion でも初期は静止画で描かれる（回転はユーザー操作時のみ）。
     void prefersReduced;
 
     return () => {

@@ -80,6 +80,24 @@ describe('ISMSナビゲーションの階層', () => {
   });
 });
 
+describe('AI分析の範囲（2026-09-13）', () => {
+  it('ISMSメニューにAI分析があり、ISMSモードのままISO 27001の範囲で開く', () => {
+    const ismsItems = navigationForMode('isms').flatMap((section) => section.items);
+    expect(ismsItems).toContainEqual(expect.objectContaining({ href: '/analysis?mode=isms', label: 'AI分析' }));
+    expect(resolveAppMode('/analysis', 'mode=isms')).toBe('isms');
+    expect(frameworkForMode(undefined, 'isms')).toBe('ISO27001:2022');
+  });
+
+  it('リスクマネジメント側のAI分析は全体のまま、モード切替は同じ画面に留まる', () => {
+    const riskItems = navigationForMode('risk').flatMap((section) => section.items);
+    expect(riskItems).toContainEqual(expect.objectContaining({ href: '/analysis?mode=risk', label: 'AI分析' }));
+    expect(resolveAppMode('/analysis')).toBe('risk');
+    expect(frameworkForMode(undefined, 'risk')).toBeUndefined();
+    expect(modeDestination('/analysis', 'mode=risk', 'isms')).toBe('/analysis?mode=isms');
+    expect(modeDestination('/analysis', 'mode=isms', 'risk')).toBe('/analysis?mode=risk');
+  });
+});
+
 describe('ナビゲーションの現在地', () => {
   it('セグメント境界で現在地を判定する', () => {
     expect(isRouteActive('/operations/device-control', { href: '/operations', label: '運用' })).toBe(false);

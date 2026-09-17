@@ -1,18 +1,18 @@
-// Reading and validating CSV for initial data import (design doc 2026-09-11 §8).
-// Only pure functions that do not touch the DB live here (to make them easy to test and to keep reading and writing separate).
+// 初期データの取り込み（設計書 2026-09-11 §8）の CSV の読み取りと検査。
+// DB に触らない純粋な関数だけを置く（試験しやすくし、読み取りと書き込みを混ぜないため）。
 //
-// Of the safety design (§8.3), the parts handled here:
-//   - Size limits (file size and row count). The values are provisional and will be revisited by measuring real imports (§0.2 "decide numbers by measurement").
-//   - CSV formula injection protection: cells starting with = + - @ tab or newline are rejected
-//     (because they would act as formulas if the imported values were later exported to and opened in a spreadsheet). Do not silently rewrite; return a row error.
-//   - Checks for required columns, unknown columns, types, value ranges, lengths, and duplicates within the file.
-// Duplicates against existing data, reference resolution (asset key -> asset), and writes are done in the server actions (they need the DB).
+// 安全設計（§8.3）のうち、ここで持つもの:
+//   - 大きさの上限（ファイルの大きさ・行数）。値は仮置きで、実際の取り込みで測って見直す（§0.2「数値は実測で決める」）。
+//   - CSV 数式インジェクション対策: 先頭が = + - @ タブ 改行 のセルは受け付けない
+//     （取り込んだ値を後で表計算に書き出して開いたとき、式として動くため）。黙って書き換えず、行の誤りとして返す。
+//   - 必須列・知らない列・型・値の範囲・長さ・ファイルの中の重複の検査。
+// 既存データとの重複・参照の解決（資産キー → 資産）・書き込みはサーバーアクション側で行う（DB が要る）。
 
 export const IMPORT_LIMITS = { maxBytes: 1_000_000, maxRows: 2_000, maxColumns: 50, maxIssues: 200 } as const;
 
 /**
- * Cap the number of errors shown (even within 1 MB a file can produce a huge number of errors, so do not let processing and the screen balloon).
- * Anything beyond the cap is reported only as a count on one line.
+ * 誤りを見せる件数に上限を付ける（1 MB 以内でも誤りを大量に作れるので、処理と画面を膨らませない）。
+ * 超えた分は件数だけを 1 行で伝える。
  */
 export function capIssues(issues: RowIssue[]): RowIssue[] {
   if (issues.length <= IMPORT_LIMITS.maxIssues) return issues;
@@ -24,7 +24,7 @@ export function capIssues(issues: RowIssue[]): RowIssue[] {
 
 export type ImportKind = 'assets' | 'risks' | 'departments' | 'assignments' | 'policies';
 
-/** A row error. row is the data row number excluding the header (1-based). 0 means an error in the whole file or the header. */
+/** 行の誤り。row は見出しを除いたデータの行番号（1 始まり）。0 はファイル全体・見出しの誤り。 */
 export type RowIssue = { row: number; column?: string; message: string };
 
 export type CsvParseResult =
@@ -32,8 +32,8 @@ export type CsvParseResult =
   | { ok: false; error: string };
 
 /**
- * Read RFC 4180 CSV (double-quoted cells, newlines inside cells, "" escapes).
- * Strip a leading BOM (added by spreadsheet apps' UTF-8 export). Skip rows with no content.
+ * RFC 4180 の CSV を読む（ダブルクォートで囲んだセル・セルの中の改行・"" のエスケープ）。
+ * 先頭の BOM は外す（表計算ソフトの UTF-8 書き出しに付く）。中身が空の行は読み飛ばす。
  */
 export function parseCsv(text: string): CsvParseResult {
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
@@ -42,8 +42,8 @@ export function parseCsv(text: string): CsvParseResult {
   let cell = '';
   let quoted = false;
   let started = false;
-  // Whether we just closed a quoted cell. A value where something other than a delimiter (, or newline) follows the closing quote is an error rather than silently reinterpreted
-  // (reading "abc"def as abcdef would change the user's value without them knowing).
+  // 引用符で囲んだセルを閉じた直後か。閉じた後に区切り（, 改行）以外が続く値は、黙って読み替えず誤りにする
+  // （"顧客"台帳 を 顧客台帳 と読むと、利用者の値が知らないうちに変わる）。
   let justClosed = false;
   for (let i = 0; i < src.length; i += 1) {
     const ch = src[i];
@@ -60,8 +60,8 @@ export function parseCsv(text: string): CsvParseResult {
     }
     justClosed = false;
     if (ch === '"') {
-      // A quote in the middle of a cell is read as a plain character, as spreadsheet apps do (so that a value like =HYPERLINK("...") is
-      // reported clearly as "a value that looks like a formula" rather than as a read error).
+      // セルの途中の引用符は、表計算ソフトと同じくただの文字として読む（=HYPERLINK("…") のような値を、
+      // 読み取りの誤りではなく「式に見える値」として分かりやすく返すため）。
       if (cell !== '') { cell += ch; started = true; continue; }
       quoted = true;
       started = true;
@@ -96,14 +96,14 @@ export function parseCsv(text: string): CsvParseResult {
 }
 
 /**
- * Whether the value would act as a formula when opened in a spreadsheet: it starts with a tab or newline, or its first character after leading whitespace is = + - @.
- * Values are trimmed on save, so " =..." is also judged in its trimmed form (so prefixing whitespace cannot slip past the check).
+ * 表計算で開いたときに式として動く値か。先頭がタブ・改行か、先頭の空白を除いた最初の文字が = + - @。
+ * 保存するときは前後の空白を除くので、「 =…」も除いた後の形で判定する（空白を前置きして判定をすり抜けさせない）。
  */
 export function looksLikeFormula(value: string): boolean {
   return /^[\t\r\n]/.test(value) || /^\s*[=+\-@]/.test(value);
 }
 
-/** A yes/no column. Empty means no. */
+/** 「はい／いいえ」の列。空は「いいえ」。 */
 function yesNo(value: string): boolean | null {
   const v = value.trim().toLowerCase();
   if (v === '' || v === 'no' || v === 'いいえ' || v === '0' || v === 'false') return false;
@@ -113,14 +113,14 @@ function yesNo(value: string): boolean | null {
 
 type ColumnSpec = { name: string; required: boolean; max: number };
 
-/** Validate the header and each row with common rules, and return them as column name -> value maps. */
+/** 列の見出しと各行を共通の決まりで検査し、列名 → 値の対応にして返す。 */
 function readRows(
   header: string[],
   rows: { row: number; cells: string[] }[],
   columns: readonly ColumnSpec[],
   issues: RowIssue[],
 ): { row: number; values: Record<string, string> }[] {
-  // A file with too many columns is returned as a single error without per-column checks (so it cannot generate a huge number of errors).
+  // 列が多すぎるファイルは、列ごとの検査をせずに 1 件の誤りで返す（誤りを大量に作らせない）。
   if (header.length > IMPORT_LIMITS.maxColumns) {
     issues.push({ row: 0, message: `列が多すぎます（${IMPORT_LIMITS.maxColumns} 列まで）` });
     return [];
@@ -166,7 +166,7 @@ function readRows(
   return out;
 }
 
-// ---- Assets ------------------------------------------------------------------------
+// ---- 資産 -------------------------------------------------------------------------
 export const ASSET_COLUMNS = [
   { name: 'asset_key', required: true, max: 80 },
   { name: 'name', required: true, max: 200 },
@@ -181,7 +181,7 @@ export type AssetImportRow = {
   description: string; iso: boolean;
 };
 
-/** Validate the assets CSV. classifications are the default classifications (keys of catalog.asset_classes_default). */
+/** 資産の CSV を検査する。classifications は分類の既定値（catalog.asset_classes_default のキー）。 */
 export function validateAssets(
   header: string[], rows: { row: number; cells: string[] }[], classifications: readonly string[],
 ): { rows: AssetImportRow[]; issues: RowIssue[] } {
@@ -214,13 +214,13 @@ export function validateAssets(
   return { rows: out, issues };
 }
 
-// ---- Departments -------------------------------------------------------------------
-// Departments are identified by name (names have no unique constraint, so a name matching an existing one is an error; design decision 2026-09-12).
+// ---- 部署 -------------------------------------------------------------------------
+// 部署は名前で見分ける（名前に一意制約が無いので、既存と同じ名前は誤りにする。2026-09-12 goto-twin 決定）。
 export const DEPARTMENT_COLUMNS = [
   { name: 'name', required: true, max: 200 },
-  // Name of the parent department. Refers to a registered department or a department in the same file. Empty means top level.
+  // 上位の部署の名前。登録済みの部署か、同じファイルの中の部署を指す。空は最上位。
   { name: 'parent_name', required: false, max: 200 },
-  // Email address of the manager. Limited to active users. Empty means undecided.
+  // 責任者のメールアドレス。在籍中の利用者に限る。空は未定。
   { name: 'owner_email', required: false, max: 320 },
 ] as const satisfies readonly ColumnSpec[];
 
@@ -256,7 +256,7 @@ export function validateDepartments(
     }
     if (!bad) out.push({ row, name: values.name, parentName, ownerEmail });
   }
-  // Rows whose parent chain within the file leads back to themselves (cycles) are errors.
+  // ファイルの中で上位をたどって自分に戻る（循環する）行は誤りにする。
   const byName = new Map(out.map((d) => [d.name, d]));
   const cyclic = new Set<number>();
   for (const d of out) {
@@ -272,7 +272,7 @@ export function validateDepartments(
   return { rows: out.filter((d) => !cyclic.has(d.row)), issues };
 }
 
-/** Order parents first (so that parent departments in the same file are created first). Assumes validateDepartments has already removed cycles. */
+/** 上位を先にして並べる（同じファイルの上位の部署を先に作るため）。循環は validateDepartments が除いている前提。 */
 export function orderDepartments(rows: DepartmentImportRow[]): DepartmentImportRow[] {
   const byName = new Map(rows.map((d) => [d.name, d]));
   const done = new Set<string>();
@@ -288,8 +288,8 @@ export function orderDepartments(rows: DepartmentImportRow[]): DepartmentImportR
   return out;
 }
 
-// ---- Membership assignment ---------------------------------------------------------
-// Set the same department on all non-revoked membership rows of an existing user. Roles are not written. Users are not created.
+// ---- 所属の割り当て ----------------------------------------------------------------
+// 既にいる利用者の、失効していない所属の行すべてに同じ部署を入れる。役割は書かない。利用者は作らない。
 export const ASSIGNMENT_COLUMNS = [
   { name: 'email', required: true, max: 320 },
   { name: 'department_name', required: true, max: 200 },
@@ -323,14 +323,14 @@ export function validateAssignments(
   return { rows: out, issues };
 }
 
-// ---- Policies (up to draft) --------------------------------------------------------
-// One row is one draft version of one policy (design decision 2026-09-12). With catalog_key it goes to the standard policy; without it, by title
-// a version is added to an existing policy (a new policy is created if none matches). No version number, approval, or effective date (approval and activation only via the screen).
+// ---- 規程（下書きまで） -------------------------------------------------------------
+// 1 行が 1 つの規程の下書きの版 1 つ（2026-09-12 goto-twin 決定）。catalog_key があれば標準規程に、無ければ題名で
+// 既存の規程に版を足す（一致が無ければ規程を新しく作る）。版番号・承認・有効日は持たない（承認と有効化は画面の経路だけ）。
 export const POLICY_COLUMNS = [
   { name: 'catalog_key', required: false, max: 80 },
-  // Required on rows with an empty catalog_key (look up an existing policy by title, and create one with that title if none exists).
+  // catalog_key が空の行では必須（題名で既存の規程を探し、無ければその題名で作る）。
   { name: 'title', required: false, max: 200 },
-  // The body limit is the same as the screen's draft (createPolicyDraft).
+  // 本文の上限は画面の下書き（createPolicyDraft）と同じ。
   { name: 'body_md', required: true, max: 200_000 },
 ] as const satisfies readonly ColumnSpec[];
 
@@ -351,8 +351,8 @@ export function validatePolicies(
       issues.push({ row, column: 'title', message: 'catalog_key が空の行は、題名が必須です' });
       continue;
     }
-    // Two rows must not point to the same policy (it would be undecided which body becomes the draft). Title overlaps are checked among rows without catalog_key
-    // (whether a catalog_key row and a title row hit the same policy is checked against the registered policies).
+    // 同じ規程を 2 行で指さない（どちらの本文を下書きにするか決まらない）。題名での重なりは catalog_key の無い行どうしで見る
+    // （catalog_key の行と題名の行が同じ規程に当たるかは、登録済みの規程と突き合わせて確かめる）。
     const seen = catalogKey ? keys : titles;
     const id = catalogKey || title;
     const first = seen.get(id);
@@ -366,7 +366,7 @@ export function validatePolicies(
   return { rows: out, issues };
 }
 
-// ---- Risks -------------------------------------------------------------------------
+// ---- リスク -----------------------------------------------------------------------
 export const RISK_FRAMES = ['管理可能性', '精度', 'スピード'] as const;
 
 export const RISK_COLUMNS = [
@@ -377,7 +377,7 @@ export const RISK_COLUMNS = [
   { name: 'measure', required: true, max: 400 },
   { name: 'frame', required: true, max: 30 },
   { name: 'summary', required: true, max: 4000 },
-  // Keys of related assets. Separate multiple keys with a semicolon (;) or an ideographic comma. Refers to registered assets, not assets in the same file.
+  // 関連する資産のキー。複数はセミコロン（;）か読点（、）で区切る。同じファイルの資産ではなく、登録済みの資産を指す。
   { name: 'asset_keys', required: false, max: 4000 },
   { name: 'iso27001', required: false, max: 10 },
 ] as const satisfies readonly ColumnSpec[];

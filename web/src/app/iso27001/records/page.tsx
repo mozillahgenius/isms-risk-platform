@@ -15,10 +15,10 @@ import {
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'ISMS の運用記録' };
 
-// Internal audit (9.2), findings and corrective actions (10.2), management review (9.3), and control effectiveness evaluation (9.1) are
-// entered from the screen (stage 1 of design doc 2026-09-11 §5). Stage 2 added information security objectives (6.2),
-// supplier evaluation (A.5.19-5.22), manual evidence, and finding exceptions. Counts mean the same as on the stage screens:
-// plans are not counted as implemented (only those with an implementation/meeting/evaluation date up to today are implemented).
+// 内部監査（9.2）・指摘と是正処置（10.2）・マネジメントレビュー（9.3）・統制の有効性評価（9.1）を
+// 画面から入力する（設計書 2026-09-11 §5 の第 1 段）。第 2 段で情報セキュリティ目的（6.2）・
+// 委託先評価（A.5.19〜5.22）・手作業の証跡・指摘の例外を足した。数の意味は段階の画面と揃える:
+// 計画は実施として数えない（実施日・開催日・評価日が今日までのものだけが実施済み）。
 
 const ERROR_LABEL: Record<string, string> = {
   forbidden: 'この記録を書く役割がありません',
@@ -132,7 +132,7 @@ const RESULT_LABEL: Record<string, string> = {
   effective: '有効', partially_effective: '一部有効', not_effective: '有効でない',
 };
 
-/** Tomorrow (JST). Used as the minimum for date fields where the server requires "after today". */
+/** 明日（JST）。サーバーが「今日より後」を求める日付欄の下限に使う。 */
 function tomorrow(): string {
   return new Date(Date.now() + 9 * 3600_000 + 86_400_000).toISOString().slice(0, 10);
 }
@@ -154,7 +154,7 @@ function PersonSelect({ name, people, required, placeholder }: { name: string; p
   );
 }
 
-/** When the list hits the limit, say so (do not silently hide older records). */
+/** 一覧が上限に届いたら、そう書く（黙って古い記録を隠さない）。 */
 function Truncated({ shown, limit }: { shown: number; limit: number }) {
   if (shown < limit) return null;
   return (
@@ -180,10 +180,10 @@ export default async function IsmsRecordsPage({
 }) {
   const sp = await searchParams;
   const mode = sp.mode === 'isms' || sp.mode === 'risk' ? sp.mode : 'isms';
-  // Read records only when the user and role are verified (do not show audit records, minutes, or exception reasons to an unknown person).
+  // 本人と役割が確かめられたときだけ記録を読む（監査の記録・議事・例外の理由を、誰か分からない人に出さない）。
   const actor = await getRecordsActor();
   const role = actor?.role ?? null;
-  // The user viewing the screen (to align server checks with what the screen shows, e.g. not showing the decision field to the requester).
+  // 画面を開いている本人（申請者本人には判断の欄を出さない、など、サーバーの検査と画面の出し分けをそろえるため）。
   const actorId = actor?.userId ?? null;
   const identified = role !== null && role !== 'none';
   const result = identified ? await getRecordsWorkspace() : null;
@@ -203,7 +203,7 @@ export default async function IsmsRecordsPage({
         </p>
         <p className="mt-2 text-[12px] text-[var(--fg-2)]">
           あなたの役割: <b>{role ? ROLE_LABEL[role] ?? role : '確認できません'}</b>
-          <span className="ms-2 text-[var(--muted)]">書ける記録は役割で決まります（保存のときにも確かめます）。</span>
+          <span className="ml-2 text-[var(--muted)]">書ける記録は役割で決まります（保存のときにも確かめます）。</span>
         </p>
       </div>
 
@@ -227,7 +227,7 @@ export default async function IsmsRecordsPage({
         </div>
       ) : (
         <>
-          {/* ---- Internal audit ---- */}
+          {/* ---- 内部監査 ---- */}
           <section id="audits" className="card p-5">
             <h2 className="text-[16px] font-semibold">内部監査（9.2）</h2>
             <Truncated shown={data.audits.length} limit={LIST_LIMIT.audits} />
@@ -281,7 +281,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Findings ---- */}
+          {/* ---- 指摘 ---- */}
           <section id="findings" className="card p-5">
             <h2 className="text-[16px] font-semibold">指摘・不適合（10.2）</h2>
             <Truncated shown={data.findings.length} limit={LIST_LIMIT.findings} />
@@ -353,7 +353,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Corrective actions ---- */}
+          {/* ---- 是正処置 ---- */}
           <section id="corrective" className="card p-5">
             <h2 className="text-[16px] font-semibold">是正処置（10.2）</h2>
             <Truncated shown={data.correctiveActions.length} limit={LIST_LIMIT.correctiveActions} />
@@ -422,7 +422,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Management review ---- */}
+          {/* ---- マネジメントレビュー ---- */}
           <section id="reviews" className="card p-5">
             <h2 className="text-[16px] font-semibold">マネジメントレビュー（9.3）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">年度に 1 回。開催日が今日までに入り、議事がある記録を経営層が承認します。承認は議事の中身に結び付くので、議事を直すと改めて承認が要ります。</p>
@@ -490,7 +490,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Effectiveness evaluation ---- */}
+          {/* ---- 有効性評価 ---- */}
           <section id="effectiveness" className="card p-5">
             <h2 className="text-[16px] font-semibold">統制の有効性評価（9.1）</h2>
             <Truncated shown={data.effectiveness.length} limit={LIST_LIMIT.effectiveness} />
@@ -550,7 +550,7 @@ export default async function IsmsRecordsPage({
               </details>
             )}
           </section>
-          {/* ---- Information security objectives ---- */}
+          {/* ---- 情報セキュリティ目的 ---- */}
           <section id="objectives" className="card p-5">
             <h2 className="text-[16px] font-semibold">情報セキュリティ目的（6.2）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">測れる目的だけを立てます。測り方は必須。達成の評価は実測値と一緒に残します。</p>
@@ -610,7 +610,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Supplier evaluation ---- */}
+          {/* ---- 委託先評価 ---- */}
           <section id="vendors" className="card p-5">
             <h2 className="text-[16px] font-semibold">委託先評価（A.5.19〜5.22）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -637,7 +637,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{v.last_result ? VENDOR_RESULT_LABEL[v.last_result] ?? v.last_result : '—'}</td>
                         <td className="px-3 py-2">
                           {v.next_due_on ?? '—'}
-                          {v.next_due_on && v.next_due_on < today() && <span className="ms-1 badge badge-danger">期限切れ</span>}
+                          {v.next_due_on && v.next_due_on < today() && <span className="ml-1 badge badge-danger">期限切れ</span>}
                         </td>
                         <td className="px-3 py-2">{v.assessment_count}</td>
                       </tr>
@@ -670,7 +670,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Evidence ---- */}
+          {/* ---- 証跡 ---- */}
           <section id="evidences" className="card p-5">
             <h2 className="text-[16px] font-semibold">証跡</h2>
             <Truncated shown={data.evidences.length} limit={LIST_LIMIT.evidences} />
@@ -697,7 +697,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{e.kind === 'manual' ? '手作業' : e.kind === 'auto' ? '自動' : '半自動'}</td>
                         <td className="px-3 py-2">
                           {e.freshness_days} 日
-                          {e.stale ? <span className="ms-1 badge badge-danger">古い</span> : e.state === 'valid' ? <span className="ms-1 badge badge-done">有効</span> : <span className="ms-1 badge badge-on-hold">{e.state}</span>}
+                          {e.stale ? <span className="ml-1 badge badge-danger">古い</span> : e.state === 'valid' ? <span className="ml-1 badge badge-done">有効</span> : <span className="ml-1 badge badge-on-hold">{e.state}</span>}
                         </td>
                       </tr>
                     ))}
@@ -720,7 +720,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Exceptions ---- */}
+          {/* ---- 例外 ---- */}
           <section id="exceptions" className="card p-5">
             <h2 className="text-[16px] font-semibold">指摘の例外</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -746,7 +746,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{x.reason}</td>
                         <td className="px-3 py-2">{x.compensating_control}</td>
                         <td className="px-3 py-2">{x.approver_name ?? '—'}<div className="text-[11px] text-[var(--muted)]">{x.approved_at}</div></td>
-                        <td className="px-3 py-2">{x.expires_at}{x.expired && <span className="ms-1 badge badge-danger">期限切れ</span>}</td>
+                        <td className="px-3 py-2">{x.expires_at}{x.expired && <span className="ml-1 badge badge-danger">期限切れ</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -774,7 +774,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Organizational issues (4.1) ---- */}
+          {/* ---- 組織の課題（4.1） ---- */}
           <section id="context" className="card p-5">
             <h2 className="text-[16px] font-semibold">組織の課題（4.1）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -797,7 +797,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{CONTEXT_KIND_LABEL[c.kind] ?? c.kind}</td>
                         <td className="px-3 py-2">
                           {c.title}
-                          {c.status === 'retired' && <span className="ms-1 badge badge-archived">取り下げ</span>}
+                          {c.status === 'retired' && <span className="ml-1 badge badge-archived">取り下げ</span>}
                           {c.description && <div className="text-[11px] text-[var(--muted)]">{c.description}</div>}
                         </td>
                         <td className="px-3 py-2">{c.isms_impact}</td>
@@ -868,7 +868,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Interested parties (4.2) ---- */}
+          {/* ---- 利害関係者（4.2） ---- */}
           <section id="parties" className="card p-5">
             <h2 className="text-[16px] font-semibold">利害関係者（4.2）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -891,7 +891,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{PARTY_CATEGORY_LABEL[p.category] ?? p.category}</td>
                         <td className="px-3 py-2">
                           {p.name}
-                          {p.status === 'retired' && <span className="ms-1 badge badge-archived">取り下げ</span>}
+                          {p.status === 'retired' && <span className="ml-1 badge badge-archived">取り下げ</span>}
                         </td>
                         <td className="px-3 py-2">{p.requirements}</td>
                         <td className="px-3 py-2">{p.addressed_in_isms || <span className="text-[var(--muted)]">未決定</span>}</td>
@@ -962,7 +962,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Legal, regulatory, and contractual requirements (A.5.31) ---- */}
+          {/* ---- 法令・規制・契約上の要求事項（A.5.31） ---- */}
           <section id="legal" className="card p-5">
             <h2 className="text-[16px] font-semibold">法令・規制・契約上の要求事項（A.5.31）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -986,7 +986,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">{LEGAL_KIND_LABEL[l.kind] ?? l.kind}</td>
                         <td className="px-3 py-2">
                           {l.title}
-                          {l.status === 'retired' && <span className="ms-1 badge badge-archived">取り下げ</span>}
+                          {l.status === 'retired' && <span className="ml-1 badge badge-archived">取り下げ</span>}
                           {l.source_ref && <div className="text-[11px] text-[var(--muted)]">{l.source_ref}</div>}
                         </td>
                         <td className="px-3 py-2">{l.requirement}</td>
@@ -1001,7 +1001,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">
                           {l.next_review_on ?? '—'}
                           {l.status === 'active' && l.next_review_on && l.next_review_on < today() && (
-                            <span className="ms-1 badge badge-danger">見直し期限切れ</span>
+                            <span className="ml-1 badge badge-danger">見直し期限切れ</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -1009,7 +1009,7 @@ export default async function IsmsRecordsPage({
                             <div className="flex flex-col gap-2">
                               <form action={assessLegalRequirement} className="flex flex-col gap-1">{hidden}
                                 <input type="hidden" name="id" value={l.id} />
-                                {/* Use the current result as the default (so someone meaning to fix only the review date does not overwrite it with another result). If not yet evaluated, make them choose. */}
+                                {/* 今の結果を初期値にする（見直し日だけ直すつもりで、別の結果に上書きしないように）。未評価なら選ばせる。 */}
                                 <select className="input" name="compliance_status" required
                                   defaultValue={l.compliance_status === 'not_assessed' ? '' : l.compliance_status}>
                                   <option value="" disabled>結果を選ぶ</option>
@@ -1096,7 +1096,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Business continuity plans and tests (A.5.29 / A.5.30) ---- */}
+          {/* ---- 事業継続の計画と試験（A.5.29 / A.5.30） ---- */}
           <section id="continuity" className="card p-5">
             <h2 className="text-[16px] font-semibold">事業継続の計画と試験（A.5.29 / A.5.30）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -1118,7 +1118,7 @@ export default async function IsmsRecordsPage({
                       <tr key={c.id} className={`border-b border-[var(--border)] align-top last:border-0 ${c.status === 'retired' ? 'text-[var(--muted)]' : ''}`}>
                         <td className="px-3 py-2">
                           {c.title}
-                          {c.status === 'retired' && <span className="ms-1 badge badge-archived">取り下げ</span>}
+                          {c.status === 'retired' && <span className="ml-1 badge badge-archived">取り下げ</span>}
                           <div className="break-all text-[11px] text-[var(--muted)]">所在: {c.procedure_location}</div>
                           <div className="text-[11px] text-[var(--muted)]">担当: {c.owner_name ?? '未定'}</div>
                         </td>
@@ -1135,7 +1135,7 @@ export default async function IsmsRecordsPage({
                         <td className="px-3 py-2">
                           {c.next_test_due ?? '—'}
                           {c.status === 'active' && c.next_test_due && c.next_test_due < today() && (
-                            <span className="ms-1 badge badge-danger">期限切れ</span>
+                            <span className="ml-1 badge badge-danger">期限切れ</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -1252,7 +1252,7 @@ export default async function IsmsRecordsPage({
                   <tbody>
                     {data.continuityTests.map((t) => (
                       <tr key={t.id} className="border-b border-[var(--border)] align-top last:border-0">
-                        <td className="px-3 py-2">{t.tested_on}{t.tested_on > today() && <span className="ms-1 badge badge-on-hold">予定</span>}</td>
+                        <td className="px-3 py-2">{t.tested_on}{t.tested_on > today() && <span className="ml-1 badge badge-on-hold">予定</span>}</td>
                         <td className="px-3 py-2">{t.plan_title}</td>
                         <td className="px-3 py-2">{CONTINUITY_METHOD_LABEL[t.method] ?? t.method}</td>
                         <td className="px-3 py-2">{CONTINUITY_RESULT_LABEL[t.result] ?? t.result}</td>
@@ -1270,7 +1270,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Technical vulnerabilities (A.8.8) ---- */}
+          {/* ---- 技術的脆弱性（A.8.8） ---- */}
           <section id="vulnerabilities" className="card p-5">
             <h2 className="text-[16px] font-semibold">技術的脆弱性（A.8.8）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
@@ -1310,7 +1310,7 @@ export default async function IsmsRecordsPage({
                             {v.detected_on}
                             <div className="text-[11px]">
                               期限: {v.due_date ?? '—'}
-                              {open && v.due_date && v.due_date < today() && <span className="ms-1 badge badge-danger">期限切れ</span>}
+                              {open && v.due_date && v.due_date < today() && <span className="ml-1 badge badge-danger">期限切れ</span>}
                             </div>
                           </td>
                           <td className="px-3 py-2">
@@ -1373,7 +1373,7 @@ export default async function IsmsRecordsPage({
             )}
           </section>
 
-          {/* ---- Change requests and approval (A.8.32) ---- */}
+          {/* ---- 変更の申請と承認（A.8.32） ---- */}
           <section id="changes" className="card p-5">
             <h2 className="text-[16px] font-semibold">変更の申請と承認（A.8.32）</h2>
             <p className="mt-1 text-[12px] text-[var(--muted)]">

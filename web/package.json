@@ -2,14 +2,13 @@
   "name": "isms-platform-web",
   "version": "0.1.0",
   "private": true,
-  "license": "MPL-2.0",
   "engines": {
     "node": ">=20.9"
   },
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 3110",
+    "dev": "next dev -H 0.0.0.0 -p 3110",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 -p 3110",
+    "start": "next start -H 0.0.0.0 -p 3110",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
-"""Run the standard checks (checker).
+"""標準チェックを実行する（checker）。
 
-  python3 scripts/checker.py --token <session token> [--db isms_dev]
-  python3 scripts/checker.py --token <...> --skip-verify   # run only, without verified results (verification is the default)
+  python3 scripts/checker.py --token <セッショントークン> [--db isms_dev]
+  python3 scripts/checker.py --token <...> --skip-verify   # 検証済みの結果を使わず実行だけ（既定は検証する）
 
-## What it does
+## 何をするか
 
-1. **Verification phase (in an isolated DB)**
-   For each check, confirm both that
-     a. running query_sql with nothing done yields 0 violations (= the precondition holds), and
-     b. running negative_fixture and then query_sql yields violations (= the check fails).
-   **Only when both a and b hold do we count "the check works".**
-   Looking at b alone mistakes a check that was already failing for a working one.
+1. **検証フェーズ（隔離した DB で行う）**
+   チェックごとに、
+     a. 何もしない状態で query_sql を流し、違反が 0 件であること（＝前提が成立している）
+     b. negative_fixture を流してから query_sql を流し、違反が出ること（＝検査が落ちる）
+   の両方を確かめる。**a と b の両方が成り立って初めて「その検査は機能している」**と数える。
+   b だけを見ると、元から落ちている検査を「機能している」と誤認する。
 
-2. **Execution phase (the target DB)**
-   Establish the tenant context and run query_sql with the **read-only role (app_ro)** to count violations.
-   Catalog SQL can be tampered with, so never run it over a connection that can write.
+2. **実行フェーズ（対象の DB）**
+   テナント文脈を確立し、**読み取り専用ロール（app_ro）**で query_sql を流して違反数を数える。
+   カタログの SQL は書き換えられる余地があるので、書ける接続では実行しない。
 
-3. **Recording**
-   Record into app.check_runs as app_rw. A check that has not been verified cannot be recorded as pass
-   (the constraint in migration 0021 rejects it). This is enforced by the DB, not by convention.
+3. **記録**
+   app_rw で app.check_runs へ記録する。検証できていないチェックは pass にできない
+   （migration 0021 の制約が拒否する）。ここは行儀ではなく DB が止める。
 
-## Why fixtures are not run on the target DB
+## fixture を対象 DB で流さない理由
 
-negative_fixture is SQL that "deliberately creates a violation". Even if rolled back, running it on
-the target DB touches **side effects that do not roll back** — triggers, audit logs, sequences.
-Verification happens in a throwaway DB; the target DB is only read.
+negative_fixture は「わざと違反を作る」SQL。ロールバックする前提でも、対象の DB で
+流せば、トリガ・監査ログ・連番など**巻き戻らない副作用**に触れる。
+検証は使い捨ての DB を作ってそこで行い、対象の DB では読むだけにする。
 """
 from __future__ import annotations
 
@@ -41,11 +41,11 @@ import uuid
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-# ---------------------------------------------------------------- thin psql wrapper
+# ---------------------------------------------------------------- psql の薄い包み
 
 def psql(dsn: str, sql: str, *, tuples_only=True) -> tuple[int, str, str]:
-    """Run SQL and return (returncode, stdout, stderr). It does not raise because
-    "failing" is also a result we want to treat as a check outcome."""
+    """SQL を流して (returncode, stdout, stderr) を返す。例外にしないのは、
+    「落ちること」も検査の結果として扱いたいため。"""
     args = ['psql', '-v', 'ON_ERROR_STOP=1', '-q', '-d', dsn, '-c', sql]
     if tuples_only:
         args[1:1] = ['-At']
@@ -65,17 +65,17 @@ def sql_literal(v: str) -> str:
 
 
 def dsn_for(db: str, user: str) -> str:
-    """Assumes a local unix socket. Environments connecting over TCP override this with ISMS_CHECKER_DSN_TEMPLATE."""
+    """ローカルの unix socket 前提。TCP で繋ぐ環境は ISMS_CHECKER_DSN_TEMPLATE で上書きする。"""
     tmpl = os.environ.get('ISMS_CHECKER_DSN_TEMPLATE')
     if tmpl:
         return tmpl.format(db=db, user=user)
     return f'postgres:///{db}?user={user}'
 
 
-# ---------------------------------------------------------------- loading checks
+# ---------------------------------------------------------------- チェックの取得
 
 def load_checks(db: str) -> list[dict]:
-    """Read catalog.checks. Read-only, so app_ro is enough."""
+    """catalog.checks を読む。読み取りだけなので app_ro で足りる。"""
     out = psql_must(
         dsn_for(db, 'app_ro'),
         "SELECT json_agg(row_to_json(c) ORDER BY c.key) FROM ("
@@ -87,43 +87,43 @@ def load_checks(db: str) -> list[dict]:
 
 
 def digest_of(db: str, key: str) -> str:
-    """Fingerprint of a check's content. **The computation is left to catalog.check_digest() in the DB.**
+    """チェックの中身の指紋。**計算は DB の catalog.check_digest() に任せる。**
 
-    Writing the same formula again here means one copy will eventually change on its own.
-    A drifted copy can fail toward "silently passes" rather than "does not match",
-    so there is a single source of the computation. The recording trigger also uses this function (migration 0022).
+    ここで同じ式をもう一度書くと、いつか片方だけ変わる。
+    ずれた側は「一致しない」ではなく「黙って通る」方向に倒れることがあるので、
+    計算元は 1 つにする。記録時のトリガもこの関数を使って照合する（migration 0022）。
     """
     return psql_must(dsn_for(db, 'app_ro'),
                      f"SELECT catalog.check_digest({sql_literal(key)})",
                      f'{key} の指紋の取得')
 
 
-# Preparation for inspecting structure after stripping string literals and comments.
+# 文字列リテラルとコメントを落としてから構造を見るための下ごしらえ。
 _STRIP = re.compile(
-    r"'(?:[^']|'')*'"          # single-quoted string (including '' escapes)
-    r"|\$\$.*?\$\$"            # dollar quoting (untagged)
-    r"|\$[A-Za-z_][A-Za-z0-9_]*\$.*?\$[A-Za-z_][A-Za-z0-9_]*\$"  # tagged
-    r'|"(?:[^"]|"")*"'         # quoted identifier
-    r'|--[^\n]*'               # line comment
-    r'|/\*.*?\*/',             # block comment
+    r"'(?:[^']|'')*'"          # 単一引用符の文字列（'' のエスケープ込み）
+    r"|\$\$.*?\$\$"            # ドル引用符（タグ無し）
+    r"|\$[A-Za-z_][A-Za-z0-9_]*\$.*?\$[A-Za-z_][A-Za-z0-9_]*\$"  # タグ付き
+    r'|"(?:[^"]|"")*"'         # 識別子の引用
+    r'|--[^\n]*'               # 行コメント
+    r'|/\*.*?\*/',             # ブロックコメント
     re.S,
 )
 
 
-# Words that move transaction boundaries. Even as a single statement, if one of these is the body
-# it can break the outer BEGIN … ROLLBACK (the fixture would no longer roll back).
-# abort is an alias of rollback. Omitting aliases leaves a hole in the rejection.
+# トランザクションの境界を動かす語。1 文であっても、これが本体だと
+# 外側の BEGIN … ROLLBACK を壊せる（fixture が巻き戻らなくなる）。
+# abort は rollback の別名。別名を落とすと拒否に穴があく。
 _TX_WORDS = ('begin', 'commit', 'rollback', 'abort', 'start', 'savepoint', 'release',
              'end', 'prepare', 'set', 'reset', 'discard', 'listen', 'unlisten', 'notify')
 
 
 def assert_single_statement(sql: str, kind: str, key: str, *, must_start_with: tuple[str, ...] = ()) -> None:
-    """Confirm that catalog SQL is **a single statement**.
+    """カタログの SQL が **1 文**であることを確かめる。
 
-    query_sql / negative_fixture come from the DB and are passed to psql as-is, so if statements
-    can be appended with `;`, one could swap what is counted or cause unexpected side effects.
-    Restricting the executing role still leaves "read whatever is readable" and "clog it with heavy queries",
-    so **the shape itself is pinned to a single statement**.
+    query_sql / negative_fixture は DB から来る。そのまま psql へ渡すので、
+    `;` で文を継ぎ足せると、数える対象を差し替えたり、想定外の副作用を起こしたりできる。
+    実行ロールを絞っても「読める範囲を読む」「重い問い合わせで詰まらせる」は残るので、
+    **形の側で 1 文に固定する**。
     """
     bare = _STRIP.sub(' ', sql)
     if ';' in bare.rstrip().rstrip(';'):
@@ -139,7 +139,7 @@ def assert_single_statement(sql: str, kind: str, key: str, *, must_start_with: t
 
 def validate_checks(checks: list[dict]) -> None:
     for c in checks:
-        # Read-only. It runs as app_ro, but the shape is also pinned to a read.
+        # 読み取りだけ。app_ro で実行するが、形の側でも読み取りに固定する。
         assert_single_statement(c['query_sql'], 'query_sql', c['key'],
                                 must_start_with=('select', 'with'))
         assert_single_statement(c['negative_fixture'], 'negative_fixture', c['key'])
@@ -155,10 +155,10 @@ def max_violations(check: dict) -> int:
     return v
 
 
-# ---------------------------------------------------------------- counting violations
+# ---------------------------------------------------------------- 違反数の数え方
 
-# Marker for picking up the count. Catalog SQL is pinned to a single statement, but even so
-# we do not assume "the last numeric line" is the count. Only marked lines are looked at.
+# 件数を拾うための目印。カタログの SQL は 1 文に固定しているが、
+# それでも「最後の数値行」を件数と決めつけない。目印付きの行だけを見る。
 COUNT_MARK = '__ISMS_CHECK_COUNT__'
 
 
@@ -171,10 +171,10 @@ def parse_count(out: str) -> tuple[bool, int, str]:
 
 
 def count_violations(dsn: str, token: str, query_sql: str) -> tuple[bool, int, str]:
-    """Establish the tenant context, run query_sql, and return the number of violating rows.
+    """テナント文脈を確立して query_sql を流し、違反行数を返す。
 
-    The context only applies within the same transaction (third argument of set_config is true),
-    so BEGIN → set_tenant_context → count are passed together in a single -c.
+    文脈は同一トランザクションでしか効かない（set_config の第3引数 true）ので、
+    BEGIN → set_tenant_context → 数える、を 1 つの -c にまとめて渡す。
     """
     sql = (
         "BEGIN;"
@@ -188,10 +188,10 @@ def count_violations(dsn: str, token: str, query_sql: str) -> tuple[bool, int, s
     return parse_count(out)
 
 
-# ---------------------------------------------------------------- verification phase
+# ---------------------------------------------------------------- 検証フェーズ
 
 def build_verify_db(db: str) -> tuple[str, str]:
-    """Recreate the throwaway verification DB, set up one tenant, and return its token."""
+    """使い捨ての検証用 DB を作り直し、テナントを 1 つ用意してトークンを返す。"""
     subprocess.run(['dropdb', '--if-exists', db], check=True)
     subprocess.run(['createdb', db], check=True)
     env = dict(os.environ, ISMS_DB=db)
@@ -233,27 +233,27 @@ def build_verify_db(db: str) -> tuple[str, str]:
 
 
 def schema_fingerprint(db: str) -> str:
-    """Fingerprint of the list of applied migrations. Tells whether the verification DB and target DB share the same base.
+    """適用済み migration の一覧と指紋。検証用 DB と対象 DB が同じ土台かを見る。
 
-    Verification rests not only on the catalog definitions but on the DDL, RLS and functions.
-    If the target DB's migrations differ, what was verified was on a different base.
+    検証はカタログの定義だけでなく、DDL・RLS・関数の上で成り立っている。
+    対象 DB の migration が違えば、確かめたのは別の土台の上での話になる。
     """
-    # public.schema_migrations is the ledger managed by migrate.sh and is not granted to app_ro
-    # (business roles are not meant to see it). The verification phase already runs with privileges
-    # that can createdb / dropdb, so it is read over the default connection here.
-    # So that a same-named local DB is not fingerprinted when the target is remote,
-    # the connection is built through the same path as elsewhere (the DSN template).
-    # This ledger cannot be read by business roles, so admin is passed as the template's {user}.
+    # public.schema_migrations は migrate.sh が管理する台帳で、app_ro には配っていない
+    # （業務ロールが見るものではない）。検証フェーズはそもそも createdb / dropdb ができる
+    # 権限で動くので、ここは既定の接続で読む。
+    # 対象がリモートのときに、同名のローカル DB を指紋化してしまわないよう、
+    # 接続の作り方は他と同じ経路（DSN テンプレート）を通す。
+    # ここは業務ロールでは読めない台帳なので、テンプレートの {user} には admin を渡す。
     admin_user = os.environ.get('ISMS_CHECKER_ADMIN_USER', '')
     tmpl = os.environ.get('ISMS_CHECKER_ADMIN_DSN_TEMPLATE')
     if tmpl:
-        # Pass both so it works whether or not the template contains {user}.
+        # {user} を書いていても書いていなくても通るように、両方渡す。
         dsn = tmpl.format(db=db, user=admin_user)
     elif admin_user:
         dsn = dsn_for(db, admin_user)
     elif os.environ.get('ISMS_CHECKER_DSN_TEMPLATE'):
-        # The connection template is overridden but no admin is specified.
-        # Looking at a same-named local DB would fingerprint something else, so treat it as unreadable.
+        # 接続の作り方が上書きされているのに管理者の指定が無い。
+        # ローカルの同名 DB を見に行くと別物を指紋化するので、読めなかった扱いにする。
         return ''
     else:
         dsn = db
@@ -266,9 +266,9 @@ def schema_fingerprint(db: str) -> str:
 
 
 def verify_check(db: str, token: str, check: dict) -> tuple[bool, str]:
-    """Return (verified?, reason).
+    """(検証できたか, 理由) を返す。
 
-    Checks both the precondition (0 violations) and that violations appear after the fixture.
+    前提（違反 0 件）と、fixture 後に違反が出ることの両方を見る。
     """
     ok, before, err = count_violations(dsn_for(db, 'app_ro'), token, check['query_sql'])
     if not ok:
@@ -276,8 +276,8 @@ def verify_check(db: str, token: str, check: dict) -> tuple[bool, str]:
     if before != 0:
         return False, f'fixture を入れる前から違反が {before} 件ある（この検査は元から落ちている）'
 
-    # Run the fixture and query_sql in the same transaction and always roll back.
-    # A separate session cannot see the uncommitted fixture, so only this read uses app_rw.
+    # fixture と query_sql を同じトランザクションで流し、必ず巻き戻す。
+    # 別セッションだと未コミットの fixture が見えないため、ここだけ app_rw で読む。
     sql = (
         "BEGIN;"
         f"SELECT app.set_tenant_context({sql_literal(token)});"
@@ -296,17 +296,17 @@ def verify_check(db: str, token: str, check: dict) -> tuple[bool, str]:
     return True, f'0 件 → {after} 件'
 
 
-# ---------------------------------------------------------------- recording
+# ---------------------------------------------------------------- 記録
 
 def record(db: str, token: str, receipt_id: str, check: dict, result: str, violations: int,
            verified: bool, digest: str | None, error_detail: str | None) -> None:
-    # coverage_ratio is "the fraction of the population that was seen". These core checks scan the
-    # whole target table, so it is 1.000 once the query succeeds. When it did not succeed (error),
-    # nothing was measured, so it stays NULL (writing 0 would read as "looked, 0%").
+    # coverage_ratio は「見られた母集団の割合」。この core チェックは対象の表を丸ごと
+    # 走査するので、問い合わせが通った時点で 1.000。通らなかった（error）ときは
+    # 測れていないので NULL のままにする（0 と書くと「見たが 0%」に読める）。
     #
-    # 'inconclusive' requires coverage_ratio (constraint in 0008). The reason pass/fail cannot be decided
-    # is not necessarily an insufficient population; here it is "failing was not confirmed",
-    # so the reason goes in error_detail and coverage records the range actually seen.
+    # 'inconclusive' は coverage_ratio が必須（0008 の制約）。合否を決められない理由は
+    # 母集団の不足とは限らず、ここでは「落ちることを確かめていない」ことなので、
+    # 理由は error_detail に書き、coverage は実際に見た範囲を書く。
     measured = violations >= 0
     cols = (
         "INSERT INTO app.check_runs "
@@ -338,10 +338,10 @@ def record(db: str, token: str, receipt_id: str, check: dict, result: str, viola
 
 
 def sync_finding(db: str, token: str, check: dict, result: str, violations: int) -> None:
-    """Turn a failure into a finding, and advance it to retest_passed on recovery.
+    """失敗を finding にし、復旧時は retest_passed へ進める。
 
-    It never advances to `closed`. The workflow requiring human confirmation is kept in the DB's
-    state transitions, and repeating the same check does not multiply the same open finding.
+    `closed` へは進めない。人の確認を要するワークフローを DB の状態遷移で
+    保ち、同じ検査を繰り返しても同一の未解決 finding を増殖させない。
     """
     if result not in ('fail', 'pass'):
         return
@@ -376,7 +376,7 @@ def sync_finding(db: str, token: str, check: dict, result: str, violations: int)
         raise SystemExit(f"[checker] {check['key']} の finding 更新が失敗しました:\n{err}")
 
 
-# ---------------------------------------------------------------- main
+# ---------------------------------------------------------------- 本体
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -402,14 +402,14 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    # The verification DB is dropped and recreated every time. If it has the same name as the target, the target gets deleted.
+    # 検証用 DB は毎回 dropdb して作り直す。対象と同じ名前だと対象を消す。
     if args.verify_db == args.db:
         print(f'[checker] 検証用 DB と対象 DB が同じです（{args.db}）。'
               '検証用 DB は作り直すので、別の名前にしてください', file=sys.stderr)
         return 2
 
     checks = load_checks(args.db)
-    # Catalog SQL comes from the DB. Check its shape before running it (single statement, etc.).
+    # カタログの SQL は DB から来る。実行する前に形を確かめる（1 文であること等）。
     validate_checks(checks)
     if not checks:
         print('[checker] catalog.checks が空です。db/seeds/0002_checks_core.sql を流してください', file=sys.stderr)
@@ -432,7 +432,7 @@ def main() -> int:
         vchecks = load_checks(args.verify_db)
         validate_checks(vchecks)
         by_key = {c['key']: c for c in vchecks}
-        # Is the base the same? If not, what was verified was on a different DB.
+        # 土台が同じか。違えば、確かめたのは別の DB の上での話になる。
         target_fp = schema_fingerprint(args.db)
         verify_fp = schema_fingerprint(args.verify_db)
         if not target_fp or not verify_fp:
@@ -469,8 +469,8 @@ def main() -> int:
         if violations > limit:
             result = 'fail'
         elif digest is None:
-            # A check whose failure has not been confirmed cannot be called "passed".
-            # The DB constraint would also stop it, but set the correct result here first.
+            # 落ちることを確かめられていない検査は「合格」と言えない。
+            # DB の制約でも止まるが、ここで先に正しい結果にしておく。
             result = 'inconclusive'
         else:
             result = 'pass'

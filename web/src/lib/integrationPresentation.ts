@@ -21,7 +21,7 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-/** Extract only the manifest structure for the UI. Raw JSON is not shown on screen. */
+/** UI向けにマニフェストの構造だけを取り出す。生のJSONは画面へ出さない。 */
 export function summarizeManifest(manifest: unknown): ManifestSummary {
   const root = objectValue(manifest);
   const auth = objectValue(root.auth);
@@ -45,7 +45,7 @@ export function summarizeManifest(manifest: unknown): ManifestSummary {
   };
 }
 
-/** Do not show raw external response text; show only the failure classification needed for operations. */
+/** 外部応答の生文を出さず、運用上必要な失敗分類だけを表示する。 */
 export function summarizeRunError(detail: string | null): string | null {
   if (!detail) return null;
   const value = detail.toLowerCase();

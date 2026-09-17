@@ -3,11 +3,11 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-// Catalog relationship graph (Obsidian-like).
-// - Edges = actual relationships plus relationships derived from classification (undirected; duplicate/self links excluded)
-// - Color = category (skeleton / control / risk / not yet loaded; bucketed server-side)
-// - Size = number of relations within the displayed graph (degree)
-// Plain Canvas + a simple force simulation with no added dependencies. Re-reads colors and redraws on theme change events.
+// カタログ関連グラフ（Obsidian / Kaname ライク）。
+// - 線 = 実在する関係と分類から導出した関係（無向表示・重複/自己リンクは除外）
+// - 色 = 区分（骨格 / 統制 / リスク / 未投入。サーバー側で bucket 済み）
+// - 大きさ = 表示グラフ内での関連数（次数）
+// 依存追加なしの素の Canvas + 簡易 force simulation。テーマ切替イベントで色を再取得して再描画する。
 
 export type GraphNode = { id: string; title: string; deg: number; bucket: number };
 export type GraphLink = { s: string; t: string };
@@ -25,7 +25,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
     if (!wrapEl) return;
     const ctxEl = canvasEl.getContext('2d');
     if (!ctxEl) return;
-    // Rebind the narrowed values to new consts so they stay non-null inside closures.
+    // クロージャ内でも非nullを保つため、ナローイング済みの値を新しい const に束ね直す。
     const canvas = canvasEl;
     const wrap = wrapEl;
     const ctx = ctxEl;
@@ -34,7 +34,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
     const idx = new Map<string, number>();
     nodes.forEach((n, i) => idx.set(n.id, i));
 
-    // Convert edges to node indexes and remove self links and (undirected) duplicates
+    // エッジをノード index 化し、自己リンク・重複（無向）を除去
     const seen = new Set<string>();
     const edges: [number, number][] = [];
     for (const l of links) {
@@ -46,11 +46,11 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       seen.add(key);
       edges.push([a, b]);
     }
-    // Adjacency sets (for hover highlighting)
+    // 隣接集合（hover ハイライト用）
     const adj: Set<number>[] = nodes.map(() => new Set<number>());
     for (const [a, b] of edges) { adj[a].add(b); adj[b].add(a); }
 
-    // Simulation state (kept in refs/locals so React state is not touched every frame)
+    // シミュレーション状態（毎フレーム React state を触らないよう ref/ローカルで保持）
     const px = new Float64Array(N);
     const py = new Float64Array(N);
     const vx = new Float64Array(N);
@@ -58,8 +58,8 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
     let W = 0, H = 0, dpr = 1, inited = false;
 
     function initLayout() {
-      // Placing nodes on a circle puts neighbors 2px apart at 929 items, overlapping from the start.
-      // Start by scattering them evenly across the whole disk using a golden-angle spiral.
+      // 円周上に並べると、929件では隣同士が2px間隔になり最初から重なる。
+      // 黄金角のらせんで円盤全体へ均等に散らしてから始める。
       const spread = Math.min(W, H) * 0.48;
       const golden = Math.PI * (3 - Math.sqrt(5));
       for (let i = 0; i < N; i++) {
@@ -71,17 +71,17 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       }
     }
 
-    // Cap the size even for high-degree nodes. Without a cap, categories with many children
-    // become huge circles that hide the child notes beneath them.
+    // 次数が大きいノードでも上限を設ける。上限が無いと、配下の多いカテゴリが
+    // 巨大な円になって、その下にいる子ノートを覆い隠してしまう。
     function baseRadius(i: number) { return Math.min(3.5 + Math.sqrt(nodes[i].deg) * 1.5, 13); }
 
-    // If there are too many nodes for the disk area, they physically cannot fit and will always overlap
-    // (= notes get hidden). To avoid that even at phone width or in orgs with many items,
-    // shrink uniformly to "a size where everything fits". Even when shrunk, keep at least 1.6px so nothing disappears.
-    const GAP = 3;              // Minimum gap between nodes (px, scaled by the same factor as the shrink)
-    const COLLIDE_PASSES = 8;   // Max overlap-resolution passes per frame (exits early once fully resolved)
-    // Effective packing ratio relative to the disk. With real data of 929 notes and 3095 edges, verified to give
-    // "0 overlapping pairs" on both desktop (1700x760) and phone width (390x620) (0.62 overlapped on narrow screens).
+    // 収める円盤の面積に対してノードが多すぎると、どう並べても物理的に入らず必ず重なる
+    // （＝ノートが隠れる）。スマホ幅や件数の多い org でもそうならないよう、
+    // 「全部が入る大きさ」まで一律に縮める。縮めても最低 1.6px は残して見えなくしない。
+    const GAP = 3;              // ノード同士の最小すき間（px、縮小と同じ率で効かせる）
+    const COLLIDE_PASSES = 8;   // 1フレームあたりの重なり解消の最大回数（解け切ったら早期終了）
+    // 円盤に対する実効充填率。実データ929ノート・3095辺で、デスクトップ(1700x760)と
+    // スマホ幅(390x620)の両方で「重なり0対」になることを確かめた値（0.62 では狭い画面で重なった）。
     const FILL = 0.45;
     let sizeScale = 1;
 
@@ -100,13 +100,13 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
     function radius(i: number) { return Math.max(1.6, baseRadius(i) * sizeScale); }
     function gap() { return GAP * sizeScale; }
 
-    // Theme-dependent colors (read actual colors from CSS variables; getComputedStyle because Canvas does not interpret classes)
+    // テーマ依存色（CSS 変数から実色を読む。Canvas はクラスを解釈しないため getComputedStyle）
     type Palette = { bucket: string[]; line: string; lineHi: string; label: string; halo: string; ring: string };
     function readPalette(): Palette {
       const cs = getComputedStyle(document.documentElement);
       const v = (name: string) => cs.getPropertyValue(name).trim();
       return {
-        // 0: up to 30 days = fresh (green) 1: up to 90 days = recent (indigo) 2: up to 180 days = somewhat old (amber) 3: over 180 days = old (red)
+        // 0:〜30日=新鮮(緑) 1:〜90日=最近(インディゴ) 2:〜180日=やや古い(琥珀) 3:180日超=古い(赤)
         bucket: [v('--success'), v('--accent'), v('--warning'), v('--danger')],
         line: v('--border-strong'),
         lineHi: v('--accent'),
@@ -127,7 +127,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     function nodeAt(mx: number, my: number) {
-      // Hit-test preferring nodes drawn on top (later)
+      // 上に描かれる（後の）ノードを優先して当たり判定
       for (let i = N - 1; i >= 0; i--) {
         const dx = mx - px[i], dy = my - py[i];
         const rr = radius(i) + 4;
@@ -136,9 +136,9 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       return -1;
     }
 
-    // ---- Uniform grid for neighbor search ----
-    // Brute force (O(N²)) is about 860k checks per frame at 929 items. Bucket into a grid and only check neighboring cells.
-    // Make the cell width larger than the "maximum possible collision distance" (radius 13+13+3=29px).
+    // ---- 近傍探索用の一様格子 ----
+    // 総当たり(O(N²))は929件で毎フレーム約86万回になる。格子に入れて近傍セルだけを見る。
+    // セル幅は「ぶつかり得る最大距離」(半径13+13+3=29px)より大きく取る。
     const CELL = 48;
     let gw = 0, gh = 0;
     let gCount = new Int32Array(0);
@@ -171,8 +171,8 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       for (let i = 0; i < N; i++) gItem[gCursor[cellOf(i)]++] = i;
     }
 
-    // Constrain positions to a **circle** rather than the frame rectangle. With a rectangle, outer nodes
-    // stick to the top/bottom/left/right edges, and the whole thing looks boxy and hard to read.
+    // 位置を収める先を「枠の矩形」ではなく**円**にする。矩形だと外側のノードが
+    // 上下左右の縁に張り付き、全体が四角く見えて読みづらい。
     function clampToDisc(i: number) {
       const cx = W / 2, cy = H / 2;
       const lim = Math.min(W, H) / 2 - 16 - radius(i);
@@ -184,8 +184,8 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       }
     }
 
-    // A spring's natural length is set by "the number of children of the hub at the far end of that edge".
-    // 217 children won't fit on a circle of radius 96px. Stretch it to a length where they fit.
+    // ばねの自然長は「その辺の先にいるハブの子の数」で決める。
+    // 子が217件なら、半径96pxの円周には並び切らない。並べるだけの長さまで伸ばす。
     function restLen(a: number, b: number) {
       const deg = Math.max(nodes[a].deg, nodes[b].deg);
       return Math.min(46 + deg * 2.9, 620);
@@ -193,8 +193,8 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
 
     function step() {
       const cx = W / 2, cy = H / 2;
-      const k = 2600;              // Neighbor repulsion coefficient (only applies within grid range)
-      const grav = 0.010;          // Attraction toward the center
+      const k = 2600;              // 近傍反発の係数（格子の範囲内にだけ効く）
+      const grav = 0.010;          // 中心への引力
       const spring = 0.020;
 
       buildGrid();
@@ -233,7 +233,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
         const d = Math.hypot(dx, dy) || 0.01;
         const f = (d - restLen(a, b)) * spring;
         const ux = dx / d, uy = dy / d;
-        // Weaken per-edge pull for hubs. Being pulled by 217 edges crushes the center into a clump.
+        // ハブほど1本あたりの引きを弱める。217本に引かれると中心が潰れて団子になる。
         const wa = 1 / (1 + Math.sqrt(nodes[a].deg));
         const wb = 1 / (1 + Math.sqrt(nodes[b].deg));
         if (a !== drag) { vx[a] += ux * f * wa; vy[a] += uy * f * wa; }
@@ -247,10 +247,10 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
         clampToDisc(i);
       }
 
-      // Fix overlaps by position, not "force". Forces stop working once alpha cools,
-      // leaving nodes stuck overlapping = notes hidden. Push apart every frame until circles just touch.
-      // Denser layouts need more passes (measured: 2 passes do not fully resolve on narrow screens).
-      // Exits as soon as there is nothing left to push, so it finishes in 1 pass when sparse.
+      // 重なりは「力」ではなく位置で直す。力だと alpha が冷えた後に効かなくなり、
+      // 重なったまま止まる＝ノートが隠れる。円が接するまで毎フレーム押し戻す。
+      // 密なほど回数が要る（狭い画面では2回では解け切らないことを実測で確認）。
+      // 押す相手が無くなったら即抜けるので、空いている時は1回で終わる。
       for (let pass = 0; pass < COLLIDE_PASSES; pass++) {
         let moved = false;
         buildGrid();
@@ -286,15 +286,15 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
           }
         }
         for (let i = 0; i < N; i++) clampToDisc(i);
-        if (!moved) break;   // No further passes needed once overlaps are gone
+        if (!moved) break;   // 重なりが無くなったら以降のパスは不要
       }
 
-      alpha *= 0.992;   // Slow the cooling so it doesn't stop before fully spreading out
+      alpha *= 0.992;   // 散り切る前に止まらないよう、冷え方を緩める
     }
 
     function draw() {
       ctx.clearRect(0, 0, W, H);
-      // Edges
+      // エッジ
       ctx.lineWidth = 1;
       for (const [a, b] of edges) {
         const hot = hover >= 0 && (a === hover || b === hover);
@@ -306,7 +306,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
-      // Nodes
+      // ノード
       for (let i = 0; i < N; i++) {
         const isHover = i === hover;
         const isNeighbor = hover >= 0 && adj[hover].has(i);
@@ -323,7 +323,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
         }
       }
       ctx.globalAlpha = 1;
-      // Labels (shown only for the hovered node and its neighbors to avoid clutter)
+      // ラベル（hover とその隣接のみ表示して混雑を避ける）
       if (hover >= 0) {
         ctx.font = '600 12px -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif';
         ctx.textBaseline = 'middle';
@@ -353,10 +353,10 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
         running = false;
       }
     }
-    // Under reduced-motion, don't run the requestAnimationFrame loop.
-    // But "just drawing" would never run overlap resolution (the position correction inside step),
-    // leaving nodes overlapping = notes hidden. Without animating,
-    // settle it a finite number of times in place, then draw once.
+    // reduced-motion では requestAnimationFrame のループを回さない。
+    // ただし「描くだけ」にすると重なり解消（step 内の位置補正）が一度も走らず、
+    // ノードが重なったまま＝ノートが隠れる。アニメーションはせずに、
+    // その場で有限回だけ整定させてから1度描く。
     function settleStatic(iters: number, startAlpha: number) {
       alpha = Math.max(alpha, startAlpha);
       for (let i = 0; i < iters; i++) step();
@@ -365,7 +365,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
 
     function reheat(a = 0.6) {
       alpha = Math.max(alpha, a);
-      // Under reduced-motion, settle in place without animating, then draw.
+      // reduced-motion ではアニメせず、その場で整定させてから描く。
       if (prefersReduced) { settleStatic(150, a); return; }
       if (!running && document.visibilityState === 'visible') {
         running = true;
@@ -383,14 +383,14 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       canvas.style.width = `${W}px`;
       canvas.style.height = `${H}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      computeSizeScale();   // Recompute the "fitting size" when the screen changes
+      computeSizeScale();   // 画面が変わったら「収まる大きさ」を取り直す
       const first = !inited;
       if (first) { initLayout(); inited = true; }
-      // Always draw the current positions once per resize, regardless of visibility or motion settings
-      // (reassigning canvas.width/height clears the buffer, so this prevents going blank after the first time too).
+      // 可視状態やモーション設定に依らず、リサイズ毎に現在位置を必ず一度描画する
+      // （canvas.width/height の再代入でバッファがクリアされるため、初回以外でも透明化を防ぐ）。
       draw();
       if (prefersReduced) {
-        // No animation, but always go as far as resolving overlaps. Run more passes the first time to scatter.
+        // アニメはしないが、重なりを解くところまでは必ずやる。初回は散らす分だけ多く回す。
         settleStatic(first ? 600 : 150, first ? 1 : 0.3);
       } else {
         reheat(0.3);
@@ -432,7 +432,7 @@ export function GraphCanvas({ nodes, links }: { nodes: GraphNode[]; links: Graph
       }
       drag = -1; downIdx = -1; moved = false;
     }
-    // Prevent lingering state when pointerup never arrives due to touch/pen gesture cancellation or tab switching.
+    // タッチ/ペンのジェスチャ中断やタブ切替で pointerup が来ない場合に状態が残らないようにする。
     function onCancel() {
       drag = -1; downIdx = -1; moved = false;
     }

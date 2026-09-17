@@ -8,9 +8,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"isms-platform/agent/internal/collector"
+	"isms-platform/agent/internal/definition"
 	"isms-platform/agent/internal/httpclient"
 	"isms-platform/agent/internal/signing"
 )
@@ -50,10 +53,13 @@ func enroll(args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	url := flags.String("url", "", "agent API base URL")
 	token := flags.String("enrollment-token", "", "one-time enrollment token")
+	deliveryToken := flags.String("delivery-token", "", "one-time installer delivery token")
 	externalID := flags.String("external-id", "", "stable device identifier")
 	hostname := flags.String("hostname", "", "device hostname")
 	model := flags.String("model", "", "device model")
-	osFamily := flags.String("os-family", "macos", "OS family")
+	// The default follows the running OS so a Windows enrollment matches the
+	// Windows definition and posture os_family.
+	osFamily := flags.String("os-family", definition.PlatformForGOOS(runtime.GOOS), "OS family")
 	offPremise := flags.Bool("off-premise", false, "mark the device as off-premise")
 	keyPath := flags.String("private-key", defaultPrivateKeyPath(), "private key path")
 	configPath := flags.String("config", defaultConfigPath(), "agent run config path")
@@ -61,12 +67,27 @@ func enroll(args []string) error {
 		return err
 	}
 	for name, value := range map[string]string{
-		"url": *url, "enrollment-token": *token, "external-id": *externalID,
+		"url": *url, "external-id": *externalID,
 		"hostname": *hostname, "model": *model,
 	} {
 		if value == "" {
 			return fmt.Errorf("--%s is required", name)
 		}
+	}
+	if *token == "" {
+		deviceID, absKeyPath, err := enrollManagementLogin(
+			context.Background(), *url, *externalID, *hostname, *model, *osFamily,
+			*offPremise, *keyPath, *configPath,
+			func(auth managementLoginAuthorization) {
+				printManagementLoginInstructions(auth, *deliveryToken != "")
+			},
+			*deliveryToken,
+		)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("device_id: %s\nprivate_key: %s\n", deviceID, absKeyPath)
+		return nil
 	}
 	publicKey, privateKey, err := signing.NewKeyPair()
 	if err != nil {
@@ -110,6 +131,36 @@ func enroll(args []string) error {
 	}
 	fmt.Printf("device_id: %s\nprivate_key: %s\n", response.DeviceID, absKeyPath)
 	return nil
+}
+
+func printManagementLoginInstructions(auth managementLoginAuthorization, distributed bool) {
+	openVerificationURI(auth.VerificationURI)
+	if distributed {
+		fmt.Printf("対象機器専用Gmailアクティベート画面: %s\nこの配布方式では認証コードの入力は不要です。送付先のGmailで画面を開き、「Gmailアカウントで認証してアクティベート」を押してください。（期限 %s）\n", auth.VerificationURI, auth.ExpiresAt)
+		return
+	}
+	fmt.Printf("Managementの手動承認画面: %s\n認証コード: %s（期限 %s）\n", auth.VerificationURI, auth.UserCode, auth.ExpiresAt)
+}
+
+// openVerificationURI is best effort. Headless/service installs still receive
+// the URL on stdout and can complete the same flow from another authenticated
+// browser, while interactive installs open it on the target machine itself.
+func openVerificationURI(uri string) {
+	var command string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		command, args = "open", []string{uri}
+	case "windows":
+		command, args = "rundll32", []string{"url.dll,FileProtocolHandler", uri}
+	case "linux":
+		command, args = "xdg-open", []string{uri}
+	default:
+		return
+	}
+	if err := exec.Command(command, args...).Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "isms-agent: 承認画面を自動で開けませんでした: %v\n", err)
+	}
 }
 
 func collect(args []string) error {

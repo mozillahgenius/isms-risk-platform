@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'カタログ' };
 
-// The contents and provenance of the rules (catalog). This used to be on the top page, but
-// the top page became "how to run the ISMS", so it moved here. The contents are unchanged.
+// ルール（カタログ）の中身と出所。もとはトップに置いていたが、
+// トップは「ISMS の進め方」にしたのでここへ移した。中身は変えていない。
 
 function Stat({
   label,
@@ -91,7 +91,7 @@ export default async function CatalogHome() {
         </div>
       </section>
 
-      {/* Showing only the total number of controls reads as if Annex A is included. Also show which criteria the controls come from. */}
+      {/* 「統制 304」だけを出すと、附属書 A が入っていると読める。どの基準の統制かを併せて出す。 */}
       <section>
         <h2 className="mb-1 text-[15px] font-semibold">統制はどの基準のものか</h2>
         <p className="mb-3 max-w-[860px] text-[12px] text-[var(--muted)]">

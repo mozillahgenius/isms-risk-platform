@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-EXPECTED_SOURCES = {"mkt", "ops", "backoffice", "knowledge", "automation", "el"}
+EXPECTED_SOURCES = {"mkt", "ops", "ssi", "kaname", "codzilla", "el"}
 DENIED = {"INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP"}
 REQUIRED_TOP = {"schema_version", "status", "source_ref", "evidence_ref", "sources"}
 REQUIRED_SOURCE = {

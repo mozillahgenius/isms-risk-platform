@@ -1,11 +1,11 @@
 -- @run-as: admin
--- 0077: Identify an import's "rows created in this transaction" by transaction ID rather than creation time
--- (Codex review 2026-09-12).
+-- 0077: 取り込みの明細の「このトランザクションで作った行」を、作成日時ではなくトランザクションの ID で見分ける
+-- （Codex レビュー 2026-09-12）。
 --
--- 0071-0076 identified them by created_at = now(). now() is the transaction start time, so rows created by another transaction
--- that started in the same microsecond also looked "just created"; they could be attached to one's own import items and then retired/deleted by an undo.
--- "created" is added to 0075's transition record (row_transitions, written only by triggers), and the item guard looks at that.
--- The transaction ID is pg_current_xact_id() (the top-level ID even inside a savepoint), so overlapping start times never mix.
+-- 0071〜0076 は created_at = now() で見分けていた。now() はトランザクションの開始時刻なので、同じマイクロ秒に始まった
+-- 別のトランザクションが作った行も「今作った」に見え、その行を自分の取り込みの明細に付けて、取り消しで退役・削除させられる。
+-- 0075 の変化の記録（row_transitions。トリガだけが書く）に「作った」を足し、明細の守りはそれを見る。
+-- トランザクションの ID は pg_current_xact_id()（セーブポイントの中でもトップの ID）なので、開始時刻が重なっても混ざらない。
 
 SET ROLE schema_owner;
 
@@ -13,7 +13,7 @@ ALTER TABLE app.row_transitions DROP CONSTRAINT row_transitions_target_type_chec
 ALTER TABLE app.row_transitions ADD CONSTRAINT row_transitions_target_type_check
   CHECK (target_type IN ('asset','risk','membership','department','policy','policy_version'));
 
--- The 0075 version, plus recording created rows (on INSERT, old = NULL, new = 'created').
+-- 0075 の版に、作った行の記録を足した（INSERT のときは old = NULL・new = 'created'）。
 CREATE OR REPLACE FUNCTION app.record_row_transition() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -44,7 +44,7 @@ BEGIN
   RETURN NULL;
 END $$;
 
--- Item guard (the 0076 version with the "created row" check replaced by the transition record's "created in this transaction"; otherwise the same).
+-- 明細の守り（0076 の版の「作った行」の判定を、変化の記録の「このトランザクションで作った」に替えた。他は同じ）。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -93,7 +93,7 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  -- Created rows: "created" is recorded in this transaction (written only by triggers). Versions must additionally be unapproved.
+  -- 作った行: このトランザクションで「作った」が記録されている（トリガだけが書く）。版はさらに未承認であること。
   v_ok := EXISTS (SELECT 1 FROM app.row_transitions t
                    WHERE t.tenant_id = NEW.tenant_id AND t.target_type = NEW.target_type AND t.target_id = NEW.target_id
                      AND t.xact_id = pg_current_xact_id() AND t.old_value IS NULL AND t.new_value = 'created');
@@ -110,7 +110,7 @@ END $$;
 
 RESET ROLE;
 
--- Also record on creation (AFTER INSERT row triggers). Asset/risk status and membership department changes stay with 0075's triggers.
+-- 作ったときにも記録する（AFTER INSERT の行トリガ）。資産・リスクの状態、所属の部署の変化は 0075 のトリガのまま。
 CREATE TRIGGER assets_created_transition AFTER INSERT ON app.assets
   FOR EACH ROW EXECUTE FUNCTION app.record_row_transition();
 CREATE TRIGGER risk_scenarios_created_transition AFTER INSERT ON app.risk_scenarios

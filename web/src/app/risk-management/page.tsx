@@ -12,14 +12,14 @@ export default async function RiskManagementPage({ searchParams }: { searchParam
   const sp = await searchParams;
   const requestedMode = Array.isArray(sp.mode) ? sp.mode[0] : sp.mode;
   const mode = requestedMode === 'isms' || requestedMode === 'risk' ? requestedMode : undefined;
-  // Only known frameworks are accepted. Unknown keys fall back to the default
-  // (the fallback is visible from which tab is current on screen).
+  // 既知の枠組みだけを受ける。知らないキーは既定へ落とす
+  // （落ちたことは画面のタブの現在地で分かる）。
   const selected = normalizeFrameworkKey(frameworkForMode(sp.framework, sp.mode));
   const result = await getRiskWorkspace(selected);
   const detail = result.ok && result.data.risks[0] ? await getRiskDetail(result.data.risks[0].id, selected) : null;
   return (
     <>
-      {/* Importing initial data (design doc §8). Bulk-register assets and risks via CSV. */}
+      {/* 初期データの取り込み（設計書 §8）。資産・リスクを CSV で一括登録する。 */}
       <p className="mb-2 text-right text-[12px]">
         <Link href="/risk-management/import" className="underline underline-offset-2">CSV で資産・リスクを取り込む</Link>
       </p>

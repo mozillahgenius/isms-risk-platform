@@ -10,9 +10,9 @@ export type PolicySummary = {
   current_version: number | null;
   current_version_id: string | null;
   current_approved_at: string | Date | null;
-  // date type. Explicitly converted to a string with ::text (see the SELECT below). Converting to Date
-  // can shift the displayed date from toLocaleDateString() etc. depending on the runtime's timezone
-  // (Codex review 2026-09-02; the same kind of issue was pointed out in the review of the screen 5 cost feature).
+  // date型。::textで明示的に文字列化する(下のSELECT参照)。Date化すると
+  // 実行環境のtimezoneでtoLocaleDateString()等の表示日がずれうる
+  // (Codexレビュー2026-09-02、画面⑤コスト機能のレビューで同種の問題を指摘)。
   current_effective_from: string | null;
   current_is_placeholder: boolean;
   draft_count: number;

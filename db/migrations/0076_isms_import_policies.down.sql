@@ -1,8 +1,8 @@
 -- @run-as: admin
--- Rollback of 0076. Returns import records to the 0075 shape (assets, risks, departments, membership assignments).
+-- 0076 の巻き戻し。取り込みの記録を 0075 の形（資産・リスク・部署・所属の割り当て）へ戻す。
 --
--- **Refuses to roll back while policy import records exist** (restoring the constraints would make those rows violate them,
--- and down would silently erase the import audit records). Locks parent first (same order as the import side; same as the 0071 / 0073 downs).
+-- **規程の取り込みの記録があるときは巻き戻さない**（制約を戻すとその行が制約に反するうえ、取り込みの監査の記録を
+-- down で黙って消すことになる）。親から順にロックする（取り込み側と同じ順番。0071 / 0073 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;
@@ -34,7 +34,7 @@ ALTER TABLE app.import_batches DROP CONSTRAINT import_batches_kind_check;
 ALTER TABLE app.import_batches ADD CONSTRAINT import_batches_kind_check
   CHECK (kind IN ('assets','risks','departments','assignments'));
 
--- Restore the 0075 version.
+-- 0075 の版へ戻す。
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE

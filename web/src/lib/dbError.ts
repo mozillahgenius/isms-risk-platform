@@ -1,13 +1,13 @@
-// Reduces DB-originated failures to a form that is safe to show on screen.
+// DB 由来の失敗を、画面に出してよい形へ丸める。
 //
-// No server-only marker (so tests can import it as a pure function). Does not touch the DB.
+// server-only を付けない（純関数でテストから読めるようにするため）。DB には触らない。
 
 /**
- * Makes the "reason it could not be read" displayable on screen.
+ * 「読めない理由」を画面に出せる形にする。
  *
- * The content of a failure cannot be chosen. A connection failure mixes host:port into
- * the message; an authentication failure mixes in the user name. Expected reasons (no tenant context, no permission) are shown as a kind,
- * and anything else is shown only as a kind. Details are in the server log.
+ * 失敗の中身は選べない。接続に失敗すれば host:port が、認証に失敗すれば利用者名が
+ * 文面に混ざる。期待している理由（テナント文脈が無い・権限が無い）は種別として出し、
+ * それ以外は種別だけ出す。詳しい中身はサーバのログにある。
  */
 export function safeReason(message: string): string {
   const first = message.split('\n')[0].trim();

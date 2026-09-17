@@ -1,12 +1,12 @@
 -- @run-as: admin
--- 0055: a home for information security objectives (JIS Q 27001:2023 6.2).
+-- 0055: 情報セキュリティ目的（JIS Q 27001:2023 6.2）の受け皿。
 --
--- 6.2 requires "measurable objectives" and "how achievement will be evaluated".
--- Recording only a numeric target, without how to measure it, means nobody can say whether it was achieved.
--- So measure_how (how to measure) is NOT NULL, and registering an objective alone is not allowed.
+-- 6.2 は「測定可能な目的」と「達成をどう評価するか」を求める。
+-- 数値目標だけを残しても、どう測るかが無ければ達成したかを誰も言えない。
+-- そこで measure_how（測り方）を NOT NULL にし、目的だけの登録を許さない。
 --
--- The achievement record (measured value, evaluation date, evaluator) is **written when evaluated**.
--- It is empty when the objective is set, and being empty itself means "not measured yet".
+-- 達成の記録（実測値・評価日・評価者）は **達成したときに書く**。
+-- 目的を立てた時点では空で、空であること自体が「まだ測っていない」を表す。
 
 SET ROLE schema_owner;
 
@@ -15,14 +15,14 @@ CREATE TABLE app.security_objectives (
   tenant_id         uuid NOT NULL,
   fiscal_year       integer NOT NULL,
   title             text NOT NULL,
-  -- Free text for what and how far. Do not allow empty objectives.
+  -- 何をどこまで、を言葉で書く欄。空の目的を作らせない。
   description       text NOT NULL DEFAULT '',
-  -- **How to measure is required**. An objective that cannot be measured is not a 6.2 objective.
+  -- **測り方は必須**。測れない目的は 6.2 の目的ではない。
   measure_how       text NOT NULL,
   target_value      text NOT NULL DEFAULT '',
   owner_user_id     uuid,
   due_date          date,
-  -- The following are filled only when achievement is evaluated. Empty when the objective is set.
+  -- 以下は達成を評価したときにだけ入る。立てた時点では空。
   achieved_value    text,
   evaluated_at      timestamptz,
   evaluated_by      uuid,
@@ -37,14 +37,14 @@ CREATE TABLE app.security_objectives (
   UNIQUE (tenant_id, fiscal_year, title),
   FOREIGN KEY (tenant_id, owner_user_id) REFERENCES app.users(tenant_id, id),
   FOREIGN KEY (tenant_id, evaluated_by)  REFERENCES app.users(tenant_id, id),
-  -- Prevent circumventing it by filling measure_how with an empty string.
+  -- 測り方を空文字で埋めて回避できないようにする。
   CHECK (length(btrim(measure_how)) > 0),
-  -- **Claiming an evaluation requires who measured what and when.** Either all 3 are set or all 3 are empty.
+  -- **評価したと言うなら、誰がいつ何を測ったかが要る。** 3 つ揃うか、3 つとも空か。
   CHECK (
     (achieved_value IS NULL AND evaluated_at IS NULL AND evaluated_by IS NULL)
     OR (achieved_value IS NOT NULL AND evaluated_at IS NOT NULL AND evaluated_by IS NOT NULL)
   ),
-  -- Achieved / not achieved requires a completed evaluation. The status cannot be advanced on its own.
+  -- 達成・未達成と言うなら評価が済んでいること。状態だけ先に進めさせない。
   CHECK (status NOT IN ('achieved','not_achieved') OR evaluated_at IS NOT NULL)
 );
 CREATE INDEX security_objectives_year ON app.security_objectives (tenant_id, fiscal_year);

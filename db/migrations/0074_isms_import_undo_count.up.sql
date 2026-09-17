@@ -1,11 +1,11 @@
 -- @run-as: admin
--- 0074: Make undo counting not miss changes made inside savepoints (Codex review 2026-09-12).
+-- 0074: 取り消しの件数の数え方を、セーブポイントの中の変更でも取りこぼさないようにする（Codex レビュー 2026-09-12）。
 --
--- 0072 / 0073 identified "rows retired (reverted) in this transaction" by xmin = pg_current_xact_id().
--- The xmin of a row updated inside a savepoint is the subtransaction ID, which does not match the top-level ID, so
--- rows actually retired were counted as "not applicable". Rows whose update time (updated_at) is now (the transaction start time) are also
--- counted as "changed in this transaction" (the undo process writes updated_at = now()).
--- Departments are counted by whether the row disappeared, so they are unchanged.
+-- 0072 / 0073 は「このトランザクションで退役にした（戻した）行」を xmin = pg_current_xact_id() で見分けていた。
+-- セーブポイントの中で更新した行の xmin はサブトランザクションの ID になり、トップの ID と一致しないので、
+-- 実際に退役にしていても「対象外」と数えていた。更新の日時（updated_at）が今（トランザクションの開始時刻）であることも
+-- 「このトランザクションで変えた」として数える（取り消しの処理は updated_at = now() を書く）。
+-- 部署は行が消えたかどうかで数えるので変わらない。
 
 SET ROLE schema_owner;
 

@@ -8,9 +8,9 @@ const LABELS = {
 
 const MAP_MARK = { inherent: '固', before_measure: '前', after_measure: '後' } as const;
 
-// SnapshotRow.assessed_on is already cast ::text on the SQL side, so it is always a "YYYY-MM-DD" string.
-// Converting a Date via toISOString() turns it into UTC and can skew the current/target determination in JST, so
-// there is no branch that accepts a Date (Codex review 2026-09-02 finding).
+// SnapshotRow.assessed_on は SQL側で ::text 済みなので常に "YYYY-MM-DD" 文字列。
+// toISOString()経由のDate変換はUTC化されJSTでの現状/目標判定がずれうるため、
+// Dateを受け付ける分岐は持たない(Codexレビュー2026-09-02指摘)。
 function dateText(value: string): string {
   return value;
 }
@@ -21,21 +21,21 @@ function levelClass(level: number): string {
   return 'bg-[var(--success-weak)] text-[var(--badge-success-fg)]';
 }
 
-// today() assumes rendering happens only on the server (this component does not declare 'use client'),
-// so hydration mismatches do not occur.
-// toISOString() is UTC-based, so it is not used. The DB side (the LATERAL JOIN in riskRegister.ts)
-// computes the CURRENT_DATE equivalent in Asia/Tokyo; if this stayed in UTC, at the date boundary
-// the "target" determination and the list's "current" determination could differ by one day (Codex review 2026-09-02 finding).
+// today() はサーバー側でのみレンダリングする(このコンポーネントは 'use client' を
+// 持たない)前提で、Hydrationのずれは起きない。
+// toISOString()はUTC基準になるため使わない。DB側(riskRegister.tsのLATERAL JOIN)は
+// Asia/Tokyo基準でCURRENT_DATE相当を計算しており、ここがUTCのままだと日付境界で
+// 「目標」判定と一覧の「現状」判定が1日ずれうる(Codexレビュー2026-09-02指摘)。
 export function today(): string {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 }
 
 export function RiskMapTimeline({ snapshots }: { snapshots: SnapshotRow[] }) {
   const cutoff = today();
-  // assessed_on <= today is "assessed (past/current)"; anything later is "target (not yet reached)".
-  // Mixing targets into the old logic that looks only at the latest entry per stage would show a future-dated
-  // post-measure snapshot as "the current post-measure risk", making it indistinguishable
-  // from the actual current assessment (found during implementation on 2026-09-02; a pre-existing defect).
+  // assessed_on <= 今日 を「評価済み(過去/現状)」、それより先を「目標(未到達)」とする。
+  // 同じstageの最新1件だけを見る従来ロジックのまま目標を混ぜると、将来日付の
+  // 施策後スナップショットが「現在の施策後リスク」として表示され、実際の
+  // 現状評価と区別が付かなくなる(2026-09-02 実装時に発見、既存の欠陥)。
   const evaluated = snapshots.filter((s) => dateText(s.assessed_on) <= cutoff);
   const targets = snapshots.filter((s) => dateText(s.assessed_on) > cutoff);
 

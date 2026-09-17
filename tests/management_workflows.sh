@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="${ISMS_TEST_DB:-isms_management_workflows_$$}"
 die() { printf '[management workflows] %s\n' "$*" >&2; exit 1; }
 expect_fail() { if "$@" >/dev/null 2>&1; then die "unexpected success: $*"; fi; }
-# Check not only that it failed but that it "failed for the intended reason". Without checking the reason,
-# a nonexistent ID or a different constraint violation would also pass, and the check would be a no-op.
+# 落ちたことだけでなく「狙った理由で落ちたか」を確かめる。理由を見ないと、
+# 存在しないIDや別の制約違反でも通ってしまい、検査が空振りする。
 expect_fail_because() {
   local want="$1"; shift
   local out
@@ -45,11 +45,11 @@ INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES
  ('20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011','risk_owner');
 SQL
 
-# Active assets must have RISK-MANAGEMENT (0050's constraint trigger).
-# This invariant never actually fired until 0061 (the SECURITY DEFINER check function could not
-# read a single app.assets row under FORCE RLS, and is_active stayed NULL and passed through).
-# 0061 added an owner SELECT policy and it took effect for the first time, so
-# from then on this fixture also attaches the framework.
+# 有効な資産は RISK-MANAGEMENT を持たなければならない（0050 の制約トリガー）。
+# この不変条件は 0061 まで実際には発火していなかった（SECURITY DEFINER の判定関数が
+# FORCE RLS で app.assets を 1 行も読めず、is_active が NULL のまま素通りしていた）。
+# 0061 で所有者向けの SELECT ポリシーが付き、初めて効くようになったので、
+# 以後この fixture も枠組みを付ける。
 # Use signed context helpers by making short-lived sessions as auth_svc is not needed in this isolated fixture.
 token_for() { local tenant="$1" user="$2" token="$3"; sql -c "SET ROLE auth_svc; SELECT app.create_session('$tenant','$user','$token',interval '1 hour'); RESET ROLE" >/dev/null; }
 token_for 10000000-0000-4000-8000-000000000001 10000000-0000-4000-8000-000000000011 requester-token-000000000000000000000000000001
@@ -130,33 +130,33 @@ sql -c "ALTER TABLE app.risk_acceptances ENABLE TRIGGER risk_acceptances_future_
 [ "$(sql -At -c "SELECT expiry_status FROM app.risk_acceptance_status WHERE expected_version=996")" = legacy_unknown ] || die "legacy acceptance status missing"
 expect_fail sql -c "UPDATE app.risk_acceptances SET expires_at=now()+interval '2 days' WHERE expected_version=999"
 
-# Only the CISO / secretariat can import and evaluate training. Enforced in the DB, not just by hiding it in the UI.
+# 教育・訓練は CISO / 事務局だけが取込・評価できる。画面の非表示だけでなく DB で強制する。
 expect_fail call_as viewer-token-0000000000000000000000000000004 "INSERT INTO app.trainings(tenant_id,title,fiscal_year) VALUES(app.current_tenant(),'forbidden',2026);"
 call_as requester-token-000000000000000000000000000001 "INSERT INTO app.trainings(tenant_id,id,title,fiscal_year,tags,source_system,external_training_id) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000061','ISMS course',2026,ARRAY['isms'],'elearning','course-1'); INSERT INTO app.training_records(tenant_id,training_id,user_id,evidence_ref,source_payload,source_sha256,imported_at) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000061','10000000-0000-4000-8000-000000000014','elearning://course/course-1/year/2026/user/viewer','{\"completed\":true}','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now());" >/dev/null
 expect_fail call_as viewer-token-0000000000000000000000000000004 "UPDATE app.training_records SET evaluation_status='有効',evaluated_at=now(),evaluated_by=app.current_session_user() WHERE training_id='10000000-0000-4000-8000-000000000061';"
 call_as ciso-token-000000000000000000000000000000003 "UPDATE app.training_records SET evaluation_status='有効',evaluated_at=now(),evaluated_by=app.current_session_user() WHERE training_id='10000000-0000-4000-8000-000000000061';" >/dev/null
 [ "$(sql -At -c "SELECT evaluation_status FROM app.training_records WHERE training_id='10000000-0000-4000-8000-000000000061'")" = 有効 ] || die "training evaluation failed"
-# Even if the e-learning import source is shared company-wide, records for another tenant's learners cannot be created.
-# training_records has a composite FK (tenant_id,user_id) -> app.users(tenant_id,id), so
-# passing another tenant's user ID fails right there. Guaranteed by the DB, not by the importer's matching.
-# First confirm the user ID used "really exists in another tenant". With a nonexistent ID
-# the same FK violation would occur for a different reason, and the check would lose its meaning.
+# eラーニングの取込元が全社共通でも、他テナントの受講者の記録は作れない。
+# training_records は (tenant_id,user_id) → app.users(tenant_id,id) の複合FKなので、
+# 別テナントの利用者IDを渡した時点で落ちる。取込コードの名寄せに頼らず DB で保証する。
+# 使う利用者IDが本当に「別テナントに実在する」ことを先に確かめる。存在しないIDだと
+# 同じFK違反でも別の理由になり、検査が意味を失う。
 [ "$(sql -At -c "SELECT tenant_id FROM app.users WHERE id='20000000-0000-4000-8000-000000000011'")" = 20000000-0000-4000-8000-000000000001 ] || die "cross-tenant fixture user missing"
 expect_fail_because 'training_records_tenant_id_user_id_fkey' call_as requester-token-000000000000000000000000000001 "INSERT INTO app.training_records(tenant_id,training_id,user_id,evidence_ref,source_payload,source_sha256,imported_at) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000061','20000000-0000-4000-8000-000000000011','elearning://course/course-1/year/2026/user/cross-tenant','{\"completed\":true}','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now());"
-# 0054's unique index includes the fiscal year, so the same external_training_id becomes a separate row per year.
-# That split is the basis on which the importer decides "cannot tell which year's cancellation this is",
-# so pin down DB-side that the split itself works (the decision rules are tested in
-# web/tests/trainingSync.test.ts; here we only look at what the DB guarantees).
-# Always filter count by tenant. The same external_training_id in another tenant would break the premise.
+# 0054 の一意索引が年度を含むので、同じ external_training_id が年度ごとに別行になる。
+# 取込コードが「どの年度の取消か決められない」と判断する根拠がこの分割なので、
+# 分割そのものが効いていることを DB 側で固定する（判定規則の検査は
+# web/tests/trainingSync.test.ts にある。ここは DB が保証する部分だけを見る）。
+# count は必ずテナントで絞る。別テナントに同じ external_training_id があると前提が崩れる。
 [ "$(sql -At -c "SELECT count(*) FROM app.trainings WHERE tenant_id='10000000-0000-4000-8000-000000000001' AND source_system='elearning' AND external_training_id='course-1'")" = 1 ] || die "expected a single fiscal year before the second row"
 call_as requester-token-000000000000000000000000000001 "INSERT INTO app.trainings(tenant_id,id,title,fiscal_year,tags,source_system,external_training_id) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000062','ISMS course',2025,ARRAY['isms'],'elearning','course-1');" >/dev/null
-# Look not only at the count but that they actually line up as separate fiscal years.
+# 件数だけでなく、実際に別々の年度として並んでいることを見る。
 [ "$(sql -At -c "SELECT string_agg(fiscal_year::text,',' ORDER BY fiscal_year) FROM app.trainings WHERE tenant_id='10000000-0000-4000-8000-000000000001' AND source_system='elearning' AND external_training_id='course-1'")" = 2025,2026 ] || die "fiscal-year separated trainings missing"
-# The same (source_system, external_training_id, fiscal_year) cannot be created twice.
+# 同じ (source_system, external_training_id, fiscal_year) は二重に作れない。
 expect_fail_because 'trainings_external_source_unique' call_as requester-token-000000000000000000000000000001 "INSERT INTO app.trainings(tenant_id,id,title,fiscal_year,tags,source_system,external_training_id) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000063','ISMS course',2025,ARRAY['isms'],'elearning','course-1');"
-# Reverting 0054 while integration evidence exists would lose data, so it is rejected.
+# 連携証跡がある状態で 0054 を戻すとデータを失うため拒否する。
 expect_fail sql -f "$ROOT/db/migrations/0054_training_integration_guards.down.sql"
-# Directly verify 0052's own safety valve: "cannot roll back while evidence exists".
-# So that the target does not drift to merely "the latest single down" as later migrations are added.
+# 0052 の「証跡がある状態では巻き戻せない」という固有の安全弁を直接検証する。
+# 後続 migration が増えても、単なる「最新1本の down」へ対象がずれないようにする。
 expect_fail sql -f "$ROOT/db/migrations/0052_management_workflows.down.sql"
 echo "management_workflows: PASS"

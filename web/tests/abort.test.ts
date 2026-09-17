@@ -10,7 +10,7 @@ describe('isAbortError', () => {
   });
 
   it('Error を継承していない中断でも名前で判定する', () => {
-    // In some runtimes DOMException is not a subclass of Error. Build that shape directly and verify it.
+    // 実行環境によっては DOMException が Error の子にならない。その形を直接作って確かめる。
     const foreign = Object.create(null) as { name: string };
     foreign.name = 'AbortError';
     expect(foreign instanceof Error).toBe(false);

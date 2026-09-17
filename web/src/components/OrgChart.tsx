@@ -2,9 +2,9 @@ import type { DepartmentNode, MembershipRow } from '@/lib/organizationRegister';
 
 type TreeNode = DepartmentNode & { children: TreeNode[] };
 
-// Currently department registration is INSERT-only (there is no edit feature to change the parent later), so genuine
-// cycles cannot be created through normal operations. However, to prepare for future edit features or direct DB manipulation,
-// circular references and excessive depth are shown explicitly rather than silently dropped (Codex review 2026-09-03 finding).
+// 現状は部門登録がINSERTのみ(親を後から差し替える編集機能は無い)ため、純粋な
+// 循環は通常の操作では作れない。ただし将来の編集機能やDB直接操作に備えて、
+// 循環参照・過剰な深さは無言で消さず明示する(Codexレビュー2026-09-03指摘)。
 const MAX_DEPTH = 20;
 
 function buildTree(departments: DepartmentNode[]): { roots: TreeNode[]; excluded: DepartmentNode[] } {
@@ -19,9 +19,9 @@ function buildTree(departments: DepartmentNode[]): { roots: TreeNode[]; excluded
       roots.push(node);
     }
   }
-  // A department caught in a cycle always has a parent, so it does not enter roots and, in this structure,
-  // cannot be reached from anywhere. Compute the set reachable from roots and pass the ones left out
-  // to the display side as excluded. Anything beyond the depth limit is likewise cut off.
+  // 循環に巻き込まれた部門は必ず親を持つのでrootsに入らず、この構造では
+  // どこからも辿れない。rootsからの到達集合を計算し、外れたものを
+  // excludedとして表示側へ渡す。深さ上限を超えた先も同様に切り捨てる。
   const reached = new Set<string>();
   const walk = (node: TreeNode, depth: number) => {
     reached.add(node.id);
@@ -57,7 +57,7 @@ function DeptNode({ node, membersByDept }: { node: TreeNode; membersByDept: Map<
         )}
       </div>
       {node.children.length > 0 && (
-        <ul className="ms-5 flex flex-col gap-2 border-l border-[var(--border)] pl-4">
+        <ul className="ml-5 flex flex-col gap-2 border-l border-[var(--border)] pl-4">
           {node.children.map((child) => (
             <DeptNode key={child.id} node={child} membersByDept={membersByDept} />
           ))}
@@ -90,10 +90,10 @@ export function OrgChart({ departments, memberships }: { departments: Department
     membersByDept.set(m.department_id, list);
   }
   const unassigned = memberships.filter((m) => !m.department_id);
-  // Members belonging to departments excluded from the tree due to circular references or excessive depth
-  // were drawn neither as a DeptNode nor as unassigned, and disappeared
-  // (Codex review 2026-09-03, 9th-round finding). Since their department cannot be displayed,
-  // they are merged into the "no department set" group so at least they stay visible.
+  // 循環参照・深さ超過でツリーから除外された部門に所属するメンバーは、
+  // DeptNodeとしてもunassignedとしても描画されず消えてしまっていた
+  // (Codexレビュー2026-09-03 9回目指摘)。所属先が表示できない以上、
+  // 「部門未設定」枠に合流させて可視性だけは確保する。
   const excludedMembers = memberships.filter((m) => m.department_id && excludedIds.has(m.department_id));
   return (
     <div className="flex flex-col gap-4">

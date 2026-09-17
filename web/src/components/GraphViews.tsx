@@ -5,10 +5,10 @@ import dynamic from 'next/dynamic';
 import { GraphCanvas, type GraphNode, type GraphLink } from './GraphCanvas';
 import { PyramidCanvas, type PyramidNode, type PyramidLink } from './PyramidCanvas';
 
-// View switching and legend. The drawing itself reuses a ported existing graph rendering implementation (coordinate calculation = lib/pyramidLayout.ts).
+// 図の切替と凡例。描画そのものは Kaname の実装を移植して使う（座標計算 = lib/pyramidLayout.ts）。
 //
-// Boundary that reliably falls back to the perspective (persp) view even if rendering fails due to WebGL init failure or context lost.
-// When a render exception is caught, also notify the parent via onFail (set the parent's webglFailed so reselecting can recover via remount).
+// WebGL の初期化失敗・context lost で描画が落ちても、遠近(persp)表示へ確実に退避するための境界。
+// render 例外を捕まえたら onFail で親にも通知する（親の webglFailed を立て、再選択で remount 復帰できるように）。
 class WebGLErrorBoundary extends Component<
   { fallback: ReactNode; children: ReactNode; onFail?: () => void },
   { failed: boolean }
@@ -25,11 +25,11 @@ class WebGLErrorBoundary extends Component<
   }
 }
 
-// Upper limit of nodes/edges for which WebGL real 3D is offered (lots of mesh/Html/lines make the R3F reconciler heavy).
+// WebGL 実3D を提供するノード/エッジ数の上限（多量の mesh/Html/線は R3F reconciler が重くなる）。
 const WEBGL_NODE_CAP = 1500;
 const WEBGL_EDGE_CAP = 4000;
 
-// WebGL (real 3D) includes three.js, so it is lazy-loaded only when selected (keeps the default bundle light).
+// WebGL(実3D) は three.js を含むため、選択時のみ遅延ロードする（既定バンドルを軽く保つ）。
 const Pyramid3D = dynamic(() => import('./Pyramid3D'), {
   ssr: false,
   loading: () => (
@@ -42,10 +42,10 @@ const Pyramid3D = dynamic(() => import('./Pyramid3D'), {
 export type GraphMeta = {
   shown: number;
   linkCount: number;
-  realLinkCount: number; // Of these, the number of relations that actually exist in the DB (FKs, column values)
+  realLinkCount: number; // うち DB に実在する関係（FK・列の値）の本数
 };
 
-// Pyramid display mode. flat = orthographic (2.5D) / persp = perspective (3D with depth) / webgl = three.js real 3D.
+// ピラミッドの表示モード。flat=正射影(2.5D) / persp=透視(遠近3D) / webgl=three.js 実3D。
 type PyramidMode = 'flat' | 'persp' | 'webgl';
 
 const PYRAMID_BOX =
@@ -72,19 +72,19 @@ export function GraphViews({
   graphMeta: GraphMeta;
   pyramidNodes: PyramidNode[];
   pyramidLinks: PyramidLink[];
-  pyramidDepth?: number; // Number of hierarchy levels
-  derivedNodeCount?: number; // Number of nodes derived from classifications (not DB rows)
+  pyramidDepth?: number; // 階層の段数
+  derivedNodeCount?: number; // 分類から導出したノード（DB の行ではない）の数
 }) {
   const [view, setView] = useState<'graph' | 'pyramid'>('pyramid');
   const [pyramidMode, setPyramidMode] = useState<PyramidMode>('flat');
   const [webglOK, setWebglOK] = useState(true);
-  const [webglFailed, setWebglFailed] = useState(false); // Set on runtime context lost / creation failure
+  const [webglFailed, setWebglFailed] = useState(false); // 実行時のcontext lost/生成失敗で立てる
   const [webglKey, setWebglKey] = useState(0);
-  // Whether WebGL has been shown at least once. While true, the Canvas is not destroyed; only its visibility is toggled via CSS
-  // (recreating the context every time hits the browser's limit on simultaneous contexts and the 3D disappears).
+  // WebGL を一度でも表示したか。true の間は Canvas を破棄せず CSS で表示/非表示だけ切り替える
+  // （毎回 context を作り直すとブラウザの同時 context 上限に達して 3D が消える）。
   const [webglEverOn, setWebglEverOn] = useState(false);
 
-  // WebGL support check (in unsupported environments, do not show the webgl button, and fall back to persp if it was selected).
+  // WebGL 対応チェック（非対応環境では webgl ボタンを出さず、選択済みなら persp に退避）。
   useEffect(() => {
     let ok = false;
     try {
@@ -93,7 +93,7 @@ export function GraphViews({
     } catch {
       ok = false;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- One-time capability check. Not a cascading update.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 一度きりの能力判定。カスケード更新ではない。
     setWebglOK(ok);
   }, []);
 
@@ -147,7 +147,7 @@ export function GraphViews({
           </button>
         </div>
 
-        {/* Pyramid display mode selector (orthographic / perspective / WebGL) */}
+        {/* ピラミッドの表示モード選択（正射影 / 遠近 / WebGL） */}
         {view === 'pyramid' && pyramidNodes.length > 0 && (
           <div className="inline-flex rounded-[var(--radius)] border border-[var(--border)] p-0.5 text-[12px]">
             {modes.map((m) => (
@@ -177,7 +177,7 @@ export function GraphViews({
         </span>
       </div>
 
-      {/* Legend. Always show outside the diagram what the colors mean (do not convey meaning by color alone). */}
+      {/* 凡例。色が何を意味するかを図の外に必ず出す（色だけで意味を運ばない）。 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">
         {BUCKET_LEGEND.map((b) => (
           <span key={b.label} className="inline-flex items-center gap-1.5">
@@ -195,7 +195,7 @@ export function GraphViews({
         <span>hover で関係の種別ラベルを表示</span>
       </div>
 
-      {/* The active view. Not drawn here while WebGL is shown; left to the persistent WebGL layer below. */}
+      {/* アクティブなビュー。WebGL 表示中はここは描かず、下の永続 WebGL レイヤに任せる。 */}
       {view === 'graph' ? (
         <GraphCanvas nodes={graphNodes} links={graphLinks} />
       ) : pyramidNodes.length ? (
@@ -211,7 +211,7 @@ export function GraphViews({
         </div>
       )}
 
-      {/* Persistent WebGL layer: once shown, never unmount it; when inactive, just hide it with hidden. */}
+      {/* 永続 WebGL レイヤ: 一度表示したら unmount せず、非アクティブ時は hidden で隠すだけにする。 */}
       {webglEverOn && pyramidNodes.length > 0 && (
         <div className={webglActive ? PYRAMID_BOX : 'hidden'} aria-hidden={!webglActive}>
           <WebGLErrorBoundary

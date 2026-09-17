@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.isms-platform.google-workspace-monthly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>python3</string>
+    <string>/opt/isms-platform/scripts/run_google_workspace_monthly.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+  <key>StandardOutPath</key>
+    <string>/var/log/isms-platform/google-workspace-monthly.launchd.out.log</string>
+  <key>StandardErrorPath</key>
+    <string>/var/log/isms-platform/google-workspace-monthly.launchd.err.log</string>
+</dict>
+</plist>

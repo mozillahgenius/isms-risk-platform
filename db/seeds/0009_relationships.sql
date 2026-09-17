@@ -1,14 +1,14 @@
--- 0009: initial links between standard controls, framework mappings, and risk templates
+-- 0009: 標準管理策・フレームワーク対応・リスク雛形との初期紐付け
 --
--- What is registered here are "candidate mappings in the catalog"; they do not imply operational
--- implementation, approval, or existence of evidence. Without fabricating standard text or implementation evidence, build reviewable
--- initial mappings from codes, standard control names, and existing risk areas / control themes.
--- Every INSERT is idempotent on natural keys so re-running does not add rows.
+-- ここで登録するのは「カタログ上の対応候補」であり、運用実施・承認・証跡の
+-- 存在を意味しない。標準本文や実装証拠を捏造せず、コードと標準的な管理策名、
+-- 既存のリスク領域・統制テーマから、レビュー可能な初期対応を作る。
+-- 再実行しても行数が増えないよう、全ての INSERT は自然キーで冪等にする。
 
 SET ROLE schema_owner;
 
--- ISO27001:2013 was an empty placeholder for migration, so it is retired from the source of truth.
--- Only the frames/tags left in old DBs are cleaned up; the ISO27001:2022 catalog is kept.
+-- ISO27001:2013 は移行用の空枠だったため、正本から廃止する。
+-- 旧DBに残った枠・タグだけを掃除し、ISO27001:2022 のカタログは保持する。
 DELETE FROM app.risk_scenario_frameworks WHERE framework_key = 'ISO27001:2013';
 DELETE FROM app.measure_frameworks WHERE framework_key = 'ISO27001:2013';
 DELETE FROM app.asset_frameworks WHERE framework_key = 'ISO27001:2013';
@@ -21,8 +21,8 @@ UPDATE catalog.frameworks
    SET source_note = 'ISO/IEC 27001:2022 Annex A の管理策コード・名称（93件）の初期カタログ。詳細な適用判断・実施証拠・SoA は別途レビューする。'
  WHERE key = 'ISO27001:2022';
 
--- ISO/IEC 27001:2022 Annex A (organizational 37, people 8, physical 14, technological 34 = 93).
--- The standard's text is not copied into guidance_md; only short standard names are kept.
+-- ISO/IEC 27001:2022 Annex A（組織的37・人的8・物理的14・技術的34 = 93件）。
+-- guidance_md に規格本文は複製せず、短い標準名称だけを保持する。
 INSERT INTO catalog.controls (framework_key, code, title_ja, theme, guidance_md)
 VALUES
   ('ISO27001:2022', 'A.5.1', '情報セキュリティのための方針群', '組織的管理策', '標準名称の初期カタログ。適用範囲・責任者・レビュー周期は自社で定義する。'),
@@ -124,7 +124,7 @@ ON CONFLICT (framework_key, code) DO UPDATE
        guidance_md = EXCLUDED.guidance_md,
        retired_at = NULL;
 
--- Resync tags so existing controls can be referenced from multiple frameworks.
+-- 既存統制を複数の枠組みから参照できるよう、タグを再同期する。
 INSERT INTO catalog.control_frameworks (control_id, framework_key)
 SELECT c.id, c.framework_key
   FROM catalog.controls c
@@ -137,9 +137,9 @@ SELECT c.id, 'RISK-MANAGEMENT'
  WHERE c.retired_at IS NULL
 ON CONFLICT DO NOTHING;
 
--- Initial IPO-KARTE -> ISO mapping table.
--- It does not claim a single exact match; it picks up to 8 candidates from existing control names/themes.
--- Standard controls with no candidate found are provisionally linked to a representative information-security control.
+-- IPO-KARTE → ISO の初期対応表。
+-- 1つの完全一致を主張せず、既存統制の名称・テーマから対応候補を最大8件選ぶ。
+-- 候補が見つからない標準管理策は、情報セキュリティ統制の代表候補へ保留接続する。
 WITH iso_patterns(code, pattern) AS (
   VALUES
     ('A.5.1', '規程|方針|ポリシー|ルール'),
@@ -251,9 +251,7 @@ SELECT ipo_id, iso_id, 'related'
  WHERE rn <= 8
 ON CONFLICT DO NOTHING;
 
--- Even when no keyword matches, do not leave a standard control isolated in the mapping table.
--- The provisional link target is not fixed to a specific control code (the loaded control catalog can be swapped).
--- Prefer controls whose name/theme is close to information security; otherwise the first control in code order.
+-- キーワードが一つも当たらない場合にも、標準管理策を対応表上で孤立させない。
 INSERT INTO catalog.framework_mappings (from_control_id, to_control_id, relation)
 SELECT c.id, i.id, 'related'
   FROM catalog.controls i
@@ -270,13 +268,13 @@ SELECT c.id, i.id, 'related'
    )
 ON CONFLICT DO NOTHING;
 
--- Initial ISO candidates per risk area. Multiple candidates are attached to one risk, but
--- this does not mean "this control is implemented". Evaluation and adoption happen in register review.
+-- リスク領域ごとの ISO 初期候補。1つのリスクに複数の候補を付けるが、
+-- 「この統制を実施済み」という意味ではない。評価・採否は台帳レビューで行う。
 WITH area_codes(area_pattern, codes) AS (
   VALUES
     ('人事|労務|採用|教育', ARRAY['A.5.11','A.5.15','A.5.16','A.5.18','A.5.34','A.6.1','A.6.2','A.6.3','A.6.4','A.6.5','A.6.6','A.6.7','A.6.8']),
-    -- Physical, network, and development controls are also linked to the existing generic "internal IT" risk template.
-    -- Not confined to industry-specific templates, so all 93 controls are reachable from at least one template.
+    -- 物理・ネットワーク・開発の管理策は、既存の汎用「社内IT」リスク雛形にも
+    -- 接続する。特定業種の雛形に閉じず、全93管理策を少なくとも1つの雛形から辿れるようにする。
     ('社内IT', ARRAY['A.7.1','A.7.2','A.7.3','A.7.4','A.7.5','A.7.6','A.7.7','A.7.8','A.7.9','A.7.10','A.7.11','A.7.12','A.7.13','A.7.14','A.8.4','A.8.6','A.8.11','A.8.14','A.8.17','A.8.18','A.8.19','A.8.21','A.8.23','A.8.27','A.8.28','A.8.31','A.8.33','A.8.34']),
     ('情報|社内IT|セキュリティ|システム|データ|IT', ARRAY['A.5.9','A.5.10','A.5.12','A.5.14','A.5.15','A.5.16','A.5.17','A.5.18','A.5.23','A.5.24','A.5.25','A.5.26','A.5.27','A.5.29','A.5.30','A.5.33','A.5.34','A.8.1','A.8.2','A.8.3','A.8.5','A.8.7','A.8.8','A.8.9','A.8.10','A.8.12','A.8.13','A.8.15','A.8.16','A.8.20','A.8.22','A.8.24']),
     ('購買|調達|委託|取引先|サプライヤー', ARRAY['A.5.19','A.5.20','A.5.21','A.5.22','A.5.23','A.5.31','A.5.32','A.6.6','A.8.30']),
@@ -300,7 +298,7 @@ SELECT ri.template_id, c.id
     ON c.framework_key = 'ISO27001:2022' AND c.code = ri.code AND c.retired_at IS NULL
 ON CONFLICT DO NOTHING;
 
--- Also attach candidate mappings between risk areas and existing IPO control themes.
+-- リスク領域と既存 IPO 統制テーマの対応候補も付ける。
 WITH area_patterns(area_pattern, control_pattern) AS (
   VALUES
     ('人事|労務|採用|教育', '人事|労務|採用|教育|従業員|個人情報'),
@@ -328,16 +326,14 @@ SELECT template_id, control_id
  WHERE rn <= 12
 ON CONFLICT DO NOTHING;
 
--- Even if area names change in the future, do not create isolated risks; link them to a minimal risk-management control.
--- The link target is not fixed to a specific control code. Prefer controls whose name/theme contains the word for "risk",
--- otherwise the first control in code order.
+-- 領域名が将来変更されても、孤立リスクを作らず最低限のリスク管理統制へ接続する。
 INSERT INTO catalog.risk_template_controls (template_id, control_id)
 SELECT r.id, c.id
   FROM catalog.risk_scenario_templates r
   CROSS JOIN LATERAL (
     SELECT x.id FROM catalog.controls x
      WHERE x.framework_key = 'IPO-KARTE' AND x.retired_at IS NULL
-     ORDER BY ((x.title_ja || ' ' || coalesce(x.theme, '')) ~ 'リスク') DESC, x.code
+     ORDER BY ((x.title_ja || ' ' || coalesce(x.theme, '')) ~ 'リスク|情報|セキュリティ') DESC, x.code
      LIMIT 1
   ) c
  WHERE r.retired_at IS NULL
@@ -346,7 +342,7 @@ SELECT r.id, c.id
    )
 ON CONFLICT DO NOTHING;
 
--- Minimal load invariants. Detect partial seed loss at load time rather than on screen.
+-- 最低限の投入不変条件。seed の途中欠落を、画面ではなく投入時に検知する。
 DO $$
 DECLARE
   n int;

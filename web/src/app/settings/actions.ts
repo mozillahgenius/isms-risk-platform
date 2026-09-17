@@ -12,9 +12,9 @@ function requiredText(form: FormData, key: string, max: number): string {
 
 function secretReference(form: FormData): string {
   const value = requiredText(form, 'secret_ref', 200);
-  // Only allow URIs pointing to a connector UUID on the external connector hub; never accept the credentials themselves.
-  if (!/^connector-hub:\/\/connector\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw new Error('invalid connector hub reference');
+  // KanameコネクタのUUIDを指すURIだけを許可し、資格情報そのものを受け取らない。
+  if (!/^kaname:\/\/connector\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error('invalid Kaname connector reference');
   }
   return value;
 }
@@ -42,7 +42,7 @@ export async function saveIntegration(formData: FormData) {
   if (status !== 'paused' && status !== 'active') throw new Error('invalid integration status');
 
   const result = await withTenantWrite(async (sql) => {
-    // kind is taken from the Git source-of-truth projection, not from the form value.
+    // kind はフォーム値を使わず、Git正本の投影から取得する。
     const manifests = await sql<{ kind: 'reader' | 'elevated_reader' | 'writer' }[]>`
       SELECT kind
         FROM catalog.connector_manifests

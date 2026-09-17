@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Send mail queued in app.mail_outbox over SMTP.
+"""app.mail_outbox に積まれたメールを SMTP で送る。
 
   python3 scripts/send_mail_outbox.py --token "$ISMS_WEB_TENANT_TOKEN" --apply
 
-The web process (management_web) holds no SMTP credentials. The UI only adds
-rows to app.mail_outbox; the actual sending is done by this script in a
-separate process with separate credentials. This keeps the ISMS target system
-itself from directly holding an outbound channel (a mis-send cannot happen in
-one click, and every send is always recorded in the queue).
+Web プロセス（management_web）は SMTP 資格情報を持たない。画面は
+app.mail_outbox に行を足すだけで、実際の送信はこのスクリプトが別プロセス・
+別資格情報で行う。ISMS の対象システム自身が社外への送信口を直接握らない形に
+しておくため（誤送信を 1 クリックで起こせない・送信の記録が必ずキューに残る）。
 
-## Does not send by default
-Unless `--apply` is given, it only prints the recipient, subject and the start
-of the body, then exits. The production timer calls it with `--apply`.
+## 既定は送らない
+`--apply` を付けない限り、宛先・件名・本文の先頭だけを表示して終わる。
+本番の timer は `--apply` を付けて呼ぶ。
 
-## Environment variables (values are written neither here nor in the repository)
-  ISMS_SMTP_HOST      e.g. smtp.gmail.com
-  ISMS_SMTP_PORT      default 587 (STARTTLS). 465 means SMTPS
-  ISMS_SMTP_USER      SMTP auth user
-  ISMS_SMTP_PASSWORD  SMTP auth password (app password)
-  ISMS_SMTP_FROM      Sender. e.g. "Example ISMS <isms@example.com>"
-  ISMS_SMTP_REPLY_TO  Optional. When the reply-to differs from the sender
-  ISMS_DB             default isms_dev
+## 環境変数（値はここにもリポジトリにも書かない）
+  ISMS_SMTP_HOST      例 smtp.gmail.com
+  ISMS_SMTP_PORT      既定 587（STARTTLS）。465 を指定すると SMTPS
+  ISMS_SMTP_USER      SMTP 認証のユーザー
+  ISMS_SMTP_PASSWORD  SMTP 認証のパスワード（アプリパスワード）
+  ISMS_SMTP_FROM      差出人。例 "Example Organization ISMS <automation@example.com>"
+  ISMS_SMTP_REPLY_TO  任意。返信先を差出人と分ける場合
+  ISMS_DB             既定 isms_dev
 
-## Failure handling
-A row that fails to send keeps status='failed' and last_error, and later runs
-pick it up again only with `--retry-failed`. This prevents silently retrying
-forever and delivering many copies to the same recipient.
+## 失敗の扱い
+送信に失敗した行は status='failed' と last_error を残し、次回以降は
+`--retry-failed` を付けたときだけ拾い直す。黙って再送し続けて同じ相手へ
+何通も届く事故を防ぐ。
 """
 from __future__ import annotations
 
@@ -41,16 +40,16 @@ from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 
 MAX_BATCH = 50
-# Marker always attached to last_error of reclaimed rows. --retry-failed does not
-# pick up rows carrying it (so mail that may have been delivered is never auto-resent).
+# 回収した行の last_error に必ず付ける印。--retry-failed はこの印の付いた行を
+# 拾わない（届いたかもしれないものを自動で送り直さないため）。
 UNCONFIRMED_MARK = '[unconfirmed]'
-# The minimum reclaim threshold is enforced DB-side by app.reclaim_stale_mail() (60 minutes).
-# One batch is at most MAX_BATCH mails x a 30-second SMTP timeout, so this leaves enough
-# margin not to mistake rows held by a running worker for "stuck" ones.
+# 回収の最短しきい値は app.reclaim_stale_mail() が DB 側で強制する（60 分）。
+# 1 バッチは最大 MAX_BATCH 通 × SMTP タイムアウト 30 秒なので、実行中の
+# ワーカーが掴んでいる行を「止まっている」と誤認しないだけの幅を取っている。
 
 
-# Dedicated role. app_rw cannot advance the send queue state (0059).
-# Separation so that "permission to send" and "permission to write business data" are not held by one role.
+# 専用ロール。app_rw では送信キューの状態を進められない（0059）。
+# 「送る権限」と「業務データを書く権限」を同じロールに持たせないための分離。
 WORKER_ROLE = 'mail_worker'
 
 
@@ -66,13 +65,13 @@ def sql_literal(value: str) -> str:
 
 
 def context_stmt(token: str) -> str:
-    """Establish the tenant context. **Call it in a form that returns no rows.**
+    """テナント文脈を立てる。**行を返さない形で呼ぶ。**
 
-    With `SELECT app.set_tenant_context(...)`, its return value (the tenant
-    uuid) is mixed into the output as a result set. psql's record separator (-R)
-    is not appended at the end of a result set, so it gets joined to the first
-    row of the next result set by a single newline and the parser mistakes the
-    uuid (hit in practice). A DO block returns no rows.
+    `SELECT app.set_tenant_context(...)` にすると、その戻り値（テナントの
+    uuid）が結果集合として出力に混ざる。psql のレコード区切り（-R）は
+    結果集合の末尾には付かないので、次の結果集合の 1 行目と改行 1 つで
+    つながってしまい、解析側が uuid を取り違える（実測で踏んだ）。
+    DO ブロックなら行を返さない。
     """
     return f'DO $ctx$ BEGIN PERFORM app.set_tenant_context({sql_literal(token)}); END $ctx$;'
 
@@ -89,12 +88,12 @@ def psql(dsn: str, statements: list[str], tuples_only: bool = True) -> str:
 
 
 def psql_json(dsn: str, statements: list[str]) -> list[dict[str, object]]:
-    """Receive the result as a single JSON value.
+    """結果を JSON 1 値で受け取る。
 
-    Splitting columns and rows by separators (-F / -R) breaks parsing when the
-    body or subject contains the same control characters, silently dropping rows
-    (a dropped row stays with its status advanced and is never sent). With JSON,
-    control characters inside strings are escaped, so separators and content never mix.
+    区切り文字（-F / -R）で列と行を切ると、本文や件名に同じ制御文字が入った
+    ときに解析が破綻し、行を黙って捨てることになる（捨てられた行は status を
+    進めたまま残り、二度と送られない）。JSON なら文字列の中の制御文字は
+    エスケープされるので、区切りと中身が混ざらない。
     """
     raw = psql(dsn, statements).strip()
     if not raw:
@@ -104,12 +103,11 @@ def psql_json(dsn: str, statements: list[str]) -> list[dict[str, object]]:
 
 def claim_batch(dsn: str, token: str, retry_failed: bool, retry_unconfirmed: bool,
                 limit: int) -> list[dict[str, str]]:
-    """Take the rows to send and advance them to status='sending' at the same time.
+    """送る対象を取り出し、同時に status='sending' へ進める。
 
-    Taking and updating state is done in one statement by app.claim_mail_batch()
-    (SECURITY DEFINER). It can only be called from the mail_worker role, so the web
-    side's app_rw cannot fabricate sent records. Contention is resolved by
-    FOR UPDATE SKIP LOCKED inside the function.
+    取り出しと状態の更新は app.claim_mail_batch()（SECURITY DEFINER）が 1 文で行う。
+    mail_worker ロールからしか呼べないので、Web 側の app_rw では送信済みの記録を
+    でっち上げられない。取り合いは関数の中の FOR UPDATE SKIP LOCKED が解決する。
     """
     rows = psql_json(dsn, [
         'BEGIN;',
@@ -123,7 +121,7 @@ def claim_batch(dsn: str, token: str, retry_failed: bool, retry_unconfirmed: boo
 
 
 def mark_sent(dsn: str, token: str, row: dict[str, str]) -> None:
-    """Mark as sent only what actually went out. The questionnaire state also advances inside the function."""
+    """実際に出たものだけを送信済みにする。質問票の状態も関数の中で進む。"""
     psql(dsn, [
         'BEGIN;',
         context_stmt(token),
@@ -133,14 +131,14 @@ def mark_sent(dsn: str, token: str, row: dict[str, str]) -> None:
 
 
 def try_mark_failed(dsn: str, token: str, row: dict[str, str], error: str) -> bool:
-    """Record as failed. If recording itself fails, return False to tell the caller.
+    """失敗として記録する。記録自体に失敗したら False を返して呼び出し元へ知らせる。
 
-    Swallowing this would leave the row in sending, picked up neither by a normal run
-    nor by --retry-failed (= it silently disappears)."""
+    ここを握りつぶすと、行が sending のまま残り、通常実行でも --retry-failed でも
+    拾われない（＝黙って消える）。"""
     try:
         mark_failed(dsn, token, row, error)
         return True
-    except Exception as exc:  # noqa: BLE001 - report the failure to record itself
+    except Exception as exc:  # noqa: BLE001 - 記録できないこと自体を報告する
         print(
             f"失敗の記録にも失敗: id={row['id']} 宛先={row['to_email']} "
             f'({type(exc).__name__}: {exc})。sending のまま残る。'
@@ -175,12 +173,11 @@ LOOPBACK_HOSTS = {'127.0.0.1', '::1', 'localhost'}
 
 
 def connect(host: str, port: int, user: str, password: str) -> smtplib.SMTP:
-    """Connect to SMTP. Always encrypted by default.
+    """SMTP へ繋ぐ。既定は必ず暗号化する。
 
-    ISMS_SMTP_STARTTLS=off is allowed **only for loopback destinations**. It is for
-    setups where an internal relay runs on the same host, and for acceptance tests.
-    If plaintext could be sent to an external relay, questionnaire contents would be
-    exposed on the path as-is.
+    ISMS_SMTP_STARTTLS=off は **ループバック宛のときだけ** 許す。社内リレーが
+    同じホストに居る構成と、受入テストのためのもの。外部の中継サーバーへ
+    平文で流せてしまうと、質問票の中身がそのまま経路上に出る。
     """
     context = ssl.create_default_context()
     ca_file = os.environ.get('ISMS_SMTP_CA_FILE')
@@ -223,11 +220,11 @@ def main() -> int:
     dsn = args.dsn or dsn_for(args.db)
 
     if args.reclaim_stale is not None:
-        # If the process dies right after claiming, the rows stay in sending and nobody
-        # picks them up (a normal run only sees queued, --retry-failed only failed). Move
-        # them to failed here so they become visible. **Do not resend.** The process may
-        # have died after delivery, and an automatic resend would deliver twice.
-        # The lower bound of the threshold (60 minutes) is enforced by app.reclaim_stale_mail().
+        # 取り出した直後にプロセスが落ちると、行は sending のまま誰にも拾われない
+        # （通常実行は queued、--retry-failed は failed しか見ない）。ここで
+        # failed へ落として見えるようにする。**再送はしない。** 相手に届いた
+        # 後で落ちた可能性があり、自動で送り直すと二重に届く。
+        # しきい値の下限（60分）は app.reclaim_stale_mail() が強制する。
         try:
             moved = psql_json(dsn, [
                 'BEGIN;',
@@ -244,8 +241,8 @@ def main() -> int:
         return 0
 
     if not args.apply:
-        # Only peek, without claiming. Advancing status without --apply would
-        # wipe out pending mail while you thought you were just checking.
+        # 取り出さずに覗くだけ。--apply 無しで status を進めてしまうと、
+        # 確認したつもりが送信待ちを消すことになる。
         pending = psql_json(dsn, [
             'BEGIN;',
             context_stmt(args.token),
@@ -290,13 +287,13 @@ def main() -> int:
 
     sent = 0
     failed = 0
-    # Mail "delivered to the recipient but not recorded on our side". Not moved to failed:
-    # doing so would deliver twice to the same recipient via --retry-failed. A human checks and decides.
+    # 「相手には届いたが、こちらの記録に書けなかった」もの。failed に落とさない。
+    # 落とすと --retry-failed で同じ相手へ二度届く。人が実物を確かめて決める。
     unrecorded: list[str] = []
     client: smtplib.SMTP | None = None
     try:
         client = connect(host, port, user, password)
-    except Exception as exc:  # noqa: BLE001 - connection/auth failure. Nothing has been sent
+    except Exception as exc:  # noqa: BLE001 - 接続・認証の失敗。1 通も送っていない
         for row in rows:
             if not try_mark_failed(dsn, args.token, row, f'{type(exc).__name__}: {exc}'):
                 unrecorded.append(row['id'])
@@ -308,7 +305,7 @@ def main() -> int:
         for row in rows:
             try:
                 client.send_message(build_message(row, sender, reply_to))
-            except Exception as exc:  # noqa: BLE001 - one failure does not stop the rest
+            except Exception as exc:  # noqa: BLE001 - 1 通の失敗で残りを止めない
                 if try_mark_failed(dsn, args.token, row, f'{type(exc).__name__}: {exc}'):
                     failed += 1
                 else:
@@ -316,7 +313,7 @@ def main() -> int:
                 continue
             try:
                 mark_sent(dsn, args.token, row)
-            except Exception as exc:  # noqa: BLE001 - the send already happened
+            except Exception as exc:  # noqa: BLE001 - 送信は済んでいる
                 unrecorded.append(row['id'])
                 print(
                     f"送信済みだが記録に失敗: id={row['id']} 宛先={row['to_email']} "

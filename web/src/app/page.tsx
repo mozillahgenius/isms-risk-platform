@@ -29,15 +29,15 @@ export default async function Home() {
   const { facts } = bundle;
 
   const assessed = ISO_STEPS.map((step) => ({ step, a: assessStep(step, facts) }));
-  // Headings are decided by statusLabel. If the counts used a different grouping,
-  // the totals would disagree with the words shown in the list.
-  // Always show the "usable" and "none" buckets, even at 0 (hiding them makes the 0 invisible).
+  // 見出しは statusLabel が決める。集計だけ別の分け方をすると、
+  // 一覧に出ている言葉と合計が食い違う。
+  // 0 件でも「記録まで残せる」と「まだ何も無い」は必ず出す（消すと 0 が見えなくなる）。
   const tally = STATUS_BUCKETS.map((label) => {
     const rows = assessed.filter((x) => statusLabel(x.a) === label);
     return { label, n: rows.length, note: rows[0] ? statusNote(rows[0].a) : '' };
   }).filter((b) => b.n > 0 || b.label === '記録まで残せる' || b.label === 'まだ何も無い');
 
-  // Check for missed assignments in both directions. One direction alone can't catch typos on the config side.
+  // 割り当ての取りこぼしを双方向で見る。片方向だと設定側のタイポを拾えない。
   const diffs = [
     { label: '規程', d: diffAssignment(assignedPolicyKeys(), Object.keys(facts.policyBodies)) },
     { label: '年間行事', d: diffAssignment(assignedCalendarKeys(), facts.calendarKeys) },
@@ -50,8 +50,8 @@ export default async function Home() {
   const assessmentByKey = new Map(assessed.map(({ step, a }) => [step.key, a]));
 
   return (
-    // This is a screen for reading, so narrow the width. Spreading to the full 1400px
-    // pushes stage names and status badges to opposite edges of view, making them hard to match up.
+    // 読むための画面なので、幅を詰める。1400px いっぱいに広げると、
+    // 段階名と状態バッジが視線の端どうしに離れて対応が取れなくなる。
     <div className="flex max-w-[1180px] flex-col gap-8">
       <section className="max-w-[860px]">
         <h1 className="text-[24px] font-semibold tracking-tight">ISMS の進め方</h1>
@@ -71,7 +71,7 @@ export default async function Home() {
         {dom && (
           <p className="mt-2 text-[12px] text-[var(--muted)]">
             判定に使う下敷きは標準運用モデル DOM {dom.version}。
-            <Link className="ms-1 underline" href="/catalog">
+            <Link className="ml-1 underline" href="/catalog">
               カタログの中身と出所を見る
             </Link>
           </p>

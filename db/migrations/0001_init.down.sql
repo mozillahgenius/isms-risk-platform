@@ -1,13 +1,13 @@
 -- @run-as: admin
--- Rollback of 0001.
--- Extensions are not dropped (other schemas in the same DB may use them; that would be an excessive DROP).
--- Schemas are dropped without CASCADE. If the downs of 0002-0015 all ran, they should be empty;
--- if anything remains, DROP fails. That is welcome as detection of an incomplete rollback, so it is not swallowed.
+-- 0001 の巻き戻し。
+-- 拡張は落とさない（同じ DB の他スキーマが使っている可能性があり、過剰な DROP になる）。
+-- スキーマは CASCADE を使わない。0002〜0015 の down が走り切っていれば空のはずで、
+-- 残っていれば DROP は失敗する。それは巻き戻し漏れの検知として歓迎する事象なので握り潰さない。
 
 DROP FUNCTION IF EXISTS app.set_tenant_context(text);
 DROP FUNCTION IF EXISTS app.current_tenant();
 
--- Revoke ALTER DEFAULT PRIVILEGES (required before dropping the roles)
+-- ALTER DEFAULT PRIVILEGES の取り消し（ロールを消す前に必要）
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'catalog') THEN
@@ -20,16 +20,16 @@ DROP SCHEMA IF EXISTS audit;
 DROP SCHEMA IF EXISTS app;
 DROP SCHEMA IF EXISTS catalog;
 
--- CREATE privilege on the public schema is **not restored**.
--- up's REVOKE does not record "whether it was originally granted", so an unconditional re-GRANT
--- would undo, via rollback, hardening that was in place before this migration was applied.
--- Rather than move from the safe side to the dangerous side on rollback, it is better not to restore it.
--- To return to the original state, run `GRANT CREATE ON SCHEMA public TO PUBLIC` by hand.
+-- public スキーマの CREATE 権限は **戻さない**。
+-- up の REVOKE は「元々付いていたか」を記録していないので、無条件に GRANT し直すと、
+-- この migration を当てる前から施されていた hardening を巻き戻しで解除してしまう。
+-- 巻き戻しで安全側から危険側へ動かすくらいなら、戻さない方がよい。
+-- 元の状態へ戻したい場合は手で `GRANT CREATE ON SCHEMA public TO PUBLIC` を実行する。
 
--- Roles exist **cluster-wide**, not per database, so
--- they cannot be dropped while another DB in the same cluster (e.g. dev and CI side by side) still references them.
--- An unconditional DROP would either break that other DB or always fail here.
--- Keep them while dependencies from other DBs remain; drop them only when none remain.
+-- ロールはデータベース単位ではなく **クラスタ全体** の存在なので、
+-- 同じクラスタの別 DB（開発用と CI 用を並べている等）がまだ参照していると落とせない。
+-- 無条件に DROP すると、その別 DB を壊すか、ここで必ず失敗する。
+-- 他 DB からの依存が残っている間は残し、依存が無くなったときだけ落とす。
 DO $$
 DECLARE
   r text;
@@ -40,8 +40,8 @@ BEGIN
   FOREACH r IN ARRAY roles LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN CONTINUE; END IF;
 
-    -- Only roles created by up carry the marker. No marker = a pre-existing role, so
-    -- leave it alone (DROP OWNED BY would take that role's owned objects down with it).
+    -- up が作ったロールにだけ印が付く。印が無い＝もともと在ったロールなので
+    -- 触らない（DROP OWNED BY はそのロールの所有物を巻き添えで消す）。
     IF NOT EXISTS (
       SELECT 1 FROM pg_shdescription sd
         JOIN pg_roles ro ON ro.oid = sd.objoid

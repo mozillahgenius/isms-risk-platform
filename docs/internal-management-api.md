@@ -1,4 +1,4 @@
-# Management internal API
+# Codzilla management internal API
 
 The API exposes `POST /internal/v1/risks/tag-iso`, the compatibility endpoint `POST /internal/v1/risks/accept`, and the evidence-bound successor `POST /internal/v2/risks/accept`. All require an exact JSON envelope of `{input,context}` and a Bearer token. `input` never contains tenant, actor, command, path, or approval identity.
 
@@ -8,7 +8,7 @@ The API exposes `POST /internal/v1/risks/tag-iso`, the compatibility endpoint `P
 
 Set these server-only values before enabling the routes:
 
-- `ISMS_MANAGEMENT_S2S_TOKEN`: at least 32 characters; shared only with the fixed management adapter that calls this API.
+- `ISMS_MANAGEMENT_S2S_TOKEN`: at least 32 characters; shared only with the fixed Codzilla management adapter.
 - `ISMS_MANAGEMENT_TENANT_ID` and `ISMS_MANAGEMENT_ACTOR_ID`: fixed UUIDs for the service identity.
 - `ISMS_MANAGEMENT_SESSION_TOKEN`: a valid ISMS session token for the same tenant and actor. The route verifies the database session context matches the signed envelope.
 

@@ -1,4 +1,4 @@
--- Rollback of 0015. Removes policies and privileges (the tables themselves are dropped by the 0002–0013 downs).
+-- 0015 の巻き戻し。ポリシーと権限を外す（表そのものは 0002〜0013 の down が落とす）。
 DO $$
 DECLARE
   r record;

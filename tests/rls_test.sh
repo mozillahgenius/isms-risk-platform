@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Acceptance test for tenant isolation and tenant context (design doc Phase 1 acceptance 6-9, 14).
+# テナント分離とテナント文脈の受入試験（設計書 Phase 1 受入 6〜9, 14）。
 #
-# Don't run as superuser. Superuser bypasses RLS, so
-# verify with real app_rw / app_ro connections (anything else is not a verification).
+# superuser では実行しない。superuser は RLS をバイパスするので、
+# app_rw / app_ro の実接続で確かめる（それ以外は検証になっていない）。
 #
-# Usage: tests/rls_test.sh   (honors DATABASE_URL / ISMS_DB)
+# 使い方: tests/rls_test.sh   （DATABASE_URL / ISMS_DB を尊重）
 set -uo pipefail
 
 DB="${ISMS_DB:-isms_dev}"
@@ -25,14 +25,14 @@ TOKEN_D='TOKEN-D-0123456789012345678901234567890123'
 TA='11111111-1111-1111-1111-111111111111'
 TB='22222222-2222-2222-2222-222222222222'
 
-# Succeeds as expected?
+# 期待どおり成功するか
 expect_ok() {
   local label="$1" url="$2" sql="$3" out
   out=$(psql -At -v ON_ERROR_STOP=1 "$url" <<<"$sql" 2>&1)
   if [ $? -eq 0 ]; then ok "$label"; else ng "$label -- $out"; fi
 }
 
-# Fails as expected? (also checks a partial message match)
+# 期待どおり失敗するか（メッセージ部分一致も見る）
 expect_err() {
   local label="$1" url="$2" sql="$3" want="${4:-}" out
   out=$(psql -At -v ON_ERROR_STOP=1 "$url" <<<"$sql" 2>&1)
@@ -46,10 +46,10 @@ expect_err() {
 }
 
 fixture() {
-  # If we continue after setup failed, the subsequent "0 cross-tenant rows" would
-  # become "0 rows because there is no data at all", a test that verifies nothing.
+  # セットアップが失敗したまま先へ進むと、以降の「越境 0 件」が
+  # 「そもそもデータが無いから 0 件」になり、何も検証していないテストになる。
   if ! psql -q -v ON_ERROR_STOP=1 "$ADMIN" >/dev/null <<SQL
--- catalog (DOM) is canonical from the seed, so don't delete it. Replace only the app-side test data.
+-- catalog（DOM）は seed が正本なので消さない。app 側の試験データだけ入れ替える。
 DELETE FROM app.vendors WHERE tenant_id IN ('$TA','$TB');
 DELETE FROM app.sessions WHERE tenant_id IN ('$TA','$TB');
 DELETE FROM app.internal_management_service_principals WHERE tenant_id IN ('$TA','$TB');
@@ -510,19 +510,19 @@ ROLLBACK;
 SELECT count(*) FROM app.vendors;" "tenant context is not set"
 
 echo "-- 受入 #9 越境の網羅（vendors だけでなく tenant_id を持つ全テーブル）"
-# Checking just one table misses policy gaps in other tables.
-# Enumerate all tables with tenant_id and verify B's data isn't visible in A's context.
-# To avoid inserting data, put tenant_id directly in the condition and check that "no rows are returned".
+# 1 テーブルだけ確かめても、他のテーブルでポリシーが抜けていれば見逃す。
+# tenant_id を持つ全テーブルを列挙し、B のデータが A の文脈で見えないことを確かめる。
+# データを入れずに済むよう、tenant_id を直に条件へ書いて「行が返らないこと」を見る。
 TABLES=$(psql -At "$ADMIN" -c "
   select c.relname from pg_class c
     join pg_namespace n on n.oid=c.relnamespace
     join pg_attribute a on a.attrelid=c.oid and a.attname='tenant_id' and not a.attisdropped
    where n.nspname='app' and c.relkind='r'
-     and c.relname not in ('sessions','device_enrollment_tokens','verification_receipts',
+     and c.relname not in ('sessions','device_enrollment_tokens','device_login_requests','device_login_request_nonces','verification_receipts',
                            'internal_management_service_principals','internal_management_acceptance_approvals')
    order by c.relname")
-# If the enumeration fails and comes back empty, the following loop never runs
-# and it reports "all tables passed". Always fail if the count is below expectations.
+# 列挙に失敗して空になると、以降のループが 1 度も回らないまま
+# 「全テーブル合格」と出てしまう。件数が想定を下回ったら必ず落とす。
 TABLE_COUNT=$(printf '%s\n' $TABLES | grep -c . || true)
 if [ "${TABLE_COUNT:-0}" -lt 20 ]; then
   ng "テーブル列挙に失敗（${TABLE_COUNT:-0} 件）。この状態の合格は信用できない"
@@ -530,15 +530,15 @@ if [ "${TABLE_COUNT:-0}" -lt 20 ]; then
   exit 1
 fi
 
-# 0 cross-tenant rows is not enough. Dropping all policies also makes rows "invisible", yielding 0,
-# which can't be distinguished from correct isolation (confirmed by measurement).
-# Also check within the same test that "the isolation policies are in place".
+# 越境 0 件だけでは足りない。ポリシーを全部消しても「見えない」ので 0 件になり、
+# 正しく分離されている状態と区別できない（実測で確認した）。
+# 「分離ポリシーが張られていること」も同じテストの中で見る。
 nopolicy=$(psql -At "$ADMIN" -c "
   select string_agg(c.relname, ' ') from pg_class c
     join pg_namespace n on n.oid=c.relnamespace
     join pg_attribute a on a.attrelid=c.oid and a.attname='tenant_id' and not a.attisdropped
    where n.nspname='app' and c.relkind='r'
-     and c.relname not in ('sessions','device_enrollment_tokens','verification_receipts',
+     and c.relname not in ('sessions','device_enrollment_tokens','device_login_requests','device_login_request_nonces','verification_receipts',
                            'internal_management_service_principals','internal_management_acceptance_approvals')
      and (not exists (select 1 from pg_policies p
                        where p.schemaname='app' and p.tablename=c.relname
@@ -564,7 +564,7 @@ SQL
   if [ $? -ne 0 ]; then
     unreadable="$unreadable $t"
   else
-    # Output lists BEGIN / uuid / count / COMMIT. Take the last numeric-only line.
+    # 出力には BEGIN / uuid / 件数 / COMMIT が並ぶ。数字だけの行の最後を取る。
     n=$(printf '%s\n' "$out" | grep -E '^[0-9]+$' | tail -1)
     [ "$n" = "0" ] || crossed="$crossed $t(${n:-読めず})"
   fi
@@ -604,7 +604,7 @@ expect_err "revoke したトークンでは文脈を作れない" "$RW" "
 SELECT app.revoke_session('$TOKEN_A');
 SELECT app.set_tenant_context('$TOKEN_A');" "invalid session"
 
-fixture   # restore for subsequent tests
+fixture   # 後続テストのために戻す
 
 printf '\n  合計: \033[32m%d PASS\033[0m / \033[31m%d FAIL\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

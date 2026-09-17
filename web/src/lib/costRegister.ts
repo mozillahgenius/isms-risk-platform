@@ -20,9 +20,9 @@ export type EducationRecordRow = {
   conducted_on: string;
   related_measure_id: string | null;
   related_measure_name: string | null;
-  // The rate_master unit rate that was valid as of the implementation date. If none, unset (rate not registered).
+  // 実施日時点で有効だったrate_masterの単価。無ければ未設定(単価未登録)。
   hourly_rate: string | null;
-  // hours × hourly_rate. If no rate is registered, null (not treated as 0 yen = prevents oversights).
+  // hours × hourly_rate。単価未登録の場合は null(0円として扱わない=見落としを防ぐ)。
   cost_amount: string | null;
   source_note: string;
 };

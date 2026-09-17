@@ -1,14 +1,14 @@
--- 0017 Close holes in the checks added in 0016.
---   1. It could be applied while overlooking existing invalid deviations
---   2. The check ran on every UPDATE, so even expiry processing could fail as collateral damage
---   3. If the standard criteria / DOM version changed later, combinations with partial overrides would break
---   4. A frozen criteria version could be "closed and then reopened"
---   5. Criteria versions could be DELETEd
+-- 0017 0016 で入れた検査の穴を塞ぐ。
+--   1. 既存の不正な逸脱を見逃したまま適用できていた
+--   2. 検査が全 UPDATE で走り、期限切れ処理まで巻き添えで落ち得た
+--   3. 標準基準・DOM 版が後から変わると、部分 override との組合せが崩れる
+--   4. 凍結した基準版を「閉じてから開き直す」ことができた
+--   5. 基準版を DELETE できた
 
 -- ------------------------------------------------------------------
--- 0. Make the check body a standalone function callable independently of the trigger.
---    Otherwise we can't verify before applying whether "existing rows pass this check".
---    The 0016 trigger function now just calls this function.
+-- 0. 検査の本体を、トリガから切り離して単独で呼べる関数にする。
+--    こうしないと「既存行がこの検査を通るか」を適用前に確かめられない。
+--    0016 のトリガ関数はこの関数を呼ぶだけにする。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.check_risk_band_override(p_tenant uuid, p_override jsonb)
 RETURNS void
@@ -79,8 +79,8 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------
--- 1. Before applying, verify that existing deviations pass the new check.
---    If any row fails, print its ID and abort (don't silently leave it).
+-- 1. 適用前に、既存の逸脱が新しい検査を通るか確かめる。
+--    通らない行があれば ID を出して中断する（黙って残さない）。
 -- ------------------------------------------------------------------
 DO $$
 DECLARE r record; v_bad text := '';
@@ -99,9 +99,9 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------
--- 2. Restrict the check to when override / kind / tenant_id change.
---    0016 fired on every UPDATE, so even the status update in
---    expire_deviations() got caught up in the check and could fail.
+-- 2. 検査を override / kind / tenant_id が動いたときだけに絞る。
+--    0016 は全 UPDATE で発火するため、expire_deviations() の
+--    status 更新まで検査に巻き込まれて落ち得た。
 -- ------------------------------------------------------------------
 DROP TRIGGER IF EXISTS trg_validate_deviation_override ON app.deviations;
 
@@ -118,10 +118,10 @@ CREATE TRIGGER trg_validate_deviation_override_upd
   EXECUTE FUNCTION app.validate_deviation_override();
 
 -- ------------------------------------------------------------------
--- 3. Make the standard risk criteria (catalog) immutable once published.
---    Partial overrides are checked for covering all 14 values on the premise that
---    "unspecified bands take the standard values". If the standard side changed later, nobody would notice the premise broke.
---    To change bands, bump the DOM version (the feedback mechanism in design doc 1.11.5).
+-- 3. 標準リスク基準（catalog）を発行後は不変にする。
+--    部分 override は「指定しなかった区分は標準値」を前提に 14 値の覆いを
+--    検査している。標準側が後から動くと、その前提が崩れたことに誰も気づけない。
+--    区分を変えたいときは DOM 版を上げる（設計書 1.11.5 のフィードバック機構）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION catalog.risk_criteria_default_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, catalog AS $$
@@ -131,7 +131,7 @@ BEGIN
      OR NEW.band_action       IS DISTINCT FROM OLD.band_action
      OR NEW.band_consider     IS DISTINCT FROM OLD.band_consider
      OR NEW.band_accept       IS DISTINCT FROM OLD.band_accept THEN
-    -- Don't change it if even one tenant uses this DOM version
+    -- テナントが 1 つでもこの DOM 版を使っていたら動かさない
     IF EXISTS (SELECT 1 FROM app.tenants t WHERE t.dom_version_id = OLD.dom_version_id) THEN
       RAISE EXCEPTION
         '配布済みの DOM 版の標準リスク基準は変更できない。新しい DOM 版を作ること';
@@ -145,8 +145,8 @@ CREATE TRIGGER trg_risk_criteria_default_immutable
   BEFORE UPDATE ON catalog.risk_criteria_default
   FOR EACH ROW EXECUTE FUNCTION catalog.risk_criteria_default_immutable();
 
--- Also block changing a tenant's DOM version while active risk_band deviations remain
--- (the 14-value coverage could break in combination with the new standard, so have the deviations wound down first).
+-- テナントの DOM 版を動かすときも、有効な risk_band 逸脱が残っていたら止める
+-- （新しい標準との組合せで 14 値の覆いが崩れ得るため、先に逸脱を畳ませる）。
 CREATE OR REPLACE FUNCTION app.guard_tenant_dom_version() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -167,9 +167,9 @@ CREATE TRIGGER trg_guard_tenant_dom_version
   FOR EACH ROW EXECUTE FUNCTION app.guard_tenant_dom_version();
 
 -- ------------------------------------------------------------------
--- 4. Allow valid_to changes only in one direction: "closing an open version".
---    0016 didn't look at valid_to, so a closed version could be revived by setting it back to NULL,
---    or its end date shifted afterwards (our own test was doing this).
+-- 4. valid_to は「開いている版を閉じる」一方向だけ許す。
+--    0016 は valid_to を見ていなかったので、閉じた版を NULL に戻して
+--    復活させたり、終了日を後からずらしたりできた（自分のテストが踏んでいた）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.risk_criteria_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
@@ -185,7 +185,7 @@ BEGIN
       'risk_criteria は凍結された版。算定式・区分・適用開始日は書き換えられない。'
       ' 変更するときは valid_to を入れて閉じ、新しい版の行を作ること';
   END IF;
-  -- A closed version can't be reopened / its end date can't be moved
+  -- 閉じた版を開き直せない／終了日を動かせない
   IF OLD.valid_to IS NOT NULL AND NEW.valid_to IS DISTINCT FROM OLD.valid_to THEN
     RAISE EXCEPTION '閉じた基準版の valid_to は変更できない（開き直し・日付の付け替えは不可）';
   END IF;
@@ -196,7 +196,7 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------
--- 5. Criteria versions can't be deleted (history; needed to reproduce past states).
+-- 5. 基準版は消せない（履歴。過去時点の再現に要る）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.risk_criteria_no_delete() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$

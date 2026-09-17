@@ -1,0 +1,16 @@
+{
+  "disk_encrypted": [{"encrypted": true}],
+  "screen_lock": [{"enabled": true, "delay_seconds": 600}],
+  "os_version": [{"major": "10", "minor": "0", "patch": "22631"}],
+  "patch_current": [{"current": true}],
+  "auto_update_checks_enabled": [{"enabled": true}],
+  "firewall_enabled": [{"enabled": true}],
+  "edr_running": [{"name": "C:\\Program Files\\SentinelOne\\Sentinel Agent 23.4.2.14\\SentinelAgent.exe"}],
+  "edr_vendor": [{"vendor": "sentinelone"}],
+  "builtin_protection": [{"defender_antivirus_enabled": true, "defender_realtime_enabled": true, "defender_signature_version": "1.417.123.0", "tamper_protection_enabled": true, "smartscreen_enabled": null}],
+  "admin_account_count": [{"username": "operator"}],
+  "password_manager_installed": [{"name": "1Password"}],
+  "unapproved_apps": [],
+  "device_identity": [{"serial": "fixture-serial", "model": "Surface Laptop 5", "hostname": "fixture-win", "os_family": "windows"}],
+  "off_premise": [{"source": "enrollment"}]
+}

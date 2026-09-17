@@ -7,9 +7,9 @@ describe('invalidationTarget', () => {
   });
 
   it('講座があっても当てずに保留する', () => {
-    // This is the crux. Even if the DB has the matching course, you cannot tell which year's
-    // revocation the response's incomplete refers to (the response carries no year). Applying it based on DB state
-    // would delete evaluated records during a resync of past years.
+    // ここが核心。DB に該当講座があっても、応答の incomplete がどの年度の
+    // 取消なのかは分からない（応答は年度を持たない）。DB の状態を根拠に
+    // 当てると、過年度分の再同期で評価済み記録を消してしまう。
     expect(invalidationTarget(true)).toEqual({ kind: 'deferred' });
   });
 

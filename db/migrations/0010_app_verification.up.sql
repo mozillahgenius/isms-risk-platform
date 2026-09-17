@@ -1,4 +1,4 @@
--- 0010 app: verification and evidence (design doc 2.9 second half)
+-- 0010 app: 検証・証跡（設計書 2.9 後半）
 CREATE TABLE app.check_runs (
   id            uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id     uuid NOT NULL,
@@ -7,8 +7,8 @@ CREATE TABLE app.check_runs (
   result        text NOT NULL CHECK (result IN ('pass','fail','inconclusive','error')),
   coverage_ratio numeric(4,3),
   row_count     int,
-  threshold_used numeric(3,2),                      -- effective threshold when relaxed by a deviation
-  deviation_id  uuid,                               -- when a deviation was applied
+  threshold_used numeric(3,2),                      -- 逸脱で緩和された場合の実効閾値
+  deviation_id  uuid,                               -- 逸脱が適用された場合
   error_detail  text,
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
@@ -22,15 +22,15 @@ CREATE TABLE app.evidences (
   tenant_id     uuid NOT NULL,
   kind          text NOT NULL CHECK (kind IN ('auto','semi_auto','manual')),
   title         text NOT NULL,
-  object_key    text,                               -- opaque key (must not contain tenant_id)
+  object_key    text,                               -- 不透明キー（tenant_id を含めない）
   sha256        bytea, byte_size bigint,
   collected_at  timestamptz NOT NULL,
-  freshness_days smallint NOT NULL,                 -- freshness criterion per control type
+  freshness_days smallint NOT NULL,                 -- 統制種別ごとの鮮度基準
   state         text NOT NULL DEFAULT 'valid'
                   CHECK (state IN ('valid','expired','unobtainable','not_collected')),
   check_run_id  uuid,
-  deleted_at    timestamptz,                        -- logical deletion
-  purged_at     timestamptz,                        -- physical deletion on reaching the retention limit
+  deleted_at    timestamptz,                        -- 論理削除
+  purged_at     timestamptz,                        -- 保持期限到達による物理削除
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),
@@ -38,7 +38,7 @@ CREATE TABLE app.evidences (
   CHECK (kind <> 'auto' OR check_run_id IS NOT NULL)
 );
 
--- The FK on exceptions.finding_id is added later because findings is created in 0011 (design doc 2.9 / 2.10)
+-- exceptions.finding_id の FK は findings が 0011 で作られるため後付けする（設計書 2.9 / 2.10）
 CREATE TABLE app.exceptions (
   id          uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id   uuid NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE app.exceptions (
   reason      text NOT NULL CHECK (length(btrim(reason)) > 0),
   compensating_control text NOT NULL CHECK (length(btrim(compensating_control)) > 0),
   approved_by uuid NOT NULL, approved_at timestamptz NOT NULL,
-  expires_at  timestamptz NOT NULL,                 -- no indefinite expiry allowed
+  expires_at  timestamptz NOT NULL,                 -- 無期限を許さない
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),

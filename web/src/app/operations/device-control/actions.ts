@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { redirect } from 'next/navigation';
 import {
   authorizedActorEmail,
-  deviceControlDevices,
+  DEVICE_CONTROL_DEVICES,
   DISPATCH_TEMPLATES,
   dispatchDeviceControl,
   RECOVERY_OUTCOMES,
@@ -20,8 +20,8 @@ function isRecoveryOutcome(value: string): value is RecoveryOutcome {
 }
 
 /**
- * Closes a pending request after a person has checked the device (recovery queue in design doc 2026-09-11 §9.4).
- * Does not retry. What was checked (note) is required and kept in the audit log.
+ * 未確定の要求を、人が端末を確かめたうえで閉じる（設計書 2026-09-11 §9.4 の復旧キュー）。
+ * 再実行はしない。何を確かめたか（note）を必須にし、監査に残す。
  */
 export async function recoverDispatchAction(formData: FormData) {
   const mode = formData.get('mode') === 'isms' ? 'isms' : 'risk';
@@ -31,7 +31,7 @@ export async function recoverDispatchAction(formData: FormData) {
   const note = String(formData.get('note') ?? '').trim();
   if (!isKnownDeviceKey(deviceKey)) redirect(`/operations/device-control?error=bad_request&mode=${mode}`);
   const back = `/operations/device-control?device=${encodeURIComponent(deviceKey)}&mode=${mode}`;
-  // request_id is issued by dispatchDeviceControlAction via randomUUID(). Values of a different shape are not sent upstream.
+  // request_id は dispatchDeviceControlAction が randomUUID() で発行したもの。形の違う値は上流へ送らない。
   if (!UUID_RE.test(requestId) || !isRecoveryOutcome(outcome) || note.length === 0 || note.length > 1000) {
     redirect(`${back}&error=bad_request`);
   }
@@ -41,16 +41,16 @@ export async function recoverDispatchAction(formData: FormData) {
 }
 
 function isKnownDeviceKey(value: string): boolean {
-  return deviceControlDevices().some((d) => d.key === value);
+  return DEVICE_CONTROL_DEVICES.some((d) => d.key === value);
 }
 function isKnownTemplateId(value: string): value is DispatchTemplateId {
   return DISPATCH_TEMPLATES.some((t) => t.id === value);
 }
 
 export async function dispatchDeviceControlAction(formData: FormData) {
-  // Do not delegate authorization entirely to the upstream SSO reverse proxy; check independently in the app layer too.
-  // Header forwarding verified on real hardware in production (2026-09-01, x-forwarded-email). When unset or mismatched,
-  // stay fail-closed (allowlist unset = nobody can execute).
+  // 前段のSSOリバースプロキシに認可を委ねきらず、アプリ層でも独立して確認する。
+  // ヘッダ転送は本番で実機確認済み(2026-09-01、x-forwarded-email)。未設定・不一致時は
+  // fail-closed(許可リスト未設定=誰も実行できない)のまま維持する。
   const mode = formData.get('mode') === 'isms' ? 'isms' : 'risk';
   const actorEmail = await authorizedActorEmail();
   if (!actorEmail) {

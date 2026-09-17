@@ -3,8 +3,7 @@
 ## Status and scope
 
 Management currently provides macOS posture collection and fixed, audited RMM
-operations through a local endpoint agent driven by an external device dispatch
-orchestrator. This is not Apple MDM.
+operations through the unified Codzilla Local Agent. This is not Apple MDM.
 
 Apple MDM support will be added as a separate provider boundary. NanoMDM is the
 preferred first adapter because it exposes the Apple MDM protocol without
@@ -16,8 +15,8 @@ not yet deployed or connected by this change.
 | Component | Responsibility |
 |---|---|
 | Management | Device inventory, desired state, approval, reason, status and audit reference |
-| Local endpoint agent | Posture collection and allowlisted local RMM operations |
-| Knowledge base (optional) | Organization knowledge, inventory provenance and durable audit context |
+| Codzilla Local Agent | Posture collection and allowlisted local RMM operations |
+| Kaname | Organization knowledge, inventory provenance and durable audit context |
 | MDM provider worker | Typed command dispatch, idempotency, retry and result normalization |
 | NanoMDM | APNs-backed Apple MDM protocol, enrollment and command transport |
 | Apple Business Manager | Organization ownership and Automated Device Enrollment |
@@ -36,7 +35,7 @@ clearly named sections:
 2. `Apple MDM`: enrollment state, supervision, profile compliance, application
    state and pending typed commands.
 
-An absent provider is shown as `未接続` ("not connected"), never as zero devices or compliant.
+An absent provider is shown as `未接続`, never as zero devices or compliant.
 The UI does not expose a free-form command field. Destructive commands require a
 fresh approval record and a second confirmation that names the exact device.
 
@@ -64,11 +63,12 @@ not accepted from the browser.
 |---|---|---|
 | Typed worker + database queue | Deterministic approval, dispatch and result gates | Default for MDM commands |
 | Shell + cron | Read-only reconciliation and health checks | Acceptable when the operation is idempotent and bounded |
-| Coding-agent orchestration | Implementation, migration rehearsal and evidence review | Development-time use only |
-| General-purpose agent orchestrator | Cross-system, recurring coordination | Candidate, not a command acceptance gate |
+| Codex or Claude Code orchestration | Implementation, migration rehearsal and evidence review | Development-time use only |
+| Hermes Agent | Cross-system, recurring coordination across skills, toolsets, MCP, cron, kanban, hooks and computer-use | Candidate, not a command acceptance gate |
 
-If an agent orchestrator is adopted, its role is to call the typed worker or
-existing CLIs; it does not emit raw MDM commands. The database request ID remains the
+If Hermes is adopted, its role is an orchestrator that calls the typed worker
+or existing `codex`/`claude` CLI; it does not emit raw MDM commands. Headless
+execution uses `hermes -z "..." -Q`. The database request ID remains the
 idempotency authority, worker failure leaves the request failed or retryable
 without implying device success, and a human approval is still required before
 profile removal, lock or erase. Deterministic security gates call the target
@@ -101,8 +101,8 @@ worker directly instead of trusting an LLM decision as proof of acceptance.
 - Escrow Bootstrap Token and Activation Lock bypass material only in the
   dedicated MDM secret boundary; Management shows presence and rotation state,
   never the values.
-- Keep the local endpoint agent as the richer posture signal and fallback
-  diagnostic path; do not duplicate its scheduler elsewhere.
+- Keep the Codzilla Agent as the richer posture signal and fallback diagnostic
+  path; do not duplicate its scheduler inside Kaname.
 
 ### Phase 3: high-risk commands
 
@@ -123,7 +123,7 @@ worker directly instead of trusting an LLM decision as proof of acceptance.
 6. Expired approval, unknown template and arbitrary provider payload are rejected.
 7. Provider outage remains visible as unavailable and does not become compliant.
 8. Backup and restore retain inventory and audit history without exporting MDM secrets.
-9. Local endpoint agent collection continues during provider failure.
+9. Codzilla Local Agent collection continues during provider failure.
 10. Lock and erase are unavailable until their separate high-risk gate passes.
 11. DDM declaration/status reconciliation remains tenant-scoped and converges
     after an offline device reconnects.
@@ -139,5 +139,5 @@ worker directly instead of trusting an LLM decision as proof of acceptance.
 Production enrollment cannot be completed from source code alone. It requires
 an organization-controlled Apple Business Manager tenant, APNs certificate,
 Automated Device Enrollment assignment, signing material and a dedicated secret
-store. Those external actions must be completed and recorded before production
-cutover.
+store. Those external actions remain pending and must be recorded in the task
+ledger before production cutover.

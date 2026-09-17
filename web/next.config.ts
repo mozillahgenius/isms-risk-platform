@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
-// Internal / local-only viewing app. There is no SSO yet, so set headers assuming it is not exposed externally.
-// (Binding is ensured by -H 127.0.0.1 in package.json. This is browser-side hardening.)
+// 社内・ローカル限定の閲覧アプリ。SSO はまだ無いので、外に出さない前提の頭を付ける。
+// （bind は package.json の -H 127.0.0.1 で担保。ここはブラウザ側の締め付け。）
 const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -11,8 +11,8 @@ const securityHeaders = [
     value: 'camera=(), microphone=(), geolocation=(), browsing-topics=(), interest-cohort=()',
   },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
-  // These screens make no external requests, so by default lock everything down to self.
-  // WebGL/Canvas use no external resources. dev is relaxed because HMR needs eval.
+  // 外部への通信を持たない画面なので、既定で自分自身だけに閉じる。
+  // WebGL/Canvas は外部リソースを使わない。dev は HMR の eval が要るため緩める。
   {
     key: 'Content-Security-Policy',
     value: [
@@ -31,23 +31,17 @@ const securityHeaders = [
   },
 ];
 
-// When placed behind oauth2-proxy (reverse_proxy setup, pass_host_header=false), the upstream
-// x-forwarded-host receives the internal IP:port instead of the real domain, and Server Actions'
-// CSRF check (Origin match) rejects legitimate requests from the public domain.
-// In that setup, explicitly allow the public domain via ISMS_SERVER_ACTIONS_ALLOWED_ORIGINS (comma-separated,
-// e.g. "isms.example.com"). If unset, nothing extra is allowed.
-const allowedOrigins = (process.env.ISMS_SERVER_ACTIONS_ALLOWED_ORIGINS ?? '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter((origin) => origin.length > 0);
-
 const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
   experimental: {
     serverActions: {
-      allowedOrigins,
+      // oauth2-proxy(reverse_proxy構成、pass_host_header=false)が upstream への
+      // x-forwarded-host に本来のドメインでなくTailscale IP:portを送るため、
+      // Server ActionsのCSRF検証(Origin一致確認)がこのドメインからの正規リクエストを
+      // 拒否してしまう(2026-09-01 実機調査で確認)。公開ドメインを明示的に許可する。
+      allowedOrigins: ['management.example.invalid'],
     },
   },
 };

@@ -3,15 +3,15 @@ import 'server-only';
 import type { TransactionSql } from 'postgres';
 
 /**
- * Enqueues onto the mail sending queue.
+ * メール送信キューへ積むところ。
  *
- * The web process holds no SMTP credentials. This only adds a row to app.mail_outbox;
- * actual sending is done by scripts/send_mail_outbox.py in a separate process with separate credentials.
- * The ISMS target system itself does not directly hold an outbound channel to external parties
- * (a mis-send cannot be triggered with one click, and every send is always recorded in the queue).
+ * Web プロセスは SMTP 資格情報を持たない。ここは app.mail_outbox に行を足すだけで、
+ * 実際の送信は scripts/send_mail_outbox.py が別プロセス・別資格情報で行う。
+ * ISMS の対象システム自身が社外への送信口を直接握らない形にしておく
+ * （誤送信を 1 クリックで起こせない・送信の記録がキューに必ず残る）。
  */
 
-export type MailPurpose = 'external_questionnaire' | 'work_assignment';
+export type MailPurpose = 'external_questionnaire' | 'work_assignment' | 'agent_distribution';
 
 export type QueuedMail = {
   purpose: MailPurpose;
@@ -24,9 +24,9 @@ export type QueuedMail = {
 };
 
 /**
- * URL of the screen the user opens. **It has no fallback value** (design doc 2026-09-11 §9.2).
- * If our own URL were written as a fallback, a deployment by another organization that forgets to set ISMS_WEB_BASE_URL
- * would put links to our domain in emails sent to external recipients. If unset, no link is output.
+ * 利用者が開く画面の URL。**予備値を持たない**（設計書 2026-09-11 §9.2）。
+ * 予備値に自社の URL を書くと、他社のデプロイで ISMS_WEB_BASE_URL を入れ忘れたときに
+ * 自社ドメインへのリンクが社外宛てのメールに載る。未設定ならリンクを出さない。
  */
 export function baseUrl(): string | null {
   const configured = process.env.ISMS_WEB_BASE_URL;
@@ -50,7 +50,7 @@ export async function queueMail(sql: TransactionSql, mail: QueuedMail): Promise<
   return id;
 }
 
-/** Notification sent to the person who was asked. The recipient is internal, so details may be written in the body. */
+/** 依頼された本人へ送る通知。宛先は社内なので、詳細は本文に書いてよい。 */
 export function assignmentNotificationBody(input: {
   assigneeName: string;
   requesterName: string;
@@ -80,7 +80,7 @@ export function assignmentNotificationBody(input: {
   return lines.join('\n');
 }
 
-/** Questionnaire sent to external parties (suppliers, cloud providers). The recipient is external, so do not write too much. */
+/** 社外（委託先・クラウド事業者）へ送る質問票。宛先が社外なので書きすぎない。 */
 export function questionnaireMailBody(input: {
   organizationName: string;
   recipientName: string;

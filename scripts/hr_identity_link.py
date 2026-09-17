@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-DEFAULT_BACKOFFICE_DB = "postgres://127.0.0.1:5432/backoffice"
+DEFAULT_BACKOFFICE_DB = "postgres://127.0.0.1:55432/ssi"
 
 
 def sql_literal(value: str) -> str:
@@ -52,7 +52,7 @@ SELECT w.id::text, coalesce(u.email::text, ''),
        w.worker_ref
   FROM bo.workforce_members w
   JOIN bo.actors a ON a.id = w.actor_id AND a.org_id = w.org_id
-  JOIN bo.app_users u ON u.id = a.user_id
+  JOIN ib.app_users u ON u.id = a.user_id
  WHERE lower(u.email::text) = lower({sql_literal(email)})
    AND (w.active_to IS NULL OR w.active_to >= current_date)
  ORDER BY w.created_at, w.id

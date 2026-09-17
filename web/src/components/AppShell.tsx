@@ -213,7 +213,7 @@ export function AppHeader() {
         >
           {RESOURCE_MANAGEMENT_NAME}
         </Link>
-        <div className="ms-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <ModeSwitch pathname={pathname} search={search} />
           <ThemeToggle />
         </div>

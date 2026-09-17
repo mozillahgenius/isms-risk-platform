@@ -1,7 +1,7 @@
-// Separates out only the pure-function part of the authorization decision for device operations (device-control).
-// deviceControl.ts has 'server-only', so it cannot be imported from plain vitest
-// (outside webpack/Next, server-only throws unconditionally). The logic itself is
-// environment-independent string comparison, so it is extracted here to be tested directly.
+// 端末操作(device-control)の認可判定の純粋関数部分だけを分離する。
+// deviceControl.ts 側は 'server-only' を持つため、素の vitest からは import できない
+// (webpack/Next以外の環境では server-only が無条件でthrowする)。ロジック自体は
+// 環境非依存の文字列比較なので、ここへ切り出して直接テストできるようにする。
 
 import { timingSafeEqual } from 'node:crypto';
 
@@ -9,16 +9,16 @@ export function isEmailAuthorizedForDeviceControl(email: string | null | undefin
   const allowed = new Set(
     (allowlistCsv ?? '').split(',').map((e) => e.trim().toLowerCase()).filter((e) => e.length > 0),
   );
-  if (allowed.size === 0) return false; // Allowlist not set = nobody is allowed
+  if (allowed.size === 0) return false; // 許可リスト未設定 = 誰も許可しない
   const normalized = (email ?? '').trim().toLowerCase();
   return normalized.length > 0 && allowed.has(normalized);
 }
 
-// x-forwarded-email is a request header, so it can be spoofed if there is a path that reaches this screen's Next.js process directly
-// (e.g. a direct connection from the internal network that bypasses nginx/oauth2-proxy). The other existing pages accept
-// this risk, but this screen sends real commands to devices and is the most sensitive, so
-// a match of a shared-secret header known only to nginx/oauth2-proxy is also required (a second factor).
-// Both unset and mismatch are rejected (fail-closed). The comparison is constant-time to avoid timing attacks.
+// x-forwarded-email はリクエストヘッダなので、この画面のNext.jsプロセスへ直接到達できる経路
+// (例: nginx/oauth2-proxyを経由しないTailscale直結)があると偽装できる。既存の他ページはこの
+// リスクを許容しているが、端末へ実コマンドを送るこの画面は最も機微度が高いため、
+// nginx/oauth2-proxy側だけが知る共有シークレットヘッダの一致も必須にする(二要素目)。
+// 未設定・不一致は共に拒否(fail-closed)。比較はタイミング攻撃を避けるため定数時間で行う。
 export function isProxySecretValid(receivedSecret: string | null | undefined, expectedSecret: string | undefined): boolean {
   const expected = (expectedSecret ?? '').trim();
   const received = (receivedSecret ?? '').trim();
@@ -40,13 +40,13 @@ export function trustedProxyEmail(
   return email;
 }
 
-// Validation and classification of the device ledger (device operations screen) read response. Used from deviceControl.ts (server-only), but
-// the logic itself is environment-independent, so it is extracted here to be tested directly from plain vitest
-// (the path involving fetch/headers() itself is out of scope. At the same level as existing paths such as getDeviceControlHistory,
-// the HTTP call wiring itself is not covered by integration tests).
+// 端末台帳(端末操作画面)の閲覧応答の検証・分類。deviceControl.ts(server-only)から使うが、
+// ロジック自体は環境非依存なのでここへ切り出し、素のvitestから直接テストできるようにする
+// (fetch/headers()を伴う経路そのものは対象外。getDeviceControlHistory等の既存経路と
+// 同じ水準で、HTTP呼び出しの配線自体は結合テストの対象としない)。
 
-// The full set of states the device ledger (external dispatcher side) can return (8 kinds).
-// Values that do not match here are treated as an "unexpected response" (if new states are added, update this too).
+// Kaname kaname.device_status ビューが返しうる状態の全集合(0062_devices.sqlのcase文と同じ8種)。
+// ここで一致しない値は「想定外の応答」として扱う(新しい状態が増えたら、ここも一緒に更新する)。
 const DEVICE_STATES = ['paused', 'failed', 'unmonitored', 'baseline', 'quiet', 'stale', 'never', 'ok'] as const;
 export type DeviceState = (typeof DEVICE_STATES)[number];
 export const KNOWN_DEVICE_STATES: ReadonlySet<string> = new Set(DEVICE_STATES);
@@ -60,7 +60,7 @@ export type DeviceDispatchPayload = {
   reason: string;
 };
 
-/** Build in one place the required attribution information passed to the external dispatcher's audit. */
+/** Codzilla と Kaname の監査へ渡す必須帰属情報を一か所で組み立てる。 */
 export function buildDeviceDispatchPayload(input: DeviceDispatchPayload): DeviceDispatchPayload | null {
   const payload = {
     device_key: input.device_key.trim(),
@@ -93,42 +93,8 @@ export function isValidInventoryItem(value: unknown): value is DeviceInventoryIt
     && (v.last_success_at === null || typeof v.last_success_at === 'string');
 }
 
-export type DeviceControlDevice = { key: string; label: string };
-
-const MAX_DEVICE_FIELD_LENGTH = 200;
-
-/**
- * Read the allowlist of target devices from the setting (ISMS_DEVICE_CONTROL_DEVICES).
- * Format is a JSON array: [{"key":"<device ID on the dispatcher side>","label":"display name"}, ...].
- * If unset, empty, or malformed, return an empty array (fail-closed: no selectable devices = no operations possible).
- * If even one element is invalid, discard the whole thing (do not read it partially and mix in unexpected devices).
- */
-export function parseDeviceControlDevices(raw: string | undefined): DeviceControlDevice[] {
-  if (!raw || raw.trim() === '') return [];
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(data)) return [];
-  const seen = new Set<string>();
-  const devices: DeviceControlDevice[] = [];
-  for (const item of data) {
-    if (item === null || typeof item !== 'object') return [];
-    const { key, label } = item as Record<string, unknown>;
-    if (typeof key !== 'string' || typeof label !== 'string') return [];
-    const k = key.trim();
-    const l = label.trim();
-    if (!k || !l || k.length > MAX_DEVICE_FIELD_LENGTH || l.length > MAX_DEVICE_FIELD_LENGTH || seen.has(k)) return [];
-    seen.add(k);
-    devices.push({ key: k, label: l });
-  }
-  return devices;
-}
-
-// Devices not in the configured allowlist are excluded here too, without relying on the upstream filter
-// (even if unknown devices get into deviceMap through config drift, they are not shown on this screen).
+// 対象5台の固定リストに無い端末は、upstream側のフィルタに依存せずここでも除外する
+// (設定ドリフトで未知の端末がdeviceMapに混入しても、この画面には出さない)。
 export function filterKnownInventoryItems(items: DeviceInventoryItem[], knownDeviceKeys: ReadonlySet<string>): DeviceInventoryItem[] {
   return items.filter((it) => knownDeviceKeys.has(it.device_key));
 }
@@ -138,10 +104,10 @@ export type InventoryClassification =
   | { state: 'empty'; items: [] }
   | { state: 'anomalous' };
 
-// Classify the orchestrator response (parsed JSON). Do not confuse "empty" with "no devices can be shown due to an anomaly/config drift":
-// the former is only when the orchestrator itself returned a validated empty array
-// with state='empty'. If rawState='ok' but items is empty, or all items are
-// outside the fixed list (= effectively 0 known devices), it is 'anomalous', and the caller falls back to unavailable.
+// orchestrator応答(パース済みJSON)を分類する。「空である」と「異常/設定ドリフトで
+// 表示できる端末が無い」を混同しない: 前者はorchestrator自身が検証済みの空配列を
+// state='empty'で返した場合だけ。rawState='ok'なのにitemsが空、または全件が
+// 固定リスト外(=既知端末が実質0件)は'anomalous'とし、呼び出し側でunavailableへ倒す。
 export function classifyInventoryResponse(
   rawState: unknown,
   rawItems: unknown,

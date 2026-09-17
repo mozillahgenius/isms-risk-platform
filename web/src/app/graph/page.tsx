@@ -93,7 +93,7 @@ export default async function GraphPage() {
         derivedNodeCount={model.derivedNodeCount}
       />
 
-      {/* A Canvas cannot be navigated by keyboard or screen reader. Always provide a text path to the same content as well. */}
+      {/* Canvas はキーボードでも読み上げでも辿れない。同じ中身へ行ける導線を必ず文字でも置く。 */}
       <section className="card p-4">
         <h2 className="text-[14px] font-semibold">図を使わずに辿る</h2>
         <p className="mt-1 text-[12px] text-[var(--muted)]">

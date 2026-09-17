@@ -2,7 +2,7 @@ import 'server-only';
 
 import { withTenant, type TenantReadResult } from './tenant';
 
-/** List of import records (0071), newest first. Undone imports are shown together with the result of the undo. */
+/** 取り込みの記録（0071）の一覧。新しい順。取り消したものは取り消しの結果も一緒に出す。 */
 export type ImportBatchRow = {
   id: string;
   kind: string;

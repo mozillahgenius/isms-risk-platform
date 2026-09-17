@@ -39,7 +39,7 @@ export const WORK_TYPE_LABEL: Record<string, string> = {
   custom: 'その他の作業',
 };
 
-/** Kind label of the target record. Kept paired with app.work_type_for_resource in 0058. */
+/** 対象レコードの種別ラベル。0058 の app.work_type_for_resource と対で持つ。 */
 export const RESOURCE_TYPE_LABEL: Record<string, string> = {
   asset: '情報資産',
   risk: 'リスク',
@@ -50,7 +50,7 @@ export const RESOURCE_TYPE_LABEL: Record<string, string> = {
   vendor_assessment: '外部リソース評価',
 };
 
-/** Target record kinds selectable per work type. The inverse mapping of work_type_for_resource. */
+/** 作業種別ごとに選べる対象レコードの種別。work_type_for_resource の逆写像。 */
 export const RESOURCE_TYPES_FOR_WORK: Record<string, string[]> = {
   asset_inventory: ['asset'],
   risk_assessment: ['risk', 'measure'],
@@ -60,7 +60,7 @@ export const RESOURCE_TYPES_FOR_WORK: Record<string, string[]> = {
   custom: [],
 };
 
-/** Cap on the number of target candidates fetched. Keeps the screen from being overwhelmed rendering options as the register grows. */
+/** 対象候補の取得件数上限。台帳が育っても選択肢の描画で画面が潰れないようにする。 */
 const TARGET_LIMIT = 300;
 
 export type AssigneeRow = {
@@ -85,7 +85,7 @@ export type AssignmentRow = {
   status: string;
   created_at: string;
   assignees: AssigneeRow[];
-  /** If the viewer is assigned to this work, that one row. Otherwise null. */
+  /** 閲覧者自身がこの作業の担当なら、その 1 行。担当でなければ null。 */
   mine: AssigneeRow | null;
   notified_count: number;
 };
@@ -119,7 +119,7 @@ export type AssignmentWorkspace = {
   users: MemberOption[];
   departments: DepartmentOption[];
   workTypes: { value: keyof typeof WORK_TYPE_LABEL; label: string }[];
-  /** Target record candidates for selectedWorkType. Empty if none is selected. */
+  /** selectedWorkType に対応する対象レコード候補。未選択なら空。 */
   targets: TargetOption[];
   selectedWorkType: string;
   assignments: AssignmentRow[];
@@ -128,7 +128,7 @@ export type AssignmentWorkspace = {
 };
 
 export type AssignmentQuery = {
-  /** 'mine' shows only work assigned to you. The default is everything visible, including work not assigned to you. */
+  /** 'mine' なら自分が担当の作業だけ。既定は担当以外も見える範囲すべて。 */
   scope?: string;
   workType?: string;
 };
@@ -204,7 +204,7 @@ export async function getAssignmentWorkspace(
       sql<{ role: ManagementRole; user_id: string | null }[]>`
         SELECT app.current_management_role() AS role,
                app.current_session_user()::text AS user_id`,
-      // Candidate assignees. Uses the same CASE as the mapping in 0057 (identical to organizationRegister.ts).
+      // 依頼先の候補。0057 の写像と同じ CASE を使う（organizationRegister.ts と同一）。
       sql<MemberOption[]>`
         SELECT u.id, u.display_name, u.email::text,
                CASE
@@ -242,8 +242,8 @@ export async function getAssignmentWorkspace(
     const role = roleRows[0]?.role ?? 'none';
     const currentUserId = roleRows[0]?.user_id ?? null;
 
-    // Work is fetched as one row and assignees as separate rows. Previously they were collapsed into one row with min()/string_agg(),
-    // so each assignee's assignment type and progress could not be read on screen.
+    // 作業は 1 行、担当者は別行で取る。以前は min()/string_agg() で 1 行へ潰して
+    // いたため、担当者ごとの担当区分と進捗が画面から読めなかった。
     const items = await sql<{
       id: string; work_type: string; title: string; instructions: string;
       resource_type: string | null; resource_id: string | null; resource_label: string | null;

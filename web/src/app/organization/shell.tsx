@@ -3,11 +3,11 @@ import Link from 'next/link';
 import { MANAGEMENT_ROLE_LABEL, type ManagementRole } from '@/lib/organizationRegister';
 
 /**
- * Shared frame for the 4 organization-management tabs (heading, tabs, save-result notice).
+ * 組織管理の 4 タブで共通の枠（見出し・タブ・保存結果の通知）。
  *
- * Not a layout.tsx because Next layouts cannot receive searchParams.
- * The save result (?saved=1 / ?error=...) and the mode (?mode=isms|risk) both
- * come via the query, so the frame can only render them if its caller is a page.
+ * layout.tsx にしなかったのは、Next の layout が searchParams を受け取れないため。
+ * 保存結果（?saved=1 / ?error=...）とモード（?mode=isms|risk）はどちらも
+ * クエリで来るので、枠を出す側がページでないと表示できない。
  */
 
 export const ORGANIZATION_TABS = [
@@ -53,14 +53,14 @@ export function first(value: string | string[] | undefined): string {
 
 export type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-/** Build links preserving ?mode=. Losing the mode on tab navigation reorders the nav. */
+/** ?mode= を保ったままリンクを作る。タブ移動でモードが落ちるとナビの並びが入れ替わる。 */
 export function withMode(href: string, mode: string): string {
   return mode ? `${href}?mode=${encodeURIComponent(mode)}` : href;
 }
 
 /**
- * The action side decides where to return after saving (ORG_TAB in actions.ts),
- * so the form only passes the current mode. Without it the mode is lost on every save.
+ * 保存後の戻り先をアクション側が決めるので（actions.ts の ORG_TAB）、
+ * フォームには今のモードだけを渡す。これが無いと保存のたびにモードが落ちる。
  */
 export function ModeField({ mode }: { mode: string }) {
   if (!mode) return null;

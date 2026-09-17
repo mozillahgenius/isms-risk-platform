@@ -1,5 +1,5 @@
--- 0011 app: operations (design doc 2.10)
--- findings, corrective actions, policies, training, audits, reviews, vendors, incidents, tasks, approvals
+-- 0011 app: 運用（設計書 2.10）
+-- 指摘・是正・規程・教育・監査・レビュー・委託先・インシデント・タスク・承認
 
 CREATE TABLE app.findings (
   id          uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -18,13 +18,13 @@ CREATE TABLE app.findings (
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),
-  -- Cannot be closed without human verification (design doc 1.9)
+  -- 人の確認なしにクローズできない（設計書 1.9）
   CHECK (status <> 'verified' OR (verified_by IS NOT NULL AND verified_at IS NOT NULL)),
   CHECK (status <> 'closed'   OR (verified_by IS NOT NULL AND closed_at   IS NOT NULL))
 );
 CREATE INDEX findings_open ON app.findings (tenant_id, status, due_date);
 
--- Add the FK from 0010's exceptions to findings after the fact
+-- 0010 の exceptions から findings への FK を後付けする
 ALTER TABLE app.exceptions
   ADD CONSTRAINT exceptions_finding_fk
   FOREIGN KEY (tenant_id, finding_id) REFERENCES app.findings(tenant_id, id);
@@ -59,7 +59,7 @@ CREATE TABLE app.policy_versions (
   tenant_id   uuid NOT NULL, policy_id uuid NOT NULL,
   version     int NOT NULL,
   body_md     text NOT NULL,
-  diff_clause_count int NOT NULL DEFAULT 0,         -- number of clauses changed from the standard (for the conformance score)
+  diff_clause_count int NOT NULL DEFAULT 0,         -- 標準からの変更条項数（適合度スコア用）
   approved_by uuid, approved_at timestamptz,
   effective_from date, superseded_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
@@ -96,7 +96,7 @@ CREATE TABLE app.audit_programs (
   id uuid NOT NULL DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   fiscal_year int NOT NULL,
   status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','fixed','completed')),
-  coverage_verified_at timestamptz,                 -- confirmation that all controls are covered (Phase 4 acceptance)
+  coverage_verified_at timestamptz,                 -- 全統制網羅の確認（Phase 4 受入）
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id), UNIQUE (tenant_id, fiscal_year)
@@ -184,7 +184,7 @@ CREATE TABLE app.incidents (
   PRIMARY KEY (tenant_id, id)
 );
 
-CREATE TABLE app.tasks (                       -- tasks derived from the standard calendar
+CREATE TABLE app.tasks (                       -- 標準カレンダー由来のタスク
   id uuid NOT NULL DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   calendar_event_key text REFERENCES catalog.calendar_events_default(key),
   title text NOT NULL, assigned_role text, assigned_to uuid,
@@ -200,7 +200,7 @@ CREATE TABLE app.tasks (                       -- tasks derived from the standar
 CREATE TABLE app.approvals (
   id uuid NOT NULL DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   target_type text NOT NULL, target_id uuid NOT NULL,
-  target_version_hash bytea NOT NULL,          -- makes it possible to identify exactly what was approved
+  target_version_hash bytea NOT NULL,          -- 何を承認したかを特定できるようにする
   approver_user_id uuid NOT NULL, approved_at timestamptz NOT NULL DEFAULT now(),
   comment text,
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,

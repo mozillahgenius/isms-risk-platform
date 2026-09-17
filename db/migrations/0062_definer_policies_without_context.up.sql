@@ -1,28 +1,28 @@
 -- @run-as: admin
--- 0062: make schema_owner policies not throw when there is no tenant context (design doc 2026-09-11 §9.3)
+-- 0062: schema_owner 向けポリシーを、テナント文脈が無くても例外を投げない形にする（設計書 2026-09-11 §9.3）
 --
--- Symptom: on a freshly migrated DB, scripts/new_tenant.py (app.provision_tenant) and
--- db/seeds/0009_relationships.sql fail with "tenant context is not set".
+-- 症状: 新規に migrate した DB で scripts/new_tenant.py（app.provision_tenant）と
+-- db/seeds/0009_relationships.sql が「tenant context is not set」で落ちる。
 --
--- Cause: since 0050, management_definer_access /
--- tenant_security_definer / verification_receipt_definer_insert, added for schema_owner,
--- call `tenant_id = app.current_tenant()` directly. app.current_tenant()
--- RAISEs when there is no context. PostgreSQL evaluates the permissive policies for the same command
--- with OR, so even when provision_tenant tries to take a row lock via 0043's ctx_user_lock (provisioning_target()),
--- the neighboring management_definer_access is evaluated first and raises.
--- The same applies to the seed's DELETE (SET ROLE schema_owner).
+-- 原因: 0050 以降、schema_owner 向けに付けた management_definer_access /
+-- tenant_security_definer / verification_receipt_definer_insert が
+-- `tenant_id = app.current_tenant()` を直接呼んでいる。app.current_tenant() は
+-- 文脈が無いと RAISE する。PostgreSQL は同じコマンドに当たる permissive ポリシーを
+-- OR で評価するので、provision_tenant が 0043 の ctx_user_lock（provisioning_target()）
+-- で行ロックを取ろうとしても、隣の management_definer_access が先に評価されて例外になる。
+-- seed の DELETE（SET ROLE schema_owner）も同じ。
 --
--- Fix: switch to app.current_tenant_or_null() (NULL when there is no context), already created in 0059.
--- Comparison with NULL is false, so without a context it just means "this policy sees nothing",
--- without interfering with other policies (provisioning_target() etc.). The meaning with a context is unchanged.
--- It is wrapped in `(SELECT ...)` so it is evaluated once per query rather than per row
--- (current_tenant_or_null catches exceptions and thus opens a subtransaction; do not make it open one per row).
+-- 対処: 0059 で既に作ってある app.current_tenant_or_null()（文脈が無ければ NULL）へ差し替える。
+-- NULL との比較は偽なので、文脈が無いときは「このポリシーでは何も見えない」になるだけで、
+-- 他のポリシー（provisioning_target() 等）の判定を邪魔しない。文脈があるときの意味は変わらない。
+-- `(SELECT ...)` で包むのは、行ごとではなく 1 クエリにつき 1 回だけ評価させるため
+-- （current_tenant_or_null は例外を捕まえるのでサブトランザクションを張る。行ごとに張らせない）。
 --
--- Targets are the 30 policies enumerated by measuring pg_policies on a fresh DB on 2026-09-12 (all those for schema_owner
--- that call current_tenant() directly). The end of the file checks that "none remain".
+-- 対象は 2026-09-12 に新規 DB で pg_policies を実測して列挙した 30 枚（schema_owner 向けで
+-- current_tenant() を直接呼んでいるもの全部）。末尾で「もう残っていない」ことを検査する。
 --
--- No SET ROLE schema_owner. The target tables are a mix of ones owned by schema_owner and ones owned by the migration
--- runner, and ALTER POLICY is allowed only for the owner. Run as @run-as: admin (superuser).
+-- SET ROLE schema_owner はしない。対象の表は所有者が schema_owner のものと migration 実行者の
+-- ものが混ざっており、ALTER POLICY は所有者にしか許されない。@run-as: admin（superuser）のまま流す。
 
 DO $$
 DECLARE
@@ -67,11 +67,11 @@ BEGIN
   END LOOP;
 END $$;
 
--- INSERT-only, so it has only WITH CHECK.
+-- INSERT 専用なので WITH CHECK だけを持つ。
 ALTER POLICY verification_receipt_definer_insert ON app.verification_receipts
   WITH CHECK (tenant_id = (SELECT app.current_tenant_or_null()));
 
--- Nothing missed. Fail if even one schema_owner policy that calls current_tenant() directly remains.
+-- 取りこぼしが無いこと。schema_owner 向けで current_tenant() を直に呼ぶポリシーが 1 枚でも残っていれば落とす。
 DO $$
 DECLARE
   leftover text;

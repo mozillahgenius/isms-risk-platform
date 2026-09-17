@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Phase 0 acceptance (design doc Part XII):
-#   load the existing xlsx -> DB -> the re-exported xlsx matches the input (machine diff with 0 differences)
+# Phase 0 の受入（設計書 Part XII）:
+#   既存 xlsx を投入 → DB → 再出力した xlsx の内容が入力と一致（機械 diff で差分 0 件）
 #
-# Do not treat "no errors" or "the file was generated" as grounds for completion.
-# Pass only when there are 0 differences and the semantic mapping (RiskItem->area/phase etc.) is confirmed directly from the DB.
+# 「エラーが出なかった」「ファイルが生成された」を根拠に完了としない。
+# 差分 0 件と、意味の写像（RiskItem→area/phase 等）を DB から直接確認できたときだけ合格。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,10 +65,10 @@ BEGIN
     FROM app.risk_scenarios s
     JOIN app.risk_assessments a ON a.tenant_id=s.tenant_id AND a.risk_scenario_id=s.id
     JOIN app.risk_treatments  t ON t.tenant_id=a.tenant_id AND t.risk_assessment_id=a.id
-   WHERE s.tenant_id='$TENANT' AND s.summary LIKE '退職者のアカウントが残り%';
-  IF r.area <> 'サンプル部門A' OR r.phase <> 1 THEN RAISE EXCEPTION 'RiskItem→area/phase の写像が誤り: % / %', r.area, r.phase; END IF;
-  IF r.theme   <> 'サンプルテーマA' THEN RAISE EXCEPTION 'Big→theme の写像が誤り: %', r.theme; END IF;
-  IF r.measure <> 'サンプル施策A'   THEN RAISE EXCEPTION 'Mid→measure の写像が誤り: %', r.measure; END IF;
+   WHERE s.tenant_id='$TENANT' AND s.summary LIKE '退職者のアカウントが残存%';
+  IF r.area <> '人事・労務' OR r.phase <> 1 THEN RAISE EXCEPTION 'RiskItem→area/phase の写像が誤り: % / %', r.area, r.phase; END IF;
+  IF r.theme   <> '入退社手続きの整備'   THEN RAISE EXCEPTION 'Big→theme の写像が誤り: %', r.theme; END IF;
+  IF r.measure <> '権限付与・剥奪フロー' THEN RAISE EXCEPTION 'Mid→measure の写像が誤り: %', r.measure; END IF;
   IF r.frame   <> '管理可能性'           THEN RAISE EXCEPTION 'Frame→frame の写像が誤り: %', r.frame; END IF;
   IF r.prob <> 4 OR r.impact_biz <> 5    THEN RAISE EXCEPTION 'Before の写像が誤り'; END IF;
   IF r.prob_after <> 2 OR r.impact_biz_after <> 4 THEN RAISE EXCEPTION 'After の写像が誤り'; END IF;
@@ -89,7 +89,7 @@ python3 - "$WORK/out.xlsx" "$WORK/broken.xlsx" <<'PY'
 import sys, openpyxl
 wb = openpyxl.load_workbook(sys.argv[1])
 ws = wb['カルテ_リスクマップ']
-ws.cell(row=2, column=6).value = 1          # overwrite ProbBefore
+ws.cell(row=2, column=6).value = 1          # ProbBefore を書き換える
 wb.save(sys.argv[2])
 PY
 if python3 "$ROOT/phase0/diff_xlsx.py" "$WORK/in.xlsx" "$WORK/broken.xlsx" >/dev/null 2>&1; then
@@ -140,9 +140,9 @@ for name in ('リスクマップ_AUTO', 'ヒートマップ_AUTO'):
 json.dump(out, open(sys.argv[2], 'w', encoding='utf-8'),
           ensure_ascii=False, sort_keys=True, indent=1)
 PY
-# Do not build it so that, when there is no golden file, "the current output" is written as the correct answer.
-# Even if generation is broken, the first run would always pass, so it would not work as a check (self-approval).
-# Require PHASE0_WRITE_GOLDEN=1 to be set explicitly only when regenerating on purpose.
+# ゴールデンが無ければ「今の出力」を正解として書き込む作りにしてはいけない。
+# 生成が壊れていても初回は必ず通ってしまい、検査として成立しない（自己承認）。
+# 意図的に作り直すときだけ PHASE0_WRITE_GOLDEN=1 を明示させる。
 if [ ! -f "$GOLDEN" ]; then
   if [ "${PHASE0_WRITE_GOLDEN:-}" = "1" ]; then
     mkdir -p "$(dirname "$GOLDEN")"
@@ -164,9 +164,9 @@ BEGIN
   SELECT count(*) INTO n FROM catalog.risk_scenario_templates WHERE retired_at IS NULL;
   IF n = 0 THEN RAISE EXCEPTION 'risk_scenario_templates が空（load_csv.py を先に流すこと）'; END IF;
   IF NOT EXISTS (SELECT 1 FROM catalog.risk_scenario_templates
-                  WHERE area = 'サンプル社内IT' AND phase = 1
-                    AND theme  = '端末管理（サンプル）'
-                    AND frame  = '管理可能性') THEN
+                  WHERE area = '経理・税務' AND phase = 1
+                    AND theme  = 'クラウド会計ソフト活用'
+                    AND frame  = 'スピード') THEN
     RAISE EXCEPTION '代表レコードが catalog に入っていない';
   END IF;
   RAISE NOTICE 'risk_scenario_templates: % 件', n;

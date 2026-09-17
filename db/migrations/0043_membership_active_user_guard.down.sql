@@ -1,7 +1,7 @@
--- 0043 down: revert to the trigger definitions as of 0005
+-- 0043 down: 0005時点のトリガー定義へ戻す
 --
--- Note: no BEGIN/COMMIT here. scripts/migrate.sh already wraps the whole file
--- in a single transaction.
+-- 注: BEGIN/COMMITはここには書かない。scripts/migrate.shがファイル全体を
+-- 既に1トランザクションで包んでいる。
 
 DROP POLICY IF EXISTS ctx_user_lock ON app.users;
 

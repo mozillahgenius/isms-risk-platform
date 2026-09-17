@@ -66,7 +66,7 @@ export default async function MemberMasterPage({ searchParams }: { searchParams:
           <form action={addMember} className="grid gap-3 border-b border-[var(--border)] bg-[var(--surface-2)] p-4 md:grid-cols-4">
             <ModeField mode={mode} />
             <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">氏名
-              <input className="input" name="display_name" placeholder="山田 太郎" required />
+              <input className="input" name="display_name" placeholder="Example Member" required />
             </label>
             <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">メールアドレス
               <input className="input" name="email" type="email" placeholder="member@example.com" required />

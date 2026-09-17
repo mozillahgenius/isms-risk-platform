@@ -1,8 +1,8 @@
 -- @run-as: admin
--- Rollback of 0066. Removes the legal/contractual requirements table and restores the role kinds to 0065's version.
+-- 0066 の巻き戻し。法令・契約上の要求事項の表を外し、役割の種類を 0065 の版へ戻す。
 --
--- **Does not roll back when data exists** (same as 0055; A.5.31 records are not silently deleted by down).
--- The guard sits before SET ROLE and takes a SHARE lock and counts only if the table exists (same as 0065's down).
+-- **データがあるときは巻き戻さない**（0055 と同じ。A.5.31 の記録を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、表が在るときだけ SHARE ロックを取って数える（0065 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;

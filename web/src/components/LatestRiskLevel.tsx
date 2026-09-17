@@ -1,9 +1,9 @@
 import type { SnapshotStage } from '@/lib/riskRegister';
 
-// "Latest level" is nothing more than the number from the newest assessment.
-// In the register's initial draft the post-measure one (after_measure) is the latest, so showing only the number
-// **makes the effect of measures not yet implemented read as the current level**.
-// Always state which stage the number is from.
+// 「最新レベル」は、いちばん新しい評価の数字でしかない。
+// 台帳の初期案では施策後（after_measure）が最新になるので、数字だけを出すと
+// **まだ実施していない施策の効果を、現在の水準として読ませてしまう**。
+// どの段階の数字なのかを必ず添える。
 const STAGE_LABEL: Record<SnapshotStage, string> = {
   inherent: '固有',
   before_measure: '施策前',

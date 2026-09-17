@@ -86,10 +86,10 @@ export async function getCompetencyWorkspace(): Promise<TenantReadResult<Compete
        WHERE tr.evaluation_status = '有効' AND tr.evidence_ref <> ''
        ORDER BY tr.completed_at DESC NULLS LAST, t.title`;
 
-    // Fulfillment rate per role (acceptance criterion C3: the number of unfulfilled people is visible at a glance).
-    // Because there is no definition of "required headcount", the denominator is "the number of members whose
-    // fulfillment status against that role's competency requirements has been recorded" (members with no record yet are
-    // not included in the denominator, to avoid arbitrary assumptions about the population).
+    // 役割ごとの充足率(受入条件C3: 未充足人数がひと目でわかる)。
+    // 「必要な人数」の定義が無いため、分母は「その役割の力量要件に対して
+    // 充足状況が記録されているメンバー数」とする(まだ記録が無いメンバーは
+    // 分母に含めない。母数の恣意的な仮定を避ける)。
     const summaries = await sql<RequirementSummary[]>`
       SELECT r.id AS requirement_id, r.role, r.required_competency,
              count(*) FILTER (

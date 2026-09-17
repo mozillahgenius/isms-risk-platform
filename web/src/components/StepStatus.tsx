@@ -16,8 +16,8 @@ import {
   type ToolState,
 } from '@/lib/isoSteps';
 
-// Displays the state of stages and tools. A display-only component; it makes no decisions at all
-// (decisions live in lib/isoSteps.ts; writing decisions per screen makes each screen tell a different lie).
+// 段階と道具の状態を出すところ。表示のためだけの部品で、判定は一切しない
+// （判定は lib/isoSteps.ts。画面ごとに判定を書くと、画面ごとに違う嘘をつき始める）。
 
 const STATUS_STYLE: Record<StepStatus, { cls: string; Icon: typeof CheckCircle }> = {
   usable: { cls: 'badge badge-done', Icon: CheckCircle },
@@ -56,7 +56,7 @@ const TOOL_STATE_STYLE: Record<ToolState['kind'], string> = {
   unreadable: 'badge badge-on-hold',
 };
 
-/** Summarize the state in a few words without rounding counts. */
+/** 状態の中身を、数を丸めずに一言にする。 */
 export function toolStateDetail(state: ToolState): string {
   switch (state.kind) {
     case 'present':
@@ -78,7 +78,7 @@ export function ToolStateBadge({ state }: { state: ToolState }) {
   return <span className={TOOL_STATE_STYLE[state.kind]}>{TOOL_STATE_LABEL[state.kind]}</span>;
 }
 
-/** Body state for a single policy. isoSteps makes the decision; this only displays it. */
+/** 規程 1 本の本文の状態。判定は isoSteps 側で行い、ここは出すだけ。 */
 export function PolicyBodyBadge({ state }: { state: PolicyBodyState }) {
   if (state === 'substantive') return null;
   return (
@@ -88,13 +88,13 @@ export function PolicyBodyBadge({ state }: { state: PolicyBodyState }) {
   );
 }
 
-/** One tool listed in a stage's details. */
+/** 段階の詳細に並べる道具 1 件。 */
 export function ToolRow({ tool, state }: { tool: StepTool; state: ToolState }) {
   const title = (
     <span className="font-medium">
       {tool.label}
       {tool.required && (
-        <span className="ms-1.5 text-[11px] font-normal text-[var(--muted)]">要る</span>
+        <span className="ml-1.5 text-[11px] font-normal text-[var(--muted)]">要る</span>
       )}
     </span>
   );
@@ -119,10 +119,10 @@ export function ToolRow({ tool, state }: { tool: StepTool; state: ToolState }) {
 }
 
 /**
- * List, by name, tools that are required but not in place.
+ * 要るのにそろっていない道具を、名前で挙げる。
  *
- * Returns a span. In the stage list each row is entirely a link (an a element),
- * so returning a p would create the invalid nesting a > span > p.
+ * span で返す。段階一覧では 1 行が丸ごとリンク（a 要素）なので、
+ * p で返すと a > span > p という不正な入れ子になる。
  */
 export function MissingLine({ missing }: { missing: StepTool[] }) {
   if (missing.length === 0) return null;

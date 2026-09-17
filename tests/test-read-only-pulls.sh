@@ -8,26 +8,26 @@ WRITABLE_SQLITE_STUB="$ROOT/tests/fixtures/writable-sqlite-stub.sh"
 CONTRACT="$ROOT/connectors/read_only_sources.contract.json"
 OUT_DIR="$(mktemp -d)"
 trap 'rm -rf "$OUT_DIR"' EXIT
-SQLITE_DB="$OUT_DIR/automation.sqlite"
+SQLITE_DB="$OUT_DIR/codzilla.sqlite"
 sqlite3 "$SQLITE_DB" "create table events (id integer primary key, message text); insert into events (message) values ('a'), ('b'), ('c');"
 
 export ISMS_PULL_DSN_MKT=fixture_mkt
 export ISMS_PULL_DSN_OPS=fixture_ops
-export ISMS_PULL_DSN_BACKOFFICE=fixture_ssi
-export ISMS_PULL_DSN_KNOWLEDGE=fixture_knowledge
-export ISMS_PULL_DSN_AUTOMATION="$SQLITE_DB"
+export ISMS_PULL_DSN_SSI=fixture_ssi
+export ISMS_PULL_DSN_KANAME=fixture_kaname
+export ISMS_PULL_DSN_CODZILLA="$SQLITE_DB"
 export ISMS_PULL_DSN_EL=fixture_el
 export ISMS_PULL_PROBE_RELATION_MKT=public.source_mkt
 export ISMS_PULL_PROBE_RELATION_OPS=public.source_ops
-export ISMS_PULL_PROBE_RELATION_BACKOFFICE=public.source_ssi
-export ISMS_PULL_PROBE_RELATION_KNOWLEDGE=public.source_knowledge
-export ISMS_PULL_PROBE_RELATION_AUTOMATION=events
+export ISMS_PULL_PROBE_RELATION_SSI=public.source_ssi
+export ISMS_PULL_PROBE_RELATION_KANAME=public.source_kaname
+export ISMS_PULL_PROBE_RELATION_CODZILLA=events
 export ISMS_PULL_PROBE_RELATION_EL=public.source_el
 export ISMS_PULL_PROBE_COLUMN_MKT=id
 export ISMS_PULL_PROBE_COLUMN_OPS=id
-export ISMS_PULL_PROBE_COLUMN_BACKOFFICE=id
-export ISMS_PULL_PROBE_COLUMN_KNOWLEDGE=id
-export ISMS_PULL_PROBE_COLUMN_AUTOMATION=message
+export ISMS_PULL_PROBE_COLUMN_SSI=id
+export ISMS_PULL_PROBE_COLUMN_KANAME=id
+export ISMS_PULL_PROBE_COLUMN_CODZILLA=message
 export ISMS_PULL_PROBE_COLUMN_EL=id
 
 python3 -m py_compile "$RUNNER" "$ROOT/scripts/read_only_role_probe.py" "$ROOT/scripts/sqlite_read_only_probe.py" "$ROOT/scripts/validate_pull_events.py" "$ROOT/scripts/snapshot_pull_events.py"
@@ -43,7 +43,7 @@ import pathlib
 import sys
 
 paths = sorted(pathlib.Path(sys.argv[1]).glob("*.json"))
-assert {path.stem for path in paths} == {"mkt", "ops", "backoffice", "knowledge", "automation", "el"}
+assert {path.stem for path in paths} == {"mkt", "ops", "ssi", "kaname", "codzilla", "el"}
 expected_credentials = {f"cred.pull.{path.stem}" for path in paths}
 for path in paths:
     data = json.loads(path.read_text(encoding="utf-8"))

@@ -1,9 +1,9 @@
 -- @run-as: admin
 
--- Only drop the function. **Approval records (rows in app.approvals) are not deleted.**
--- The fact of approval could be stored in app.approvals even before 0056 existed,
--- and what this migration created is the path, not the record.
--- Deleting evidence to revert a path would be wrong.
+-- 関数を落とすだけ。**承認記録（app.approvals の行）は消さない。**
+-- 承認したという事実は 0056 が入る前から app.approvals に置ける形で、
+-- この migration が作ったのは経路であって記録ではない。
+-- 経路を戻すために証跡を消すのは筋が違う。
 
 SET ROLE schema_owner;
 

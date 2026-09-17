@@ -3,21 +3,21 @@ import 'server-only';
 import { withTenant, withTenantActor, type TenantReadResult } from './tenant';
 
 /**
- * Reads ISMS operational records (design doc 2026-09-11 §5).
- * Phase 1: internal audit (9.2), findings and corrective action (10.2), management review (9.3), control effectiveness evaluation (9.1).
- * Phase 2: information security objectives (6.2), supplier assessment (A.5.19-5.22), evidence, finding exceptions.
- * §4 (0065-): organizational issues (4.1), interested parties (4.2), legal, regulatory and contractual requirements (A.5.31).
+ * ISMS の運用記録（設計書 2026-09-11 §5）を読むところ。
+ * 第 1 段: 内部監査（9.2）・指摘と是正処置（10.2）・マネジメントレビュー（9.3）・統制の有効性評価（9.1）。
+ * 第 2 段: 情報セキュリティ目的（6.2）・委託先評価（A.5.19〜5.22）・証跡・指摘の例外。
+ * §4（0065〜）: 組織の課題（4.1）・利害関係者（4.2）・法令・規制・契約上の要求事項（A.5.31）。
  *
- * The meaning of the counts is aligned with the stage screen (catalog.ts's getRegisterFacts):
- * plans are not counted as done (only those whose execution / meeting / evaluation date is today or earlier are "done").
+ * 数の意味は段階の画面（catalog.ts の getRegisterFacts）と揃える:
+ * 計画は実施として数えない（実施日・開催日・評価日が今日までのものだけが「実施済み」）。
  */
 
 export type Person = { id: string; display_name: string; email: string };
 export type MeasureOption = { id: string; measure_key: string; name: string };
 
 /**
- * Upper limit on items shown in a list. The stage screen counts without a limit, so when the limit is reached the screen says so
- * (do not silently hide older records. Codex review 2026-09-12).
+ * 一覧に出す件数の上限。段階の画面の件数は上限なしで数えるので、上限に届いたら画面にそう書く
+ * （黙って古い記録を隠さない。Codex レビュー 2026-09-12）。
  */
 export const LIST_LIMIT = {
   audits: 200, findings: 300, correctiveActions: 300, effectiveness: 300, evidences: 300,
@@ -346,7 +346,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
         LEFT JOIN app.users u ON u.tenant_id = o.tenant_id AND u.id = o.owner_user_id
         LEFT JOIN app.users e ON e.tenant_id = o.tenant_id AND e.id = o.evaluated_by
        ORDER BY o.fiscal_year DESC, o.title`;
-    // Show only the latest assessment per supplier (the full history is in app.vendor_assessments).
+    // 委託先ごとに最新の評価だけを出す（履歴は app.vendor_assessments に全件ある）。
     const vendors = await sql<VendorRow[]>`
       SELECT v.id, v.name, v.service_name, v.criticality,
              la.assessed_on::text AS last_assessed_on, la.result AS last_result, la.next_due_on::text AS next_due_on,
@@ -358,7 +358,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
            ORDER BY a.assessed_on DESC, a.created_at DESC LIMIT 1
         ) la ON true
        ORDER BY v.name`;
-    // Stale (more than freshness_days since collection) is shown as outdated even if the status is still valid.
+    // 鮮度切れ（収集から freshness_days を過ぎた）は、状態が valid のままでも古いと示す。
     const evidences = await sql<EvidenceRow[]>`
       SELECT id, kind, title, object_key,
              to_char(collected_at AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS collected_at,
@@ -378,7 +378,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
         JOIN app.findings f ON f.tenant_id = x.tenant_id AND f.id = x.finding_id
         LEFT JOIN app.users u ON u.tenant_id = x.tenant_id AND u.id = x.approved_by
        ORDER BY x.expires_at`;
-    // Organizational issues and interested parties (0065). Active ones first (withdrawn ones are kept as the history of decisions).
+    // 組織の課題・利害関係者（0065）。有効なものを先に出す（取り下げたものも決定の経緯として残す）。
     const contextIssues = await sql<ContextIssueRow[]>`
       SELECT c.id, c.kind, c.title, c.description, c.isms_impact, c.owner_user_id, u.display_name AS owner_name,
              c.reviewed_on::text AS reviewed_on, c.status
@@ -391,7 +391,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
         FROM app.interested_parties p
         LEFT JOIN app.users u ON u.tenant_id = p.tenant_id AND u.id = p.owner_user_id
        ORDER BY (p.status = 'active') DESC, p.category, p.name`;
-    // Legal, regulatory and contractual requirements (0066). Shown together with the controls and evidence that address them, and the conformity evaluation.
+    // 法令・規制・契約上の要求事項（0066）。応える統制・証跡と、適合の評価を一緒に出す。
     const legalRequirements = await sql<LegalRequirementRow[]>`
       SELECT l.id, l.kind, l.title, l.requirement, l.source_ref, l.owner_user_id, u.display_name AS owner_name,
              l.measure_id, l.evidence_id,
@@ -405,7 +405,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
         -- 削除した証跡は「証跡あり」と見せない（今ある証跡と取り違えないように）。
         LEFT JOIN app.evidences e ON e.tenant_id = l.tenant_id AND e.id = l.evidence_id AND e.deleted_at IS NULL
        ORDER BY (l.status = 'active') DESC, l.kind, l.title`;
-    // Business continuity plans (0068). The last test and test count are taken only from tests dated today or earlier (scheduled tests are not counted as done).
+    // 事業継続の計画（0068）。最後の試験・試験の回数は、実施日が今日までの試験だけから取る（予定を実施として数えない）。
     const continuityPlans = await sql<ContinuityPlanRow[]>`
       SELECT p.id, p.title, p.scope, p.rto_hours, p.rpo_hours, p.procedure_location, p.owner_user_id,
              u.display_name AS owner_name, p.next_test_due::text AS next_test_due, p.status,
@@ -429,7 +429,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
         LEFT JOIN app.evidences e ON e.tenant_id = t.tenant_id AND e.id = t.evidence_id AND e.deleted_at IS NULL
        ORDER BY t.tested_on DESC, t.created_at DESC
        LIMIT ${LIST_LIMIT.continuityTests}`;
-    // Vulnerabilities (0069). Open ones (detected / in progress) first, ordered by highest severity and nearest due date.
+    // 脆弱性（0069）。開いているもの（検知・対応中）を先に、重大度の高い順・期限の近い順に出す。
     const vulnerabilities = await sql<VulnerabilityRow[]>`
       SELECT v.id, v.title, v.identifier, v.source, v.asset_id, a.asset_key, a.name AS asset_name, v.severity,
              v.detected_on::text AS detected_on, v.due_date::text AS due_date, v.status,
@@ -441,10 +441,10 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
                 CASE v.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                 v.due_date NULLS LAST, v.detected_on DESC
        LIMIT ${LIST_LIMIT.vulnerabilities}`;
-    // Only active assets can be linked to vulnerabilities.
+    // 脆弱性を結べる資産は、有効なものだけ。
     const assets = await sql<AssetOption[]>`
       SELECT id, asset_key, name FROM app.assets WHERE status = 'active' ORDER BY asset_key`;
-    // Change requests (0070). Those awaiting a decision and those approved (awaiting implementation) first.
+    // 変更の申請（0070）。判断を待っているもの・承認済み（実施待ち）を先に出す。
     const changeRequests = await sql<ChangeRequestRow[]>`
       SELECT c.id, c.title, c.description, c.impact, c.risk_level, c.rollback_plan, c.asset_id,
              a.asset_key, a.name AS asset_name, c.planned_on::text AS planned_on, c.requested_by,
@@ -467,7 +467,7 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
          AND EXISTS (SELECT 1 FROM app.memberships ms
                       WHERE ms.tenant_id = u.tenant_id AND ms.user_id = u.id AND ms.revoked_at IS NULL)
        ORDER BY u.display_name`;
-    // Auditors are active users with the auditor role (the DB enforces the no-dual-role rule).
+    // 監査人は監査人ロールを持つ有効な利用者（兼任禁止は DB が守る）。
     const auditors = await sql<Person[]>`
       SELECT DISTINCT u.id, u.display_name, u.email
         FROM app.users u
@@ -485,9 +485,9 @@ export async function getRecordsWorkspace(): Promise<TenantReadResult<RecordsWor
 }
 
 /**
- * The person viewing the screen (role and user ID). null if unreadable.
- * Record lists are read with the shared tenant session, so "is this the viewer's own request" cannot be known there.
- * Read via the viewer's own path (proxy identity) so the screen's conditional display matches the server checks (e.g. a requester does not decide).
+ * 画面を開いている本人（役割と利用者 ID）。読めなければ null。
+ * 記録の一覧は共有のテナントセッションで読むので、「本人の申請か」はそこでは分からない。
+ * 本人の経路（プロキシの本人性）で読み、画面の出し分けをサーバーの検査（申請者は判断しない等）とそろえる。
  */
 export async function getRecordsActor(): Promise<{ role: string; userId: string } | null> {
   const r = await withTenantActor(async (sql) => {
@@ -498,7 +498,7 @@ export async function getRecordsActor(): Promise<{ role: string; userId: string 
   return r.ok ? r.data : null;
 }
 
-/** Role of the person viewing the screen (owner/admin/manager/member/auditor/none). null if unreadable (writes are verified separately by the DB). */
+/** 画面を開いている本人の役割（owner/admin/manager/member/auditor/none）。読めなければ null（書き込みは DB が別途確かめる）。 */
 export async function getRecordsActorRole(): Promise<string | null> {
   const r = await withTenantActor(async (sql) => {
     const rows = await sql<{ role: string }[]>`SELECT app.current_management_role() AS role`;

@@ -1,18 +1,18 @@
 -- @run-as: admin
--- 0076: add policies to the initial data import (§8) (design decision of 2026-09-12; drafts only).
---   One row is one draft version of one policy. With a catalog_key the version is added to that policy; otherwise to the single policy whose title matches.
---   If nothing matches, a new policy is created with version 1. Approval and activation are not part of the import (only the
---   screen paths approve_policy_version / activate_policy_version).
---   Items: the added version (policy_version) and any newly created policy (policy).
---   Undo: only deletes versions that are unapproved, unedited, unreferenced and still the latest; a newly created policy is deleted only once it has no versions
---   (that judgment is made by the Web undo process; the DB counts by whether the row is gone, same as departments).
+-- 0076: 初期データの取り込み（§8）に規程を足す（2026-09-12 goto-twin 決定。下書きまで）。
+--   1 行が 1 つの規程の下書きの版 1 つ。catalog_key があればその規程に、無ければ題名で 1 件だけ一致する規程に版を足す。
+--   一致が無ければ規程を新しく作って版 1 を入れる。承認・有効化は取り込みに入れない（approve_policy_version /
+--   activate_policy_version の画面の経路だけ）。
+--   明細: 足した版（policy_version）と、新しく作った規程（policy）。
+--   取り消し: 未承認・未修正・参照が無く、まだ最新の版だけを消し、新しく作った規程は版が無くなったときだけ消す
+--   （その判定は Web の取り消し処理。件数は行が無くなったかどうかで DB が数える。部署と同じ）。
 
 SET ROLE schema_owner;
 
 ALTER TABLE app.import_batches DROP CONSTRAINT import_batches_kind_check;
 ALTER TABLE app.import_batches ADD CONSTRAINT import_batches_kind_check
   CHECK (kind IN ('assets','risks','departments','assignments','policies'));
--- A row that creates a new policy yields 2 items (policy and version), so the item count can exceed the row count.
+-- 規程を新しく作る行は、規程と版の 2 つの明細になるので、明細の数が行数を超えることがある。
 ALTER TABLE app.import_batches DROP CONSTRAINT import_batches_check;
 ALTER TABLE app.import_batches ADD CONSTRAINT import_batches_check
   CHECK (created_count >= 0 AND (kind IN ('assignments','policies') OR created_count <= row_count));
@@ -24,9 +24,9 @@ DROP INDEX app.import_batch_items_created_once;
 CREATE UNIQUE INDEX import_batch_items_created_once ON app.import_batch_items (tenant_id, target_type, target_id)
   WHERE target_type IN ('asset','risk','department','policy','policy_version');
 
--- Item guard (the 0075 version plus policies and versions).
---   Policies: rows created in this transaction (created_at is now; keep_created_at ensures updates cannot change it)
---   Versions: unapproved rows created in this transaction
+-- 明細の守り（0075 の版に、規程と版を足した）。
+--   規程: このトランザクションで作った行（created_at が今。更新で変えられないのは keep_created_at が守る）
+--   版:   このトランザクションで作った、未承認の行
 CREATE OR REPLACE FUNCTION app.import_items_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -93,7 +93,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- Who and when, and undo counts (the 0075 version plus policies and versions; for both, rows that no longer exist count as "undone").
+-- 誰がいつ・取り消しの件数（0075 の版に、規程と版を足した。どちらも行が無くなったものを「取り消した」）。
 CREATE OR REPLACE FUNCTION app.import_log_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -150,7 +150,7 @@ END $$;
 
 RESET ROLE;
 
--- Also prevent updates from changing the creation time of policies and versions (so "created in this transaction" cannot be faked; same as 0072 / 0073).
+-- 規程と版の作成日時も更新で変えさせない（「このトランザクションで作った」の判定を偽らせない。0072 / 0073 と同じ）。
 CREATE TRIGGER policies_keep_created_at BEFORE UPDATE ON app.policies
   FOR EACH ROW EXECUTE FUNCTION app.keep_created_at();
 CREATE TRIGGER policy_versions_keep_created_at BEFORE UPDATE ON app.policy_versions

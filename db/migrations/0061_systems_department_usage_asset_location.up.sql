@@ -1,43 +1,41 @@
--- 0061: register of systems in use / per-department usage / location of information assets
+-- 0061: 利用システムの台帳化 / 部門ごとの利用実態 / 情報資産の所在場所
 --
--- Background (measured):
---   - Information assets had no column equivalent to "location". Scanning all of
---     db/migrations for "location" (or its Japanese equivalents) finds nothing (the comment in 0020
---     and the external file reference in 0040 are different things).
---   - Meanwhile app.assets.owner_department_id already has both the column and the FK
---     since 0027, yet it is never used by any screen or query (0 hits with grep).
---   - app.application_catalog (0045) is only SELECTed; there is no INSERT/UPDATE
---     path. It sat empty as the parent for ID/license integration.
+-- 背景（実測）:
+--   - 情報資産に「所在場所」に相当する列は無かった。db/migrations 全体を
+--     location / 所在 / 保管 で走査してもヒットしない（0020 のコメントと
+--     0040 の外部ファイル参照は別物）。
+--   - 一方 app.assets.owner_department_id は 0027 で列も FK も既にあるのに、
+--     画面からもクエリからも一度も使われていない（grep で 0 件）。
+--   - app.application_catalog（0045）は SELECT されるだけで、INSERT/UPDATE の
+--     経路が無い。ID・ライセンス連携の親として置かれたまま空だった。
 --
--- Policy: **do not create a 4th "system-like thing".**
---   There are already three: app.application_catalog (parent for ID integration),
---   app.vendors (outsourcees = business counterparties) and app.assets.asset_type
---   (free text). Adding yet another systems table here would list the same SaaS in
---   4 places under different names, and nobody could say which is authoritative.
---   Promote application_catalog to the source of truth for "systems in use" and give
---   it a write path. Do not reconcile it with vendors (systems in use and
---   counterparties are different axes).
+-- 方針: **「システムらしきもの」を 4 つ目にしない。**
+--   既に app.application_catalog（ID連携の親）、app.vendors（委託先＝取引相手）、
+--   app.assets.asset_type（自由記述）の 3 つがある。ここに新しいシステム表を
+--   建てると、同じ SaaS が 4 箇所に別名で載り、どれが正本か誰も言えなくなる。
+--   application_catalog を「利用システム」の正本に昇格させ、書き込み経路を付ける。
+--   vendors とは名寄せしない（利用システムと取引相手は別の軸）。
 --
---   So the only new table is app.department_systems.
---   It records "systems a department uses that are not yet registered as
---   information assets" and "how they are used", which cannot be expressed via assets.
+--   したがって新設するのは app.department_systems 1 本だけ。
+--   「情報資産としてはまだ登録していないが、部門が使っているシステム」と
+--   「どう使っているか」の記述先が、資産経由では表せないため。
 
 SET ROLE schema_owner;
 
 -- ------------------------------------------------------------------
--- (1) Every member can write systems in use
+-- (1) 利用システムは各メンバーが書ける
 --
---   Write permission on the asset register (app.assets) stays with 0058's
---   require_work_permission. **Only the list of systems in use is relaxed.** What only
---   the front line knows is "which system is used for what", not the classification
---   of information assets or the assignment of ISO frameworks.
+--   資産台帳（app.assets）の書き込み権限は 0058 の require_work_permission の
+--   ままにする。**緩めるのは利用システムの一覧だけ。** 現場でないと分からない
+--   のは「どのシステムを何に使っているか」であって、情報資産の分類や
+--   ISO 枠組みの割当ではない。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.require_system_edit_permission() RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE v_role text := app.current_management_role();
 BEGIN
-  -- Auditors do not modify business data (same arrangement as the dual-role ban in 0005).
-  -- Users with no membership (none) cannot write either.
+  -- 監査人は業務データを変更しない（0005 の兼任禁止と同じ立て付け）。
+  -- 所属の無い利用者（none）も書けない。
   IF v_role IN ('none','auditor') THEN
     RAISE EXCEPTION 'system edit permission required' USING ERRCODE='insufficient_privilege';
   END IF;
@@ -47,20 +45,20 @@ ALTER FUNCTION app.require_system_edit_permission() OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.require_system_edit_permission() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.require_system_edit_permission() TO app_rw;
 
--- **0045 explicitly revokes INSERT/UPDATE/DELETE on application_catalog from app_rw**
--- ("do not let provider-derived state be forged with ordinary DML ... write only after
--- adding a dedicated RPC and a provider worker role"). That control stays in place.
--- As 0045 foreshadowed, **add dedicated RPCs** and let only them write.
--- Provisioning (identity_principals / entitlement_assignments /
--- provisioning_requests) stays read-only and is left untouched.
+-- **0045 は app_rw から application_catalog の INSERT/UPDATE/DELETE を明示的に
+-- 剥奪している**（「provider由来の状態を通常DMLで偽装させない。…専用RPCと
+-- provider worker role を追加してからだけ書き込む」）。その統制は外さない。
+-- 0045 が予告したとおり **専用 RPC を足して**、そこだけが書けるようにする。
+-- プロビジョニング（identity_principals / entitlement_assignments /
+-- provisioning_requests）は引き続き読み取り専用のまま触らない。
 --
--- 0045's CHECK constraints (regexes for app_key / provider, the provisioning_mode enum)
--- are not changed either. Rather than intruding on an already-applied table, callers
--- produce values that satisfy the constraints (derive app_key from the name, default provider to unknown).
+-- 0045 の CHECK 制約（app_key / provider の正規表現、provisioning_mode の enum）も
+-- 変えない。適用済みのテーブルへ侵襲せず、呼び出し側が制約を満たす値を作る
+-- （名称から app_key を採番し、provider は unknown を既定にする）。
 
--- SECURITY DEFINER runs as schema_owner. application_catalog is FORCE RLS,
--- so the owner needs a policy too. Compare with the variant that does not raise
--- when there is no context (same reason as 0059: keep the behavior from before the policy).
+-- SECURITY DEFINER は schema_owner として走る。application_catalog は
+-- FORCE RLS なので所有者にもポリシーが要る。文脈が無いときに例外を投げない
+-- 版で比べる（0059 と同じ理由。張る前と同じ挙動に留める）。
 CREATE POLICY tenant_security_definer ON app.application_catalog FOR ALL TO schema_owner
   USING (tenant_id = app.current_tenant_or_null())
   WITH CHECK (tenant_id = app.current_tenant_or_null());
@@ -84,12 +82,12 @@ ALTER FUNCTION app.create_system(text,text,text,text) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.create_system(text,text,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.create_system(text,text,text,text) TO app_rw;
 
--- app.assets is FORCE RLS and only has policies for app_rw / app_ro (0015).
--- Without one for the owner, the function below running as SECURITY DEFINER
--- (schema_owner) sees no asset rows at all, and the "used as a location" check is always false
--- (the same trap hit by 0057's assignment_target_exists; reproduced in acceptance tests).
--- Only reading is needed, so limit it to SELECT. Compare with the variant that does not raise
--- when there is no context, keeping the behavior from before the policy (0 rows).
+-- app.assets は FORCE RLS で app_rw / app_ro 向けのポリシーしか持たない（0015）。
+-- 所有者向けが無いと、SECURITY DEFINER（schema_owner）で走る下の関数からは
+-- 資産が 1 行も見えず、「所在として使われているか」の検査が常に false になる
+-- （0057 の assignment_target_exists で踏んだのと同じ罠。受入テストで再現した）。
+-- 必要なのは読むことだけなので SELECT に限る。文脈が無いときに例外を投げない
+-- 版で比べ、ポリシーを張る前と同じ挙動（0 行）に留める。
 CREATE POLICY tenant_security_definer_read ON app.assets FOR SELECT TO schema_owner
   USING (tenant_id = app.current_tenant_or_null());
 
@@ -99,8 +97,8 @@ CREATE OR REPLACE FUNCTION app.update_system(
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
   PERFORM app.require_system_edit_permission();
-  -- Do not retire a system that is used as a location.
-  -- Retiring it while still referenced yields a register saying "information lives in a place that no longer exists".
+  -- 所在場所として使われているシステムを廃止にしない。
+  -- 参照を残したまま廃止すると「もう無い場所に情報がある」台帳になる。
   IF p_status = 'retired' AND EXISTS (
     SELECT 1 FROM app.assets
      WHERE tenant_id = app.current_tenant() AND status = 'active'
@@ -124,15 +122,15 @@ GRANT EXECUTE ON FUNCTION app.update_system(uuid,text,text,text) TO app_rw;
 CREATE OR REPLACE FUNCTION app.guard_application_catalog() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
-  -- Paths without context (migration scripts, connectors, tests) pass through.
-  -- has_actor_context() rejects a tenant context with no actor (0059).
+  -- 文脈が無い経路（移行スクリプト・コネクタ・tests）は素通しする。
+  -- has_actor_context() はテナント文脈があるのに本人が居ない状態を弾く（0059）。
   IF NOT app.has_actor_context() THEN RETURN coalesce(NEW, OLD); END IF;
   PERFORM app.require_system_edit_permission();
   IF TG_OP <> 'DELETE' THEN
     NEW.updated_at := now();
     NEW.updated_by := app.current_session_user();
-    -- Do not let the caller decide who the author is. With coalesce, the passed value
-    -- would remain as-is, allowing forged audit info by writing another same-tenant user's ID.
+    -- 申告者は呼び出し側に決めさせない。coalesce にすると、渡された値が
+    -- そのまま残り、同じテナントの別人の ID を書いて監査情報を偽装できる。
     IF TG_OP = 'INSERT' THEN
       NEW.created_at := now();
       NEW.created_by := app.current_session_user();
@@ -155,13 +153,13 @@ COMMENT ON TABLE app.application_catalog IS
   '利用システムの正本。ID・ライセンス連携の親であると同時に、各メンバーが登録する「うちが使っているシステム」の一覧。委託先の台帳（app.vendors）とは別の軸で、名寄せしない';
 
 -- ------------------------------------------------------------------
--- (2) Which systems a department uses and how
+-- (2) 部門がどのシステムをどう使っているか
 --
---   "What information is handled" gets no separate register on the department side.
---   Once information assets (app.assets) have owner_department_id and a location,
---   department x system x information comes out by aggregation. A free-text information
---   register here would duplicate the asset register and inevitably diverge.
---   This table holds only "how it is used".
+--   「どんな情報を扱っているか」は部門側に別の台帳を持たせない。
+--   情報資産（app.assets）に owner_department_id と所在場所が入れば、
+--   部門×システム×情報は集計で出る。ここに自由記述の情報台帳を作ると、
+--   資産台帳と二重管理になって必ず食い違う。
+--   ここが持つのは「どう使っているか」だけ。
 -- ------------------------------------------------------------------
 CREATE TABLE app.department_systems (
   tenant_id      uuid NOT NULL,
@@ -193,8 +191,8 @@ BEGIN
   IF TG_OP <> 'DELETE' THEN
     NEW.updated_at := now();
     NEW.updated_by := app.current_session_user();
-    -- Do not let the caller decide who the author is. With coalesce, the passed value
-    -- would remain as-is, allowing forged audit info by writing another same-tenant user's ID.
+    -- 申告者は呼び出し側に決めさせない。coalesce にすると、渡された値が
+    -- そのまま残り、同じテナントの別人の ID を書いて監査情報を偽装できる。
     IF TG_OP = 'INSERT' THEN
       NEW.created_at := now();
       NEW.created_by := app.current_session_user();
@@ -228,12 +226,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON app.department_systems TO app_rw;
 GRANT SELECT ON app.department_systems TO app_ro;
 
 -- ------------------------------------------------------------------
--- (3) Location of information assets
+-- (3) 情報資産の所在場所
 --
---   The system is chosen via FK. With free text only, the same system gets written many
---   ways, and "which information is in this system" can no longer be looked up.
---   However, a location is not always a system (paper, safe, device, mail), so
---   location_note is kept alongside for locations the FK cannot express.
+--   システムを FK で選ばせる。自由記述だけにすると、同じシステムが表記ゆれで
+--   何通りにも書かれ、「このシステムにどの情報があるか」を引けなくなる。
+--   ただし所在は常にシステムとは限らない（紙・金庫・端末・郵送物）ので、
+--   FK で表せない所在のために location_note を併せて持つ。
 -- ------------------------------------------------------------------
 ALTER TABLE app.assets
   ADD COLUMN location_system_id uuid,

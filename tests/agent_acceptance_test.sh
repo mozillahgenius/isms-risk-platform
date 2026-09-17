@@ -17,9 +17,9 @@ cleanup() {
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
-  # SERVER_PID is the subshell's PID, and the next-server beyond it **remains**.
-  # If it remains when the next run starts, the new one fails to start and talks to the old server (which looks at a different DB),
-  # getting HTTP 400. Since that fails with no clear cause, kill whatever is listening too.
+  # SERVER_PID はサブシェルの PID で、その先の next-server は**残る**。
+  # 残ったまま次に走ると、新しい方は起動に失敗し、古いサーバ（別 DB を見ている）へ
+  # 話しかけて HTTP 400 になる。原因が分からない形で落ちるので、待ち受けごと落とす。
   if command -v lsof >/dev/null 2>&1; then
     lsof -ti "tcp:$PORT" 2>/dev/null | xargs -r kill >/dev/null 2>&1 || true
   fi
@@ -28,7 +28,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Before starting, check that the port is free. If occupied, fail saying so.
+# 起動前に港が空いていることを見る。塞がっていたら、その旨で落とす。
 if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -ti "tcp:$PORT" 2>/dev/null || true)" ]; then
   printf '  \033[31mFAIL\033[0m ポート %s が既に使われています（前回の next-server が残っています）\n' "$PORT"
   printf '        lsof -ti tcp:%s | xargs kill で落としてから流し直してください\n' "$PORT"

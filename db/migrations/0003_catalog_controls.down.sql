@@ -1,4 +1,4 @@
--- Rollback of 0003
+-- 0003 の巻き戻し
 DROP TABLE IF EXISTS catalog.check_controls;
 DROP TABLE IF EXISTS catalog.checks;
 DROP TABLE IF EXISTS catalog.risk_template_controls;

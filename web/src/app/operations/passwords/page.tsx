@@ -109,7 +109,7 @@ export default async function PasswordManagerPage({
             サーバー側の非秘密設定に不正な値があります。許可済みのプロバイダー・製品・ヘルスパスと、認証情報を含まない HTTPS URL を指定してください。
           </p>
         )}
-        {status.productId === 'vaultwarden-derived' && !status.cutoverReady && (
+        {status.productId === 'intelligent-beast-vaultwarden-derived' && !status.cutoverReady && (
           <p className="mt-4 text-[12px] text-[var(--warning)]">
             派生版の上流ref・commit、fork commit、image digest、互換・移行・復旧ゲートの固定証跡が一致していないため、本番利用可能とは判定しません。
           </p>
@@ -149,7 +149,7 @@ export default async function PasswordManagerPage({
         <div className="mt-3 grid gap-4 text-[13px] leading-6 text-[var(--fg-2)] md:grid-cols-3">
           <div><b className="text-[var(--fg)]">保管庫</b><br />人が使うパスワードと共有保管庫の管理だけを担当します。</div>
           <div><b className="text-[var(--fg)]">MDM</b><br /><span className="text-[var(--muted)]">{INTEGRATION_LABEL[status.mdmIntegrationState]}</span><br />公式クライアント／拡張機能の配布・稼働確認は、接続済みになるまで実行しません。</div>
-          <div><b className="text-[var(--fg)]">証跡連携・運用操作</b><br /><span className="text-[var(--muted)]">{INTEGRATION_LABEL[status.evidenceIntegrationState]}</span><br />証跡連携と固定運用操作は、接続済みになるまで予定として扱います。</div>
+          <div><b className="text-[var(--fg)]">Kaname・Codzilla</b><br /><span className="text-[var(--muted)]">{INTEGRATION_LABEL[status.evidenceIntegrationState]}</span><br />証跡連携と固定運用操作は、接続済みになるまで予定として扱います。</div>
         </div>
         <p className="mt-4 text-[12px] text-[var(--muted)]">
           いずれの経路も、人のパスワードやマスターパスワードを読み出しません。秘密値の登録・変更・閲覧は専用保管庫内で完結します。

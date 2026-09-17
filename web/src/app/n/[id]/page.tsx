@@ -2,8 +2,8 @@ import { notFound, redirect } from 'next/navigation';
 import { decodeNodeId } from '@/lib/nodeid';
 import { destinationOf } from '@/lib/nodeDestination';
 
-// A page that only decides where to go when a node in the diagram is clicked.
-// The decision itself lives in lib/nodeDestination.ts (pure function, under test).
+// 図のノードをクリックしたときの行き先を決めるだけのページ。
+// 判断そのものは lib/nodeDestination.ts（純関数・テスト対象）に置く。
 
 export const dynamic = 'force-dynamic';
 

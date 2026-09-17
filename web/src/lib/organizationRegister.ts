@@ -7,18 +7,18 @@ export { MANAGEMENT_ROLE_LABEL };
 export type { ManagementRole };
 
 /**
- * Reading organization management data (departments, members, roles).
+ * 組織管理（部門・メンバー・役割）の読み取り。
  *
- * A previous change deleted web/src/app/organization/ entirely, but
- * navigation.ts kept showing /organization in both RISK / ISMS modes, so
- * the link target was a 404. As part of restoring it, reads move from withTenant (shared token) to
- * withTenantActor (proxy identity). Without knowing the viewer's own management role,
- * the screen cannot decide which viewers it may present the edit forms to.
+ * 27c56ef「RUNTIME稼働状態へ同期」で web/src/app/organization/ ごと消えていたが、
+ * navigation.ts は RISK / ISMS の両モードで /organization を出し続けていたため
+ * リンク先が 404 だった。復旧にあたり、読み取りを withTenant（共有トークン）から
+ * withTenantActor（プロキシ本人性）へ移す。閲覧者自身の管理ロールが分からないと
+ * 「誰がフォームを出してよいか」を画面側で決められないため。
  *
- * No new roles are created. The 5 roles in catalog.roles_default (0002 / 0029 seed) are shown as
- * owner/admin/manager/member/auditor using the same mapping as app.current_management_role() in 0057.
- * Keeping the mapping in two places inevitably leads to divergence, so the SQL CASE is
- * written in the same form as the user list in workAssignments.ts.
+ * ロールは新設しない。catalog.roles_default の 5 ロール（0002 / 0029 seed）を
+ * 0057 の app.current_management_role() と同じ写像で owner/admin/manager/member/
+ * auditor として見せる。写像を二重に持つと必ず食い違うので、SQL 側の CASE は
+ * workAssignments.ts のユーザー一覧と同じ形にそろえてある。
  */
 
 export type TenantInfo = {
@@ -70,21 +70,21 @@ export type MemberRow = {
   leads_departments: string[];
 };
 
-/** Systems in use (app.application_catalog). The parent for identity federation, and also
- *  the source of truth (0061) for "systems we use" that each member registers. */
+/** 利用システム（app.application_catalog）。ID連携の親であると同時に、
+ *  各メンバーが登録する「うちが使っているシステム」の正本（0061）。 */
 export type SystemRow = {
   id: string;
   app_key: string;
   name: string;
   provider: string;
   status: string;
-  /** Number of departments that declare they use this system */
+  /** この部門数がこのシステムを使っていると申告している */
   department_count: number;
-  /** Number of information assets located in this system */
+  /** このシステムを所在場所としている情報資産の件数 */
   asset_count: number;
 };
 
-/** Which systems a department uses and how. */
+/** 部門がどのシステムをどう使っているか。 */
 export type DepartmentSystemRow = {
   department_id: string;
   department_name: string;
@@ -93,8 +93,8 @@ export type DepartmentSystemRow = {
   usage_note: string;
 };
 
-/** Within a department, "which systems hold what information, and how much".
- *  Takes no new input; built only from aggregates of the asset register (app.assets). */
+/** 部門の中で「どのシステムに、どんな情報が、どれだけあるか」。
+ *  新しい入力は持たず、資産台帳（app.assets）からの集計だけで作る。 */
 export type DepartmentInformationRow = {
   department_id: string;
   department_name: string;
@@ -121,19 +121,19 @@ const EMPTY_ROLE_COUNTS: Record<ManagementRole, number> = {
 };
 
 /**
- * Fetches only "who the viewer is and what they can do", which every tab needs.
+ * どのタブでも要る「閲覧者は誰で、何ができるか」だけを取る。
  *
- * Previously a single request always issued around 15 queries (departments, members,
- * systems, asset aggregates, wizard progress). If the screen is split per master,
- * each screen must read only what it needs, or it becomes "4 screens displayed, 4x the load".
+ * 以前は 1 リクエストで 15 本前後のクエリを常に全部投げていた（部門も、メンバーも、
+ * システムも、資産の集計も、ウィザードの進捗も）。画面をマスタごとに割るなら、
+ * 各画面が必要な分だけ読む形にしないと「表示は 4 画面・負荷は 4 倍」になる。
  */
 export type OrganizationContext = {
   role: ManagementRole;
-  /** Editing departments, scope, and certification body. Owners and admins (org_manage in 0059). */
+  /** 部門・適用範囲・審査機関の編集。オーナー・管理者（0059 の org_manage）。 */
   canManageOrg: boolean;
-  /** Changing management roles themselves. Owners only (role_manage in 0057). */
+  /** 管理ロールそのものの変更。オーナーのみ（0057 の role_manage）。 */
   canManageRole: boolean;
-  /** Editing systems in use. Everyone except auditors and those with no membership (0061). */
+  /** 利用システムの編集。監査人と所属なし以外（0061）。 */
   canEditSystems: boolean;
   currentUserId: string | null;
 };
@@ -154,7 +154,7 @@ async function readContext(sql: Sql): Promise<OrganizationContext> {
   };
 }
 
-/** Minimal read for screens that only need the department options. */
+/** 部門の選択肢だけが要る画面のための最小読み取り。 */
 async function readDepartmentOptions(sql: Sql): Promise<{ id: string; name: string }[]> {
   return sql<{ id: string; name: string }[]>`
     SELECT id, name FROM app.departments
@@ -164,7 +164,7 @@ async function readDepartmentOptions(sql: Sql): Promise<{ id: string; name: stri
 export type MemberMasterData = OrganizationContext & {
   members: MemberRow[];
   roleCounts: Record<ManagementRole, number>;
-  /** Options for "department" in the add form. The full department tab data is not needed. */
+  /** 追加フォームの「所属部門」の選択肢。部門タブの全情報は要らない。 */
   departmentOptions: { id: string; name: string }[];
 };
 
@@ -173,16 +173,16 @@ export type DepartmentMasterData = OrganizationContext & {
   memberships: MembershipRow[];
   users: UserOption[];
   roles: RoleOption[];
-  /** Department usage declarations. Registered on the system master side, but read in the per-department actuals table. */
+  /** 部門の利用申告。登録はシステムマスタ側だが、部門ごとの実態表で読む。 */
   departmentSystems: DepartmentSystemRow[];
   departmentInformation: DepartmentInformationRow[];
-  /** Count of information assets with no managing department set. The department view will not be filled until this is 0. */
+  /** 管理部門が未設定の情報資産の件数。ここが 0 にならないと部門ビューは埋まらない。 */
   assetsWithoutDepartment: number;
 };
 
 export type SystemMasterData = OrganizationContext & {
   systems: SystemRow[];
-  /** Options for the department usage declaration form. The details themselves are read in the department tab. */
+  /** 部門の利用申告フォームの選択肢。明細そのものは部門タブで読む。 */
   departmentOptions: { id: string; name: string }[];
 };
 
@@ -191,14 +191,14 @@ export type OrganizationProfileData = OrganizationContext & {
   certificationBodies: CertificationBodyRow[];
 };
 
-/** Member master. Roster and headcount per role. */
+/** メンバーマスタ。名簿とロール別人数。 */
 export async function getMemberMaster(): Promise<TenantReadResult<MemberMasterData>> {
   return withTenantActor(async (sql) => {
     const context = await readContext(sql);
 
-    // Include suspended and departed members too. If they silently vanish from the roster, "can they still get in?"
-    // can no longer be checked from the screen (app.set_tenant_context_for_proxy passes only people with status='active'
-    // and one valid membership, so this is effectively the access list).
+    // 停止・退職済みも含めて出す。名簿から静かに消えると「まだ入れるのか」が
+    // 画面から確認できなくなる（app.set_tenant_context_for_proxy は status='active'
+    // かつ有効な所属が 1 件ある人だけを通す＝ここが実質のアクセス権一覧になる）。
     const members = await sql<MemberRow[]>`
       SELECT u.id, u.display_name, u.email::text, u.status,
              CASE
@@ -240,14 +240,14 @@ export async function getMemberMaster(): Promise<TenantReadResult<MemberMasterDa
   });
 }
 
-/** Department master. Departments, heads, membership assignments, and per-department usage. */
+/** 部門マスタ。部門・責任者・所属割当と、部門ごとの利用実態。 */
 export async function getDepartmentMaster(): Promise<TenantReadResult<DepartmentMasterData>> {
   return withTenantActor(async (sql) => {
     const context = await readContext(sql);
 
-    // Headcount per department is counted on the memberships side. If it were not counted here,
-    // the screen would count with a department x member double loop, and the numbers would silently drift
-    // by the excluded departments (circular references).
+    // 部門ごとの在籍数は memberships 側で数える。ここで数えておかないと、
+    // 画面が部門 × メンバーの二重ループで数えることになり、除外された部門
+    // （循環参照）の分だけ数字が静かにずれる。
     const departments = await sql<DepartmentNode[]>`
       SELECT d.id, d.name, d.parent_id, d.owner_user_id, u.display_name AS owner_name,
              (SELECT count(DISTINCT m.user_id)::int
@@ -287,8 +287,8 @@ export async function getDepartmentMaster(): Promise<TenantReadResult<Department
        WHERE ds.tenant_id = app.current_tenant()
        ORDER BY d.name, a.name`;
 
-    // Information assets per department x location. No new input fields; derived from the asset register.
-    // We want to list them the same way whether the location is a system or free text, so group by both.
+    // 部門 × 所在場所ごとの情報資産。入力欄は増やさず、資産台帳から出す。
+    // 所在がシステムでも自由記述でも同じ形で並べたいので、両方で束ねる。
     const departmentInformation = await sql<DepartmentInformationRow[]>`
       SELECT a.owner_department_id::text AS department_id, d.name AS department_name,
              a.location_system_id::text AS application_id, s.name AS system_name,
@@ -323,7 +323,7 @@ export async function getDepartmentMaster(): Promise<TenantReadResult<Department
   });
 }
 
-/** System-in-use master. The systems themselves, and department usage declarations. */
+/** 利用システムマスタ。システムそのものと、部門の利用申告。 */
 export async function getSystemMaster(): Promise<TenantReadResult<SystemMasterData>> {
   return withTenantActor(async (sql) => {
     const context = await readContext(sql);
@@ -345,7 +345,7 @@ export async function getSystemMaster(): Promise<TenantReadResult<SystemMasterDa
   });
 }
 
-/** Organization info. Organization name, ISMS scope, and certification body. */
+/** 組織情報。組織名・ISMS適用範囲と審査機関。 */
 export async function getOrganizationProfile(): Promise<TenantReadResult<OrganizationProfileData>> {
   return withTenantActor(async (sql) => {
     const context = await readContext(sql);
@@ -367,10 +367,10 @@ export async function getOrganizationProfile(): Promise<TenantReadResult<Organiz
 }
 
 /**
- * Wizard progress.
+ * ウィザードの進捗。
  *
- * Previously the wizard also called getOrganizationWorkspace(), so to get 6
- * count(*) values it read everything, including the roster, departments, systems, and asset aggregates.
+ * 以前はウィザードも getOrganizationWorkspace() を呼んでいたので、6 個の
+ * count(*) を得るために名簿・部門・システム・資産集計まで全部読んでいた。
  */
 export async function getWizardSteps(): Promise<TenantReadResult<WizardStepStatus[]>> {
   return withTenantActor(async (sql) => {
@@ -378,8 +378,8 @@ export async function getWizardSteps(): Promise<TenantReadResult<WizardStepStatu
       SELECT name, iso_scope_statement FROM app.tenants WHERE id = app.current_tenant()`;
     const scope = tenants[0]?.iso_scope_statement ?? '';
 
-    // Core logic (spec): each step's completion is determined mechanically by whether the corresponding table
-    // has at least one row of data.
+    // 主要ロジック(仕様書): 各ステップの完了判定は対応テーブルの1件以上の
+    // データ有無で機械的に行う。
     const [assetCount, competencyCount, incidentCount, costCount, certCount] = await Promise.all([
       sql<{ n: number }[]>`SELECT count(*)::int AS n FROM app.risk_scenarios`.then((r) => r[0]?.n ?? 0),
       sql<{ n: number }[]>`SELECT count(*)::int AS n FROM app.competency_requirements`.then((r) => r[0]?.n ?? 0),

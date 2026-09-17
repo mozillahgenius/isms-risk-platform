@@ -1,0 +1,11 @@
+[Unit]
+Description=Rotate the ISMS mail worker tenant session before it expires
+# 失敗を Codzilla へ知らせる。メールで知らせると、
+# 「メールが送れないこと」を通知できず循環する。
+OnFailure=isms-failure-notify@%n.service
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/isms-platform/releases/isms/current/ops/runtime/rotate-mail-session.sh
+# 失敗しても旧トークンへ戻す。次の回で拾い直す。

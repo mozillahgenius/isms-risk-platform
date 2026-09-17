@@ -3,14 +3,14 @@ import { AppShellFrame } from '@/components/AppShellFrame';
 import { RESOURCE_MANAGEMENT_NAME } from '@/lib/navigation';
 import './globals.css';
 
-// Pages override title (so each screen correctly shows where you are).
+// ページ側で title を上書きする（各画面で現在地を正しく示す）。
 export const metadata: Metadata = {
   title: { default: 'ダッシュボード', template: `%s｜${RESOURCE_MANAGEMENT_NAME}` },
   description: 'ISMSを含むリスク管理、運用証跡、デバイス統制を一つの台帳で管理する',
 };
 
-// Settle data-theme before rendering to avoid FOUC / hydration mismatch.
-// Priority: explicit value in localStorage (light/dark) > prefers-color-scheme.
+// FOUC / hydration mismatch を避けるため、描画前に data-theme を確定させる。
+// 優先順位: localStorage の明示値（light/dark）> prefers-color-scheme。
 const themeInit = `(function(){try{var t=localStorage.getItem('isms-theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

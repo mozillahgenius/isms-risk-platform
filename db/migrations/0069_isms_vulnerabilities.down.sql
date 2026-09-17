@@ -1,8 +1,8 @@
 -- @run-as: admin
--- Rollback of 0069. Removes the vulnerabilities table and reverts the permission table to 0068's version.
+-- 0069 の巻き戻し。脆弱性の表を外し、許可の表を 0068 の版へ戻す。
 --
--- **Do not roll back when data exists** (same as 0055; do not silently delete A.8.8 records in down).
--- The guard is placed before SET ROLE, and takes a SHARE lock and counts only when the table exists (same as 0065's down).
+-- **データがあるときは巻き戻さない**（0055 と同じ。A.8.8 の記録を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、表が在るときだけ SHARE ロックを取って数える（0065 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;
@@ -18,7 +18,7 @@ END $$;
 
 SET ROLE schema_owner;
 
--- Dropping the table also drops its role policies and indexes.
+-- 表を消すと、張ってある役割ポリシーと索引も一緒に消える。
 DROP TABLE IF EXISTS app.vulnerabilities;
 
 CREATE OR REPLACE FUNCTION app.records_role_allows(p_kind text) RETURNS boolean

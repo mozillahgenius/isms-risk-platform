@@ -1,0 +1,12 @@
+[Unit]
+Description=ISMS mail outbox sender
+# 失敗を Codzilla へ知らせる。メールで知らせると、
+# 「メールが送れないこと」を通知できず循環する。
+OnFailure=isms-failure-notify@%n.service
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/isms-platform/releases/isms/current/ops/runtime/send-mail-outbox.sh
+# 失敗しても timer は次の回で拾い直す（--retry-failed は付けない。
+# 同じ相手へ黙って何通も届く事故を避けるため、再送は人が判断する）。

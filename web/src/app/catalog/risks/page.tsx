@@ -24,8 +24,8 @@ export default async function RisksPage({ searchParams }: { searchParams: Search
   const framework = firstParam(frameworkForMode(firstParam(sp.framework), mode));
   const page = pageParam(sp.page);
 
-  // Filter options are fetched with DISTINCT. Fetching the whole list again to count them would
-  // read every row not used for display twice on every request.
+  // 絞り込みの選択肢は DISTINCT で引く。一覧を丸ごともう一度引いて数えると、
+  // 表示に使わない 196 行を毎回二度読むことになる。
   const [rows, domains, prov, frameworks] = await Promise.all([
     listRisks({ q, domain, frame, framework }),
     listRiskDomains(framework),

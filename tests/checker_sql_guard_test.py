@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Checks on the shape of catalog SQL (rejected before the checker runs it).
+"""カタログの SQL の形の検査（checker が実行する前に弾く）。
 
-catalog.checks query_sql / negative_fixture **come from the DB**.
-Without fixing their shape before handing them to psql, one could append statements with `;`
-to "swap what is counted" or "cause unexpected side effects".
-This verifies that the guard actually works.
+catalog.checks の query_sql / negative_fixture は **DB から来る**。
+psql へ渡す前に形を固定していないと、`;` で文を継ぎ足して
+「数える対象を差し替える」「想定外の副作用を起こす」ができる。
+ここはその番人が実際に働くことを確かめる。
 """
 import importlib.util
 import os
@@ -38,7 +38,7 @@ must_reject('複数文で副作用を起こす', "SELECT 1; DROP TABLE app.polic
 must_reject('読み取り以外で始まる', "DELETE FROM app.policies")
 must_reject('コメントで隠した継ぎ足し', "SELECT 1 /* x */ ; SELECT 2")
 must_reject('空', "")
-# Even a single statement, if it moves the transaction boundary, keeps the fixture from rolling back
+# 1 文であっても、トランザクションの境界を動かされると fixture が巻き戻らなくなる
 must_reject('COMMIT でトランザクションを閉じる', "COMMIT", must=())
 must_reject('ROLLBACK で閉じる', "ROLLBACK", must=())
 must_reject('BEGIN で入れ子にする', "BEGIN", must=())
@@ -53,7 +53,7 @@ must_accept('WITH で始まる', "WITH x AS (SELECT 1) SELECT * FROM x")
 must_accept('行コメント内のセミコロン', "SELECT 1 -- ; これは文ではない\n")
 must_accept('ドル引用符の中のセミコロン', "SELECT $$a;b$$ WHERE false")
 
-# Only the marked count is picked up
+# 目印付きの件数だけを拾うこと
 ok, n, _ = checker.parse_count(f'{checker.COUNT_MARK}3')
 if not ok or n != 3:
     FAILED.append('目印付きの件数を読めない')

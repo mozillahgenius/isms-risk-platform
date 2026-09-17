@@ -1,0 +1,15 @@
+[Unit]
+Description=Rotate the ISMS web tenant session every 6 hours
+
+[Timer]
+# 6 時間ごと。TTL 24 時間に対して 4 回の余裕があるので、
+# 1〜2 回失敗しても期限には間に合う（間隔は Mac 版 launchd の
+# StartInterval 21600 秒と同じ値をそのまま移した）。
+OnBootSec=5min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Persistent=true
+Unit=isms-web-session-rotate.service
+
+[Install]
+WantedBy=timers.target

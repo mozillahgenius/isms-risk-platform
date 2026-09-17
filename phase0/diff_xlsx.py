@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Normalize and compare the karte risk-map sheet of two xlsx files.
+"""2 つの xlsx のカルテ_リスクマップ を正規化して比較する。
 
-  python3 phase0/diff_xlsx.py input.xlsx output.xlsx
+  python3 phase0/diff_xlsx.py 入力.xlsx 出力.xlsx
 
-Exits 1 if there is even one difference. With 0 differences, exits 0 and prints the digest.
-The comparison rules are in phase0/NORMALIZATION.md (norm/v1).
+差分が 1 件でもあれば exit 1。0 件なら exit 0 とダイジェストを表示する。
+比較の規則は phase0/NORMALIZATION.md（norm/v1）。
 """
 from __future__ import annotations
 

@@ -9,9 +9,9 @@ export type RiskOwnerOption = {
   user_id: string;
   display_name: string;
   department_name: string | null;
-  // false: not currently an active risk_owner, but currently assigned to an existing incident,
-  // so the value must not be removed from the options (Codex review 2026-09-02 finding:
-  // restricting to active caused existing assignments to be silently cleared every time an edit was saved).
+  // false: 現在は有効なrisk_ownerではないが、既存インシデントに現在アサイン
+  // されているため選択肢から消してはいけない値(Codexレビュー2026-09-02指摘:
+  // active限定にした結果、既存アサインが編集保存のたびに無言解除されていた)。
   is_active_pool: boolean;
 };
 
@@ -42,7 +42,7 @@ export type IncidentRow = {
   related_measure_name: string | null;
   assignee_user_id: string | null;
   assignee_name: string | null;
-  // Risk owner of the related risk's department. Used to suggest a default when assignee is unset.
+  // 関連リスクの部門が持つリスクオーナー。assignee 未設定時の既定値提案に使う。
   suggested_owner_user_id: string | null;
   suggested_owner_name: string | null;
 };
@@ -71,9 +71,9 @@ export async function getIncidentWorkspace(): Promise<TenantReadResult<IncidentW
                                AND ou.status = 'active'
        ORDER BY i.occurred_at DESC NULLS LAST, i.created_at DESC`;
 
-    // Options are "currently active risk_owner" union "users currently assigned to an existing incident
-    // (even if they have left or had their role removed)". Excluding the latter means that just editing and saving
-    // that incident silently clears the assignment (Codex review 2026-09-02 finding).
+    // 選択肢は「現在有効なrisk_owner」∪「既存インシデントに現在アサインされている
+    // ユーザー(退職・ロール解除済みでも)」。後者を外すと、そのインシデントを編集
+    // して保存しただけでアサインが無言解除される(Codexレビュー2026-09-02指摘)。
     const riskOwners = await sql<RiskOwnerOption[]>`
       SELECT user_id, display_name, department_name, is_active_pool FROM (
         SELECT DISTINCT ON (user_id) user_id, display_name, department_name, is_active_pool

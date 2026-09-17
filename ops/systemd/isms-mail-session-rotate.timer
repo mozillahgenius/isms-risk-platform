@@ -1,0 +1,14 @@
+[Unit]
+Description=Rotate the ISMS mail worker tenant session every 6 hours
+
+[Timer]
+# Web 用と同じ 6 時間ごと。TTL 24 時間に対して 4 回の余裕がある。
+# Web 用と時刻をずらして、同時に auth_svc へ来ないようにする。
+OnBootSec=8min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Persistent=true
+Unit=isms-mail-session-rotate.service
+
+[Install]
+WantedBy=timers.target

@@ -1,11 +1,11 @@
--- 0038 app: competence management (screen ⑤ "Competence management")
+-- 0038 app: 力量管理(画面⑤「力量管理」)
 --
--- The management area corresponding to the competence requirement of ISO/IEC 27001 (clause 7.2).
--- Defines the competence (job requirements) needed per role and records fulfillment per member.
+-- ISO/IEC 27001の力量要件(本文7.2)に相当する管理領域。役割ごとに必要な
+-- 力量(職能要件)を定義し、メンバーごとの充足状況を記録する。
 --
--- For the same reason as 0037, RLS is set up individually here (0015's bulk RLS only applies to
--- tables that existed when 0015 ran; discovered while implementing 0037, and from then on new tables
--- are set up individually from the start).
+-- 0037と同じ理由でRLSはここで個別設定する(0015のRLS一括適用は0015実行
+-- 時点の既存テーブルにしか効かない。0037実装時に発見・以後の新規テーブル
+-- では最初から個別設定する)。
 
 CREATE TABLE app.competency_requirements (
   id                  uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -33,8 +33,8 @@ CREATE TABLE app.competency_fulfillments (
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, requirement_id) REFERENCES app.competency_requirements(tenant_id, id),
   FOREIGN KEY (tenant_id, member_id) REFERENCES app.users(tenant_id, id),
-  -- Fulfillment for the same requirement and member is kept in one row (if history is needed, extend later
-  -- to an append-only form including assessed_on; for now focus on listing "the current state").
+  -- 同一要件・同一メンバーの充足状況は1行に集約する(履歴が要る場合はassessed_on
+  -- 込みの追記型へ後日拡張する。まずは「今どうか」の一覧表示に絞る)。
   UNIQUE (tenant_id, requirement_id, member_id)
 );
 

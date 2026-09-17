@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Production DB backup and restore.
+# 本番DBのバックアップ・復旧。
 #
-#   scripts/backup_restore.sh backup [output dir]   take a backup with pg_dump -Fc (default ~/backups/isms-platform)
-#   scripts/backup_restore.sh restore <dump file> <target DB name>  restore into the given DB (refused if the DB exists, to prevent mix-ups)
-#   scripts/backup_restore.sh verify  [output dir]   check that the latest backup can actually be restored into a throwaway DB
+#   scripts/backup_restore.sh backup [出力先ディレクトリ]   pg_dump -Fc でバックアップを取る（既定 ~/backups/isms-platform）
+#   scripts/backup_restore.sh restore <dumpファイル> <復旧先DB名>  指定DBへ復旧する（既存DBがあれば拒否。取り違え防止）
+#   scripts/backup_restore.sh verify  [出力先ディレクトリ]   最新のバックアップを使い捨てDBへ実際に復旧できるか確かめる
 #
-# Connection follows the same convention as scripts/migrate.sh: DATABASE_URL (default postgres:///isms_dev;
-# ISMS_DB overrides just the DB name). If DATABASE_URL were ignored in favor of a fixed local DB,
-# someone who sets only DATABASE_URL, expecting migrate.sh behavior, would unknowingly operate on the local
-# isms_dev (Codex review 2026-09-02 finding).
+# 接続先は scripts/migrate.sh と同じ規約: DATABASE_URL（既定 postgres:///isms_dev、
+# ISMS_DB で DB 名だけ上書き可）。DATABASE_URL を無視してローカル固定にしていると、
+# migrate.sh のつもりで DATABASE_URL だけ設定して実行した人が気づかずローカル
+# isms_dev を操作してしまう(Codexレビュー2026-09-02指摘)。
 #
-# Added in response to the point that "a backup that has never been test-restored is not a backup".
-# The verify subcommand actually restores the latest dump made by backup into a separate DB,
-# and confirms that the schema_migrations version count matches the source.
+# 「一度も復旧を試していないバックアップはバックアップではない」という指摘を受けて追加。
+# verify サブコマンドは、backup が作った最新のダンプを実際に別DBへ復旧し、
+# schema_migrations の版数が復旧元と一致することまで確認する。
 set -euo pipefail
 
 ISMS_DB="${ISMS_DB:-isms_dev}"
@@ -22,15 +22,15 @@ DEFAULT_DIR="$HOME/backups/isms-platform"
 die() { printf '\033[31m[backup] %s\033[0m\n' "$*" >&2; exit 1; }
 info() { printf '[backup] %s\n' "$*"; }
 
-# Label used for file names and lookup keys. Prefer the last segment (dbname) of DATABASE_URL,
-# falling back to ISMS_DB. Fixing it to ISMS_DB would make file names disagree with reality when
-# DATABASE_URL points to another DB or environment (Codex review 2026-09-02 finding).
+# ファイル名・検索キーに使うラベル。DATABASE_URL の末尾セグメント(dbname)を
+# 優先し、無ければ ISMS_DB へ落とす。ISMS_DB 固定だと、DATABASE_URL が別DB・
+# 別環境を指す場合にファイル名が実体と食い違う(Codexレビュー2026-09-02指摘)。
 db_label() {
-  # Strip the query string (?user=app_ro etc.) and fragment first, then take dbname after the last
-  # "/". Splitting on "/" first would, when a query value itself contains "/"
-  # (e.g. ?sslrootcert=/tmp/ca.pem), turn the tail of the query into the label instead of the dbname
-  # (Codex review 2026-09-02 finding; this repository itself uses the
-  # postgres:///isms_dev?user=app_ro form = ISMS_WEB_DATABASE_URL etc.).
+  # クエリ文字列(?user=app_ro等)・フラグメントを先に取り除いてから、最後の
+  # "/" で dbname を取り出す。先に "/" 区切りをすると、クエリ値自体に "/" を
+  # 含む場合(例: ?sslrootcert=/tmp/ca.pem)、dbnameではなくクエリ末尾を
+  # ラベル化してしまう(Codexレビュー2026-09-02指摘、このリポジトリ自体は
+  # postgres:///isms_dev?user=app_ro 形式を使う=ISMS_WEB_DATABASE_URL等)。
   local seg="${DB_URL%%\?*}"
   seg="${seg%%#*}"
   seg="${seg##*/}"
@@ -42,18 +42,18 @@ cmd_backup() {
   mkdir -p "$dir"
   local ts; ts=$(date +%Y%m%d-%H%M%S)
   local out="$dir/$(db_label)-${ts}-$$.dump"
-  # Not local: the EXIT trap can fire after cmd_backup has returned (at script exit).
-  # With local, the variable is out of scope at that point and
-  # it fails with "unbound variable" (the cleanup function itself doesn't run).
+  # local にしない: EXIT トラップは cmd_backup が return した後(スクリプト終了時)
+  # に発火しうる。local だとその時点で変数がスコープ外になり
+  # 「unbound variable」で落ちる(cleanup 関数自体が動かない)。
   tmp="${out}.tmp.$$"
-  # Write to a temp file and mv to the real file name only on success (atomic rename).
-  # Writing directly to the real file would leave an incomplete dump if pg_dump is interrupted,
-  # and verify would pick it up as "the latest backup" (Codex review 2026-09-02 finding).
-  # Include $$ in the file name too, so multiple runs in the same second don't collide.
+  # 一時ファイルへ書いてから成功時だけ本番ファイル名へ mv する(atomic rename)。
+  # 直接本ファイルへ書くと、pg_dump が中断した際に不完全なダンプが残り、
+  # verify がそれを「最新のバックアップ」として拾ってしまう(Codexレビュー2026-09-02指摘)。
+  # 同一秒に複数回走らせても衝突しないよう、ファイル名にも $$ を含める。
   #
-  # Pass a function to trap rather than string-expanding the path (shell-injection countermeasure;
-  # Codex review 2026-09-02 finding: if $dir contains single quotes or newlines,
-  # the string-expanded version of the trap can be broken).
+  # trap にパスを文字列展開せず関数を渡す(シェルインジェクション対策、
+  # Codexレビュー2026-09-02指摘: $dir にシングルクォートや改行が含まれると
+  # 文字列展開版のtrapは壊せてしまう)。
   cleanup_tmp() { rm -f -- "$tmp"; }
   trap cleanup_tmp EXIT
   pg_dump "$DB_URL" -Fc -f "$tmp"
@@ -80,13 +80,13 @@ cmd_verify() {
   local latest; latest=$(ls -t "$dir"/"$(db_label)"-*.dump 2>/dev/null | head -1)
   [ -n "$latest" ] || die "$dir にバックアップがありません。先に backup を実行してください"
   info "検証対象: $latest"
-  # Not local: same reason as tmp in cmd_backup (if out of scope when the EXIT trap
-  # fires, it fails with unbound variable).
+  # local にしない: cmd_backup の tmp と同じ理由(EXITトラップ発火時に
+  # スコープ外だと unbound variable で落ちる)。
   verify_db="isms_backup_verify_$$"
-  # Set the EXIT trap only after createdb succeeds. If set earlier, when a same-named DB
-  # already exists (e.g. due to PID reuse) and createdb fails, the trap would
-  # dropdb that existing DB (Codex review 2026-09-02 finding). Pass a function to trap
-  # (shell-injection countermeasure against string expansion; same reason as cmd_backup).
+  # createdb 成功後にだけ EXIT trap を張る。先に張ると、PID再利用等で同名DBが
+  # 既に存在していて createdb が失敗した場合でも、trap がその既存DBを
+  # dropdb してしまう(Codexレビュー2026-09-02指摘)。trapへは関数を渡す
+  # (文字列展開によるシェルインジェクション対策、cmd_backupと同じ理由)。
   createdb "$verify_db"
   cleanup_verify_db() { dropdb --if-exists -- "$verify_db"; }
   trap cleanup_verify_db EXIT

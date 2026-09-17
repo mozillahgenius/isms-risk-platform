@@ -1,7 +1,7 @@
--- 0045 app: operational register for ID and license management with Google Workspace as the IdP
+-- 0045 app: Google WorkspaceをIdPとするID・ライセンス管理の運用台帳
 --
--- Credentials for executing external APIs are not stored in this DB. Only a tenant-isolated register is kept here,
--- to track who is granted what, which fixed operations were requested, and their results.
+-- 外部APIの実行資格情報はこのDBへ保存しない。ここでは、誰に何を付与するか、
+-- どの固定操作を要求したか、その結果を追跡するためのテナント分離台帳だけを持つ。
 
 CREATE TABLE app.identity_principals (
   id               uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -190,9 +190,9 @@ BEGIN
   END LOOP;
 END $$;
 
--- Don't let provider-derived state be spoofed via ordinary DML. Intake, approval, catalog management, and execution results
--- are written only after adding dedicated RPCs that derive the actor from the session, and a provider worker role.
--- Until then, all 5 tables are read-only from the admin UI.
+-- provider由来の状態を通常DMLで偽装させない。受付・承認・catalog管理・実行結果は、
+-- actorをセッションから導出する専用RPCとprovider worker roleを追加してからだけ書き込む。
+-- それまでは管理画面からは全5表を読み取り専用にする。
 REVOKE INSERT, UPDATE, DELETE ON
   app.identity_principals,
   app.application_catalog,

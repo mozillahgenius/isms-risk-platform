@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
-"""Apply the standard policies (catalog.policies_default) to existing tenants.
+"""既に在るテナントへ、標準規程（catalog.policies_default）を反映する。
 
-Why this is needed:
-  Policies are deployed to a tenant only by app.provision_tenant(), i.e. **only at the moment
-  the tenant is created**. Standard policies added or bodies written later never reach
-  existing tenants. If only the catalog changes without reaching them, CHK-CORE-POLICY-003
-  (deployed policy bodies match the standard) keeps firing as a violation.
+なぜ要るか:
+  規程がテナントへ展開されるのは app.provision_tenant()、つまり **テナントを作る
+  瞬間だけ**。あとから標準規程を足したり本文を書いたりしても、既存のテナントには
+  何も届かない。届かないまま catalog だけ変えると、CHK-CORE-POLICY-003
+  （展開した規程の本文が標準と一致している）が違反として鳴り続ける。
 
-What it does (one transaction):
-  1. Adds policies not yet deployed to app.policies and puts the standard body into version 1
-  2. Aligns titles that differ from the catalog
-  3. For policies whose latest version body differs from the catalog, **adds a new version**
-     (existing version bodies are not rewritten; the previous version gets superseded_at)
+やること（1 トランザクション）:
+  1. まだ展開されていない規程を app.policies へ足し、版 1 に標準の本文を入れる
+  2. 題名が catalog と違えば合わせる
+  3. 最新版の本文が catalog と違う規程に、**新しい版を足す**
+     （既存の版の本文は書き換えない。前の版には superseded_at を打つ）
 
-What it does not do:
-  - It does not approve. approved_by / approved_at / effective_from are not set.
-    This script only "distributes the standard"; the decision to make it effective is made by a person.
-  - It does not create deviations (policy_edit). The body inserted here is the standard itself,
-    so there is no difference from the standard. Deviations are registered when a tenant changes a body.
-  - It does not touch other tenants. Row-level security is in effect via the tenant context (token),
-    so other tenants' rows are not even visible.
+やらないこと:
+  - 承認しない。approved_by / approved_at / effective_from は入れない。
+    このスクリプトは「標準を配る」だけで、有効化の判断は人が行う。
+  - 逸脱（policy_edit）は作らない。ここで入れる本文は標準そのものなので、
+    標準からの差分は生じない。テナントが本文を変えるときに逸脱を登録する。
+  - 他テナントには触れない。テナント文脈（トークン）で行レベルセキュリティが
+    効いているため、他テナントの行はそもそも見えない。
 
-diff_clause_count is 0, because it is a copy of the standard and no clauses were changed.
+diff_clause_count は 0。標準の写しであって、条項を変えたわけではないため。
 
-Usage:
-  python3 scripts/sync_tenant_policies.py --dry-run   # only show changes (rolled back)
-  python3 scripts/sync_tenant_policies.py             # apply
+使い方:
+  python3 scripts/sync_tenant_policies.py --dry-run   # 変更点を見るだけ（巻き戻す）
+  python3 scripts/sync_tenant_policies.py             # 反映する
 
-Connection:
-  ISMS_WRITE_DATABASE_URL (default postgres://127.0.0.1/isms_dev?user=app_rw)
-  ISMS_WEB_TENANT_TOKEN or the token in web/.env.local
+接続:
+  ISMS_WRITE_DATABASE_URL（既定 postgres://127.0.0.1/isms_dev?user=app_rw）
+  ISMS_WEB_TENANT_TOKEN もしくは web/.env.local のトークン
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def literal(value: str) -> str:
-    """Make an SQL string literal (quotes doubled)."""
+    """SQL の文字列リテラルにする（引用符は二重化）。"""
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -66,7 +66,7 @@ SQL = r"""
 BEGIN;
 SELECT app.set_tenant_context(__TENANT_TOKEN__);
 
--- Show the state before applying, so we never claim "inserted" without looking at the counts.
+-- 反映前の状態を出す。件数を見ずに「入れた」と言わないため。
 SELECT '反映前' AS phase,
        (SELECT count(*) FROM catalog.policies_default d
           JOIN catalog.dom_versions v ON v.id = d.dom_version_id AND v.is_current) AS catalog_policies,
@@ -81,23 +81,23 @@ SELECT '反映前' AS phase,
          WHERE p.tenant_id = app.current_tenant()
            AND v.body_md IS DISTINCT FROM d.body_md) AS body_mismatch;
 
--- Prevent two runs at the same time.
--- Row locks alone are not enough: rows for **policies that do not exist yet** cannot be locked, so
--- two concurrent runs would try to create the same policy twice (the unique constraint just makes one fail,
--- and the partially applied run leaves nothing meaningful). A per-tenant advisory lock admits only one run.
+-- 同時に 2 つ走らないようにする。
+-- 行ロックだけでは足りない。**まだ存在しない規程行**は押さえられないので、
+-- 2 本が同時に走ると同じ規程を二重に作ろうとする（一意制約で片方が落ちるだけで、
+-- 途中まで進んだ側の意味は残らない）。テナント単位の助言ロックで入口を 1 本に絞る。
 SELECT pg_advisory_xact_lock(hashtext('isms:sync_tenant_policies'),
                              hashtext(app.current_tenant()::text));
 
--- Also lock existing policy rows (so version numbering does not race).
+-- 既にある規程行も押さえる（版番号の採番が競合しないように）。
 SELECT id FROM app.policies
  WHERE tenant_id = app.current_tenant()
  ORDER BY id
    FOR UPDATE;
 
--- 1. Policies not yet expanded. Decide the id up front and write it without reading it back
---    (same reason as app.provision_tenant(): RETURNING requires read privilege).
+-- 1. まだ展開されていない規程。id を先に決めてしまい、書き戻して読まない
+--    （app.provision_tenant() と同じ理由。RETURNING は読み取りの権限を要求する）。
 WITH src AS MATERIALIZED (
-  -- gen_random_uuid() is volatile. It is referenced twice, so fix its value exactly once.
+  -- gen_random_uuid() は volatile。2 度参照するので必ず 1 回で確定させる。
   SELECT gen_random_uuid() AS policy_id, d.key, d.title_ja, d.body_md
     FROM catalog.policies_default d
     JOIN catalog.dom_versions v ON v.id = d.dom_version_id AND v.is_current
@@ -110,7 +110,7 @@ WITH src AS MATERIALIZED (
 INSERT INTO app.policy_versions (tenant_id, policy_id, version, body_md, diff_clause_count)
 SELECT app.current_tenant(), policy_id, 1, body_md, 0 FROM src;
 
--- 2. Align titles with the catalog.
+-- 2. 題名を catalog に合わせる。
 UPDATE app.policies p
    SET title = d.title_ja, updated_at = now()
   FROM catalog.policies_default d
@@ -119,7 +119,7 @@ UPDATE app.policies p
    AND p.tenant_id = app.current_tenant()
    AND p.title IS DISTINCT FROM d.title_ja;
 
--- 3. Add a new version to policies whose body has changed. Existing versions are never rewritten.
+-- 3. 本文が動いている規程に、新しい版を足す。既存の版は書き換えない。
 WITH latest AS (
   SELECT p.id AS policy_id, d.body_md AS want,
          v.version AS cur_version, v.id AS cur_version_id, v.body_md AS have
@@ -145,8 +145,8 @@ INSERT INTO app.policy_versions (tenant_id, policy_id, version, body_md, diff_cl
 SELECT app.current_tenant(), c.policy_id, coalesce(c.cur_version, 0) + 1, c.want, 0
   FROM changed c;
 
--- 4. Verify on the spot that the sync took effect.
---    If this fails, the sync did not happen. Do not let it COMMIT.
+-- 4. 反映できたことをその場で確かめる。
+--    ここが落ちるなら反映は成立していない。COMMIT させない。
 DO $$
 DECLARE n_missing int; n_mismatch int;
 BEGIN
@@ -172,8 +172,8 @@ BEGIN
     RAISE EXCEPTION '最新版の本文が標準と一致しない規程が % 本ある', n_mismatch;
   END IF;
 
-  -- Version numbers must be consecutive starting at 1 (gaps from concurrent runs make the history unreadable).
-  -- max = count alone is not enough: it would accept sequences that do not start at 1, such as (0,2).
+  -- 版番号が 1 から始まる連番であること（同時実行で飛ぶと履歴が読めなくなる）。
+  -- max = count だけでは足りない。(0,2) のように 1 始まりでない並びを通してしまう。
   IF EXISTS (
     SELECT 1 FROM app.policies p
      CROSS JOIN LATERAL (
@@ -210,8 +210,8 @@ def main() -> None:
     token = read_token()
     dsn = os.environ.get("ISMS_WRITE_DATABASE_URL", "postgres://127.0.0.1/isms_dev?user=app_rw")
     sql = SQL.replace("\nCOMMIT;\n", "\nROLLBACK;\n") if args.dry_run else SQL
-    # The token is **passed via stdin**. Putting it in psql arguments (-v tenant_token=...) would let
-    # anyone on the same machine read it with ps. In the SQL body it never appears in argv.
+    # トークンは **標準入力で渡す**。psql の引数（-v tenant_token=...）に置くと、
+    # 同じ機の誰でも ps で読める。SQL 本文なら argv には出ない。
     sql = sql.replace("__TENANT_TOKEN__", literal(token))
     command = ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-d", dsn]
     subprocess.run(command, input=sql, text=True, check=True)

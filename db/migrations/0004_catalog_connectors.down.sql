@@ -1,2 +1,2 @@
--- Rollback of 0004
+-- 0004 の巻き戻し
 DROP TABLE IF EXISTS catalog.connector_manifests;

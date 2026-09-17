@@ -1,63 +1,64 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Design system (modern refresh / light + dark)
-   - Keeps existing var names (--background etc.) compatible while extending them
-   - Theme precedence: explicit html[data-theme] first, otherwise prefers-color-scheme
+   Kaname デザインシステム（モダン刷新 / light + dark）
+   - 既存 var 名（--background 等）は互換維持しつつ拡張
+   - テーマ優先順位: html[data-theme] を明示優先、無ければ prefers-color-scheme
    ============================================================ */
 :root {
-  /* Fonts. The source project injected --font-geist-* via next/font, but this one does not fetch
-     external fonts (CSP is locked to self, and it should look the same offline), so
-     resolve to OS fonts here. Referencing var() while undefined invalidates the whole
-     font-family declaration and falls back to the default font. */
+  /* フォント。移植元は next/font で --font-geist-* を注入していたが、こちらは外部フォントを
+     取りに行かない（CSP を self に閉じている・オフラインでも同じ見た目にする）ため、
+     ここで OS のフォントに解決する。未定義のまま var() を参照すると font-family 宣言ごと
+     無効になり、既定フォントに落ちる。 */
   --font-geist-sans: ui-sans-serif, system-ui;
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Surfaces and borders (cool off-white, slightly toward indigo) */
-  --background:    #f6f7fb;   /* App background */
-  --surface:       #ffffff;   /* Cards and panels */
-  --surface-2:     #f0f1f6;   /* Secondary surfaces such as the sidebar */
+  /* 面・境界（クールなオフホワイト、わずかにインディゴ寄り） */
+  --background:    #f6f7fb;   /* アプリ背景 */
+  --surface:       #ffffff;   /* カード・パネル */
+  --surface-2:     #f0f1f6;   /* サイドバー等の副面 */
   --surface-3:     #e7e9f1;   /* hover / active */
   --border:        #e4e6ef;
   --border-strong: #d2d5e2;
-  /* Text */
+  /* 文字 */
   --foreground:    #171922;
   --fg-2:          #3b3f4c;
   --muted:         #6b7180;
-  --faint:         #797e8c;   /* Faintest auxiliary text and icons (slightly darker for readability) */
-  /* Accent (refined indigo/violet) */
+  --faint:         #797e8c;   /* 最も淡い補助文字・アイコン（可読性のためやや濃く） */
+  /* アクセント（洗練インディゴ・バイオレット） */
   --accent:        #5b57e0;
   --accent-hover:  #4a46d1;
   --accent-weak:   #edecfb;
-  --accent-line:   #d9d7f7;   /* Accent rules, underlines, and focus rings */
+  --accent-line:   #d9d7f7;   /* アクセントの罫線・下線・フォーカスリング */
   --accent-fg:     #ffffff;
-  /* Semantic */
+  --accent-step-fg:#ffffff;
+  /* セマンティック */
   --success:       #12a074;
   --success-weak:  #e2f4ec;
   --warning:       #b7791f;
   --warning-weak:  #f8efd9;
   --danger:        #d64545;
   --danger-weak:   #fbe7e7;
-  /* Badge text colors (darker than semantic colors to meet 4.5:1 on weak backgrounds; light theme) */
+  /* バッジ文字色（弱背景の上で 4.5:1 を満たすためセマンティック色より濃くする。ライト用） */
   --badge-success-fg: #0a6b48;
   --badge-warning-fg: #8a5510;
   --badge-danger-fg:  #a32a26;
-  /* Scrollbar */
+  /* スクロールバー */
   --scrollbar:     #cdd0dd;
   --scrollbar-hover:#a9a9b4;
-  /* Border radius (unified on one scale) */
+  /* 角丸（1つのスケールに統一） */
   --radius:  10px;
   --radius-sm: 7px;
   --radius-lg: 14px;
   --radius-xl: 18px;
-  /* Shadows (faint tint matched to the background color) */
+  /* 影（背景色に寄せた淡いティント） */
   --shadow-sm: 0 1px 2px rgba(24,26,42,.06), 0 1px 1px rgba(24,26,42,.04);
   --shadow-md: 0 6px 20px rgba(24,26,42,.09);
   --shadow-lg: 0 18px 48px rgba(24,26,42,.16);
   --ring: 0 0 0 3px var(--accent-line);
 }
 
-/* ---- Dark tokens (explicit data-theme="dark") ---- */
+/* ---- ダークトークン（明示 data-theme="dark"） ---- */
 [data-theme="dark"] {
   --background:    #0b0c10;
   --surface:       #15171d;
@@ -74,13 +75,14 @@
   --accent-weak:   #1e1b3a;
   --accent-line:   #302b57;
   --accent-fg:     #ffffff;
+  --accent-step-fg:#161627;
   --success:       #35c48f;
   --success-weak:  #10251d;
   --warning:       #e0a94a;
   --warning-weak:  #281f11;
   --danger:        #ec6a6a;
   --danger-weak:   #2a1515;
-  /* Badge text colors (in dark, semantic colors already have enough contrast on weak backgrounds, so used as is) */
+  /* バッジ文字色（ダークは弱背景の上でセマンティック色が十分なコントラストを持つためそのまま） */
   --badge-success-fg: var(--success);
   --badge-warning-fg: var(--warning);
   --badge-danger-fg:  var(--danger);
@@ -91,7 +93,7 @@
   --shadow-lg: 0 22px 54px rgba(0,0,0,.62);
 }
 
-/* ---- System fallback when JS is disabled (does not override an explicit light setting) ---- */
+/* ---- JS 無効時の system fallback（明示 light 指定は上書きしない） ---- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     --background:    #0b0c10;
@@ -109,6 +111,7 @@
     --accent-weak:   #1e1b3a;
     --accent-line:   #302b57;
     --accent-fg:     #ffffff;
+    --accent-step-fg:#161627;
     --success:       #35c48f;
     --success-weak:  #10251d;
     --warning:       #e0a94a;
@@ -153,7 +156,7 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* ============ Base ============ */
+/* ============ ベース ============ */
 html { scroll-behavior: smooth; color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) { color-scheme: dark; } }
@@ -177,14 +180,14 @@ h1 { letter-spacing: -.02em; }
   a { color: inherit; }
 }
 
-/* Focus ring */
+/* フォーカスリング */
 :where(a, button, input, select, textarea):focus-visible {
   outline: none;
   box-shadow: var(--ring);
   border-radius: var(--radius-sm);
 }
 
-/* Thin custom scrollbar */
+/* 細めのカスタムスクロールバー */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar) transparent;
@@ -198,7 +201,7 @@ h1 { letter-spacing: -.02em; }
 }
 *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
 
-/* ============ Reusable components ============ */
+/* ============ 再利用コンポーネント ============ */
 @layer components {
   .card {
     background: var(--surface);
@@ -245,10 +248,10 @@ h1 { letter-spacing: -.02em; }
   .badge-client  { background: var(--warning-weak); color: var(--badge-warning-fg); }
   .badge-task    { background: var(--surface-3); color: var(--fg-2); }
 
-  /* Contents of the theme toggle button. **Switched by CSS, not JS state**, so
-     it is correct from server render onward and there is no hydration mismatch.
-     Always set display within this rule. If combined with Tailwind's `contents` utility,
-     the utility layer comes later and overrides display:none, showing both icons. */
+  /* テーマ切替ボタンの中身。**JS の状態ではなく CSS で切り替える**ので、
+     サーバ描画の時点から正しく、hydration のずれも起きない。
+     display は必ずこの規則の中で与える。Tailwind の `contents` ユーティリティを併用すると、
+     ユーティリティ層が後に来るため display:none を上書きし、両方のアイコンが出る。 */
   .theme-when-light { display: contents; }
   .theme-when-dark  { display: none; }
   [data-theme="dark"] .theme-when-light { display: none; }
@@ -258,11 +261,11 @@ h1 { letter-spacing: -.02em; }
     :root:not([data-theme]) .theme-when-dark  { display: contents; }
   }
 
-  /* Status styles (cover project PROJECT_STATUS / audit action) */
-  .badge-active    { background: var(--accent-weak); color: var(--accent); }          /* In progress / UPDATE */
-  .badge-done      { background: var(--success-weak); color: var(--badge-success-fg); } /* Done / INSERT */
-  .badge-on-hold   { background: var(--warning-weak); color: var(--badge-warning-fg); } /* On hold */
-  .badge-lead      { background: var(--surface-3); color: var(--fg-2); }              /* Prospect / default for anything other than DELETE */
-  .badge-archived  { background: var(--surface-3); color: var(--fg-2); }              /* Archived */
+  /* ステータス系（案件 PROJECT_STATUS / 監査 action を網羅） */
+  .badge-active    { background: var(--accent-weak); color: var(--accent); }          /* 進行中 / UPDATE */
+  .badge-done      { background: var(--success-weak); color: var(--badge-success-fg); } /* 完了 / INSERT */
+  .badge-on-hold   { background: var(--warning-weak); color: var(--badge-warning-fg); } /* 保留 */
+  .badge-lead      { background: var(--surface-3); color: var(--fg-2); }              /* 見込み / DELETE 以外の既定 */
+  .badge-archived  { background: var(--surface-3); color: var(--fg-2); }              /* アーカイブ */
   .badge-danger    { background: var(--danger-weak); color: var(--badge-danger-fg); }  /* DELETE */
 }

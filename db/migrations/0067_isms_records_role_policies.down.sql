@@ -1,6 +1,6 @@
 -- @run-as: admin
--- Rollback of 0067. Removes the role policies on the records tables, restores require_records_role to the 0066 version (which holds its own permission table),
--- and drops records_role_allows. Only policies and functions are affected, so no record data is lost (no data protection needed).
+-- 0067 の巻き戻し。記録の表の役割ポリシーを外し、require_records_role を 0066 の版（許可の表を自分で持つ形）へ戻して、
+-- records_role_allows を消す。ポリシーと関数だけなので、記録のデータは失われない（データの保護は要らない）。
 
 SET ROLE schema_owner;
 

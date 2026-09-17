@@ -1,50 +1,50 @@
--- 0044 app: execution records for measure-exclusion simulations on screen 8 (AI analysis / simulation)
+-- 0044 app: 画面⑧(AI分析・シミュレーション)の施策除外シミュレーション実行記録
 --
--- Per the design decision (2026-09-03),
--- this starts even while real operational data on screen 7 (incident management) is still scarce.
--- Acceptance criteria (detailed spec):
---   C1: overlap analysis mechanically detects sets of measures covering the same risk/asset
---   C2: simulation results state explicitly whether they are "sample values" or "estimates based on real data"
---   C3: every run leaves a record in app.simulation_runs so it can be reproduced and verified
---   C4: when there is not enough data, the feature is explicitly disabled (never silently
---       emit uncertain numbers)
+-- goto-twin決裁(2026-09-03、twin-consult-log C-20260903-085834-0288)にもとづき、
+-- 画面⑦(インシデント管理)の実運用データがまだ僅少な段階でも着手する。
+-- 受入条件(詳細仕様書、Kaname作業ログKaname作業ログ参照):
+--   C1: 重複分析は同一リスク/同一資産をカバーする施策の組を機械的に検出する
+--   C2: シミュレーション結果は「サンプル値」か「実データに基づく推定」かを明示
+--   C3: 実行のたびにapp.simulation_runsへ記録が残り、再現・検証できる
+--   C4: 十分なデータが無い場合、機能を明示的に無効化する(黙って不確かな
+--       数値を出さない)
 --
--- Implementation policy (fixed by design decision): overlap analysis and simulation use deterministic logic
--- (no LLM). No dummy/test data goes into the production DB (this migration itself is
--- schema-only and writes no data at all).
+-- 実装方針(goto-twin決裁で固定): 重複分析・シミュレーションは決定論ロジック
+-- (LLM不使用)。本番DBへダミー/テストデータは投入しない(このmigration自体も
+-- スキーマのみで、データは一切書き込まない)。
 --
--- Design history (two revisions):
---   1st (Codex review 2026-09-03): the original idea was "total incident count minus
---   incidents linked to the target measure = predicted count after excluding the measure", but
---   the meaning was inverted (incidents linked to a measure are "events that happened even with the
---   measure in effect"; excluding the measure does not make them disappear = the count does not drop).
---   We judged that app.incidents alone gives no basis to deterministically derive the
---   direction of change on exclusion, gave up on the "exclusion simulation", and changed the feature into
---   "per-measure incident linkage counts (current actuals)".
+-- 設計の経緯(2回の見直し):
+--   1回目(Codexレビュー2026-09-03指摘): 当初案は「全体インシデント件数−
+--   対象施策に紐づくインシデント件数=施策除外後の予測件数」としていたが、
+--   意味が逆転していた(施策に紐づくインシデントは「施策が有効な状態でも
+--   起きた事案」であり、除外したら無かったことになる=減るわけではない)。
+--   このシステムはapp.incidentsだけでは除外時の増減方向を決定論的に出す
+--   根拠が無いと判断し、「除外シミュレーション」を諦めて「施策別インシデ
+--   ント紐づけ集計(現状の実測)」へ機能の性質を変更した。
 --
---   2nd (design re-decision, 2026-09-03): the premise above was wrong.
---   app.risk_evaluation_snapshots (0027) records, per risk scenario,
---   risk_level (probability x impact) for stage IN ('inherent','before_measure','after_measure'),
---   so for an after_measure snapshot linked to a measure (measure_id)
---   the evaluation of the preceding stage (inherent if there is no before_measure) already
---   exists. The counterfactual "if the measure were removed" is
---   exactly the difference between these evaluations; no time series or measure implementation period is needed.
---   By definition the direction is one-way: "the defense goes away = risk is at least the current value"
---   (if the preceding stage's evaluation is lower than the current one, i.e. inverted, that is an inconsistency in
---   the evaluation records; it is not quantified but rejected as "inconsistent evaluations").
---   This allows implementing it while keeping the original nature of the feature as an "exclusion simulation",
---   so no revision of the detailed spec was deemed necessary (design decision).
+--   2回目(goto-twin再決裁、2026-09-03): 上記の前提が誤りだった。
+--   app.risk_evaluation_snapshots(0027)は、リスクシナリオごとに
+--   stage IN ('inherent','before_measure','after_measure')でrisk_level
+--   (probability×impact)を記録しており、施策(measure_id)に紐づく
+--   after_measureスナップショットと、その前段階(before_measureが無ければ
+--   inherent)の評価値が既に存在する。「施策を外した場合」の反実仮想は、
+--   この評価値の差そのものであり、時系列データや施策の実施期間は不要。
+--   方向は定義上「防御が無くなる=リスク値は現状以上になる」の一方向のみ
+--   (前段階の評価が現状より低い=逆転していれば、それは評価記録の不整合
+--   であり、数値化せず「評価値が不整合」として拒否する)。
+--   これにより「除外シミュレーション」という当初の機能性質を維持したまま
+--   実装できるため、詳細仕様書の改訂は不要と判断した(goto-twin決裁)。
 --
---   The incident linkage counts (the feature built in the 1st revision) are
---   not called a "simulation" and remain in a separate panel as reference information
---   (live query on the screen only; no dedicated execution-record table).
+--   インシデントへの紐づけ件数集計(1回目の見直しで作った機能)は、
+--   「シミュレーション」とは呼ばず、参考情報として別パネルに残す
+--   (画面のライブクエリのみ。専用の実行記録テーブルは持たない)。
 --
--- Schema: the per-scenario breakdown (risk_scenario_id, with/without-measure
--- risk_level, evaluation date) is stored in scenario_breakdown (jsonb array). This is so that
--- not only the totals but also "what was compared" can be verified after the data changes later
--- (C3; Codex review 2026-09-03: originally only totals were stored and
--- with no breakdown it could not be reproduced). method is no longer free text but constrained by a CHECK
--- on fixed values (add allowed values when adding logic in the future).
+-- スキーマ: 対象シナリオ単位の内訳(risk_scenario_id・施策あり/なしの
+-- risk_level・評価日)をscenario_breakdown(jsonb配列)に保存する。件数の
+-- 合計だけでなく、後日データが変わった後も「何を比較したか」を検証できる
+-- ようにするため(C3、Codexレビュー2026-09-03指摘: 当初は合計件数のみで
+-- 内訳が無く再現できなかった)。methodは自由記述をやめ、固定値のCHECKで
+-- 縛る(将来ロジックを追加する時は許容値を増やす)。
 
 CREATE TABLE app.simulation_runs (
   id                            uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -64,10 +64,10 @@ CREATE TABLE app.simulation_runs (
   CHECK (scenario_count >= 1),
   CHECK (after_measure_risk_level_sum >= 0),
   CHECK (without_measure_risk_level_sum >= 0),
-  -- Measure exclusion is a counterfactual that removes a defense, so the post-exclusion risk total
-  -- never falls below the current (with-measure) total. Inverted data is detected in the app layer and
-  -- the INSERT is not performed at all (rejected as "inconsistent evaluations", not quantified), so
-  -- this CHECK is the last line of defense.
+  -- 施策除外は防御を無くす方向の反実仮想なので、除外後のリスク値合計は
+  -- 現状(施策あり)合計を下回らない。逆転データはアプリ層で検知して
+  -- INSERT自体を行わない(「評価値が不整合」として拒否、数値化しない)ため、
+  -- ここは最終防衛線としてのCHECK。
   CHECK (without_measure_risk_level_sum >= after_measure_risk_level_sum),
   CHECK (jsonb_typeof(scenario_breakdown) = 'array')
 );
@@ -75,12 +75,12 @@ CREATE TABLE app.simulation_runs (
 COMMENT ON TABLE app.simulation_runs IS '画面⑧: 施策除外シミュレーション(リスク評価スナップショットの施策あり/なし比較)の実行記録。C3(再現・検証)の実体';
 COMMENT ON COLUMN app.simulation_runs.scenario_breakdown IS '対象リスクシナリオごとの内訳(risk_scenario_id・施策ありrisk_level/評価日・施策なしrisk_level/stage/評価日)。後日データが変わっても何を比較したかを検証できるようにするため保存する';
 
--- Enforce on the DB side too that scenario_count and each total match the actual contents of scenario_breakdown.
--- The app path computes them correctly, but if another path such as direct SQL
--- could create rows whose counts/totals merely add up (without a matching breakdown), the C3 (reproduce/
--- verify) guarantee would break (Codex review 2026-09-03, 5th round). PostgreSQL
--- CHECK constraints cannot contain subqueries (set-returning functions such as jsonb_array_elements
--- cannot be used directly in a CHECK expression), so this is verified by a BEFORE INSERT trigger.
+-- scenario_count・各合計値がscenario_breakdownの実際の中身と一致することを
+-- DB側でも強制する。アプリ経路は正しく計算しているが、直接SQL等の別経路で
+-- 件数・合計だけ辻褄を合わせた(内訳が伴わない)行を作れてしまうとC3(再現・
+-- 検証)の保証が崩れる(Codexレビュー2026-09-03 5回目指摘)。PostgreSQLの
+-- CHECK制約はサブクエリを書けない(jsonb_array_elementsのような集合を返す
+-- 関数はCHECK式に直接使えない)ため、BEFORE INSERTトリガーで検証する。
 CREATE OR REPLACE FUNCTION app.check_simulation_run_breakdown() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 DECLARE
@@ -89,10 +89,10 @@ DECLARE
   v_without_sum integer;
   v_all_keys_present boolean;
 BEGIN
-  -- The ? operator only checks the key's "existence" (true even if the value is JSON null).
-  -- If the value stays null, ((elem->>'after_level')::int) becomes SQL NULL and
-  -- sum() ignores it, silently reducing the total, so check with ->> down to IS NOT NULL
-  -- (Codex review 2026-09-03, 6th round).
+  -- ?演算子はキーの「存在」だけを見る(値がJSON nullでも真になる)。
+  -- 値がnullのままだと((elem->>'after_level')::int)がSQL NULLになり、
+  -- sum()がそれを無視して静かに合計を減らすため、->>でIS NOT NULLまで
+  -- 確認する(Codexレビュー2026-09-03 6回目指摘)。
   SELECT count(*), coalesce(sum((elem ->> 'after_level')::int), 0),
          coalesce(sum((elem ->> 'without_measure_level')::int), 0),
          bool_and(
@@ -125,13 +125,13 @@ END $$;
 CREATE TRIGGER trg_simulation_run_breakdown BEFORE INSERT ON app.simulation_runs
   FOR EACH ROW EXECUTE FUNCTION app.check_simulation_run_breakdown();
 
--- The policy itself follows the same standard form as other tables with tenant_id (tenant_isolation FOR ALL)
--- (scripts/ci/check_rls.sql checks this form uniformly, so giving just this table
--- a different form would break the generality of the check). Append-only execution records are actually enforced
--- via GRANT: app_rw is not given UPDATE/DELETE. PostgreSQL checks table privileges (GRANT)
--- before RLS, so even if the policy covers ALL, without the GRANT
--- UPDATE/DELETE statements cannot run at all. Follows the established pattern of 0027's app.risk_evaluation_
--- snapshots (history cannot be UPDATEd/DELETEd).
+-- ポリシー自体は他のtenant_id付きテーブルと同じ標準形(tenant_isolation FOR ALL)
+-- に揃える(scripts/ci/check_rls.sqlがこの形を一律に検査するため、ここだけ
+-- 別形にすると検査の一般化が崩れる)。実行記録を追記専用にする実効的な強制は
+-- GRANTで行う: app_rwにUPDATE/DELETEを与えない。PostgreSQLはRLSより先に
+-- テーブル権限(GRANT)を見るため、ポリシーがALLをカバーしていてもGRANTが
+-- 無ければUPDATE/DELETE文はそもそも実行できない。0027のapp.risk_evaluation_
+-- snapshots(履歴はUPDATE/DELETE不可)と同じ確立済みパターンを踏襲する。
 DO $$
 BEGIN
   ALTER TABLE app.simulation_runs ENABLE ROW LEVEL SECURITY;

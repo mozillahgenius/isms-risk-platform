@@ -1,8 +1,8 @@
--- 0027: risk register, asset/measure masters, framework tags, evaluation history
--- Adds the operational register's data-entry side without breaking the existing catalog / app.risk_*.
+-- 0027: リスク台帳・資産/施策マスタ・枠組みタグ・評価履歴
+-- 既存の catalog / app.risk_* を壊さず、運用台帳の登録面を追加する。
 
 -- ---------------------------------------------------------------------------
--- Shared catalog: framework tags
+-- 共有カタログ: 枠組みタグ
 -- ---------------------------------------------------------------------------
 INSERT INTO catalog.frameworks (key, name_ja, version, source_note)
 VALUES (
@@ -16,8 +16,8 @@ ON CONFLICT (key) DO UPDATE
        version = EXCLUDED.version,
        source_note = EXCLUDED.source_note;
 
--- Existing risk templates embedded the Phase in domain. Move Phase to its own column and
--- normalize domain to just the area name. Titles and summaries are left untouched.
+-- 既存のリスク雛形は domain に Phase を含めていた。Phase は独立列へ移し、
+-- domain は領域名だけに正規化する。タイトルや要約には触れない。
 ALTER TABLE catalog.risk_scenario_templates
   ADD COLUMN area text,
   ADD COLUMN phase smallint;
@@ -42,8 +42,8 @@ ALTER TABLE catalog.risk_scenario_templates
   ADD CONSTRAINT risk_scenario_templates_business_key
   UNIQUE (domain, phase, theme, measure, frame, summary);
 
--- Controls previously had a single-valued framework_key. Add a tag table that can express
--- overlapping frameworks, and migrate the existing values as the initial tags.
+-- 統制は従来 framework_key を単一値で持っていた。互いに重なる枠組みを
+-- 表現できるタグ表を追加し、既存値を初期タグとして移す。
 CREATE TABLE catalog.control_frameworks (
   control_id   uuid NOT NULL REFERENCES catalog.controls(id),
   framework_key text NOT NULL REFERENCES catalog.frameworks(key),
@@ -54,8 +54,8 @@ INSERT INTO catalog.control_frameworks (control_id, framework_key)
 SELECT id, framework_key FROM catalog.controls
 ON CONFLICT DO NOTHING;
 
--- The existing IPO-readiness rules are reused on the risk management screen too.
--- The ISO27001 tag is not attached, to avoid fabricating Annex A data.
+-- 既存の上場準備ルールは、リスクマネジメント画面でも再利用する。
+-- ISO27001タグは、附属書 A の実データを捏造しないため付けない。
 INSERT INTO catalog.control_frameworks (control_id, framework_key)
 SELECT id, 'RISK-MANAGEMENT'
   FROM catalog.controls
@@ -88,7 +88,7 @@ SELECT p.key, f.framework_key
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- Tenant registers: assets / measures / risks and framework tags
+-- テナント台帳: 資産 / 施策 / リスクと枠組みタグ
 -- ---------------------------------------------------------------------------
 CREATE TABLE app.assets (
   id                   uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -185,8 +185,8 @@ ALTER TABLE app.risk_treatments
   ADD CONSTRAINT risk_treatments_measure_fk
   FOREIGN KEY (tenant_id, measure_id) REFERENCES app.measures(tenant_id, id);
 
--- Risk map time series. The existing risk_assessments is the baseline for audit; this is an
--- append-only display snapshot for comparing inherent / before-measure / after-measure on screen.
+-- リスクマップの時系列。既存 risk_assessments は監査用の基準版、こちらは
+-- 画面で固有/施策前/施策後を比較する追記型の表示用スナップショット。
 CREATE TABLE app.risk_evaluation_snapshots (
   id               uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id        uuid NOT NULL,
@@ -213,8 +213,8 @@ CREATE TABLE app.risk_evaluation_snapshots (
 CREATE INDEX risk_evaluation_snapshots_timeline
   ON app.risk_evaluation_snapshots (tenant_id, risk_scenario_id, assessed_on, created_at);
 
--- New app tables are created after the bulk processing in 0015, so the same tenant isolation
--- is applied explicitly here. History cannot be UPDATEd/DELETEd.
+-- 新規 app テーブルは 0015 の一括処理より後に作られるため、ここで同じ
+-- テナント分離を明示的に適用する。履歴は UPDATE/DELETE 不可。
 DO $$
 DECLARE
   t text;

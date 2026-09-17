@@ -1,39 +1,35 @@
-# Backoffice → ISMS HR identity link
+# backoffice → ISMS HR identity link
 
-The link uses the existing `app.identities.hr_employee_id` column. It stores the
-immutable text form of `bo.workforce_members.id` from a separate backoffice
-database. `worker_ref` is only a changeable human reference and is never used as
-the link key. The backoffice is the source of truth; ISMS receives a projection
-and never writes back to the backoffice.
+The one-person pilot uses the existing `app.identities.hr_employee_id` column.
+It stores the immutable text form of `bo.workforce_members.id` from the separate
+backoffice database. `worker_ref` is only a changeable human reference and is
+never used as the link key. Backoffice is the source of truth; ISMS receives a
+projection and never writes back to backoffice.
 
 ## Worker reference rule
 
-A suggested `worker_ref` format is
-`HR-<calendar year>-<zero-padded tenant-local serial>`, for example `HR-2026-001`.
-The serial is allocated from the backoffice workforce ledger, not from an ISMS
-UUID or an email address. The value is a human-facing backoffice reference only;
-the immutable cross-system link remains the UUID in `bo.workforce_members.id`,
-copied as text to `app.identities.hr_employee_id`.
+For this sample pilot, `worker_ref` is assigned as
+`EX-HR-<calendar year>-<zero-padded tenant-local serial>`. The serial starts at
+`001` for the first active workforce member in the Example Organization tenant and
+is allocated from the backoffice workforce ledger, not from an ISMS UUID or an
+email address. The pilot value is therefore `EX-HR-2026-001`. The value is a
+human-facing backoffice reference only; the immutable cross-system link remains
+the UUID in `bo.workforce_members.id`, copied as text to
+`app.identities.hr_employee_id`.
 
-## Expected backoffice schema
+## Backoffice source of truth for the pilot
 
-The script reads (read-only) these backoffice relations:
-
-- `bo.workforce_members` (`id`, `org_id`, `actor_id`, `worker_ref`, `active_to`, `created_at`)
-- `bo.actors` (`id`, `org_id`, `user_id`, `label`, `kind`)
-- `bo.app_users` (`id`, `email`, `display_name`)
-
-The backoffice connection is taken from `--backoffice-db` or
-`BACKOFFICE_DATABASE_URL` (default `postgres://127.0.0.1:5432/backoffice`). Point it
-at the backoffice source of truth; test or end-to-end databases are never valid
-sources for `hr_employee_id`.
+The pilot uses `postgres://127.0.0.1:55432/ssi` as the backoffice source of
+truth. `ssi_e2e_codex`, `ssi_e2e_codex_fix`, and any other test database are
+never valid sources for `hr_employee_id`. The production container database on
+port 55434 is also not this pilot's source of truth.
 
 ## Registration path
 
-The backoffice is expected to provide a registration form that ensures the user
-has a `bo.actors(kind='human')` row and then upserts `bo.workforce_members` with
-the supplied `worker_ref`. This does not require changing the backoffice schema
-or creating a synchronization job.
+The backoffice `/admin/hr` page has a current-user-only registration form. It
+ensures the logged-in user has a `bo.actors(kind='human')` row, then upserts
+`bo.workforce_members` with the supplied `worker_ref`. It does not change the
+backoffice schema and it does not create a synchronization job.
 
 After the backoffice row exists, the ISMS-side command is read-only by default:
 
@@ -63,7 +59,7 @@ workforce ID with a nonexistent UUID; it must fail before CHK-ENDPOINT-010 is
 accepted. `--self-test` remains a local unit-level check of the same invariant.
 
 The backoffice and read-only ISMS endpoints are environment/inputs, not
-hardcoded deployment assumptions. `--tenant-token` (or
+hardcoded production assumptions. `--tenant-token` (or
 `ISMS_WEB_TENANT_TOKEN`) establishes the tenant context for the `app_ro`
 verification reads. `--provisioner-dsn` (or
 `ISMS_PROVISIONER_DATABASE_URL`) must be a separate `provisioner` connection;

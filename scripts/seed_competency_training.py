@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Idempotently load initial drafts of the company's (tenant's) competency requirements and education/training.
+"""自社（テナント）の力量要件と教育・訓練の初期案を冪等に投入する。
 
-What it loads:
-    1. Competency requirements  app.competency_requirements (competencies required per standard role)
-    2. Education/training       app.trainings (tagged as ISMS in scope)
+入れるもの:
+  1. 力量要件   app.competency_requirements（標準ロールごとに要る力量）
+  2. 教育・訓練 app.trainings（ISMS 対象のタグ付き）
 
-**What it does not load**: fulfillment assessments (app.competency_fulfillments) and attendance records
-(app.training_records). Both are track records involving "who"; inserting them without the fact of an actual
-assessment or attendance would fabricate evidence. People and track records are entered by operations.
+**入れないもの**: 充足の評価（app.competency_fulfillments）と受講記録
+（app.training_records）。どちらも「誰が」を伴う実績であり、実際に評価・受講した
+事実が無いまま入れると、証跡の捏造になる。人と実績は運用側で入れる。
 
-Everything is an **initial draft, unapproved**. The description says so.
+すべて **初期案・未承認**。description にその旨を残す。
 
-How idempotency works:
-    - Competency requirements are matched on (role, required_competency) and descriptions converge
-    - Trainings are matched on (fiscal_year, title) and descriptions and tags converge
-    - **Existing rows are never deleted**, so additions made by operations are not removed
+冪等の効き方:
+  - 力量要件は (role, required_competency) で突き合わせ、説明文を収束させる
+  - 教育は (fiscal_year, title) で突き合わせ、説明文とタグを収束させる
+  - **既存行の削除はしない**。運用が足したものを消さないため
 
-Source of the content: role definitions in catalog.roles_default and education events in
-catalog.calendar_events_default. Nothing absent from the standard operating model has been added.
+内容の出所: catalog.roles_default の役割定義と、catalog.calendar_events_default の
+教育行事。標準運用モデルに無いものを足していない。
 
   python3 scripts/seed_competency_training.py [--dry-run]
 """
@@ -34,9 +34,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 SOURCE = "標準ロール定義と年間行事を元にした初期案。未承認"
 
-# --- Competency requirements -------------------------------------------------
-# (role, required competency, description)
-# Role definitions (catalog.roles_default.description) unpacked into verifiable behaviors.
+# --- 力量要件 ---------------------------------------------------------------
+# (ロール, 要る力量, 説明)
+# 役割の定義（catalog.roles_default.description）を、確かめられる行動に開いたもの。
 REQUIREMENTS = [
     ("ciso", "リスク受容の判断",
      "残留リスクを受容するかを判断し、判断の根拠と日付を記録できる。受容は委譲しない。"),
@@ -68,9 +68,9 @@ REQUIREMENTS = [
      "暗号化・画面施錠・更新の適用を自分で確かめられる。"),
 ]
 
-# --- Education/training ------------------------------------------------------
-# (fiscal year, title, description, tags)
-# Only items corresponding to annual events (annual_training / event_onboarding) are included.
+# --- 教育・訓練 -------------------------------------------------------------
+# (年度, 題名, 説明, タグ)
+# 年間行事（annual_training / event_onboarding）に対応するものだけを置く。
 FISCAL_YEAR = 2026
 TRAININGS = [
     (FISCAL_YEAR, "情報セキュリティ年次教育",
@@ -182,7 +182,7 @@ def main() -> None:
     sql = build_sql(token)
     if args.dry_run:
         sql = sql.replace("\nCOMMIT;\n", "\nROLLBACK;\n")
-    # Pass the token in the SQL body on stdin. Putting it in psql arguments makes it readable via ps.
+    # トークンは標準入力の SQL 本文で渡す。psql の引数に置くと ps で読めてしまう。
     command = ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", dsn]
     subprocess.run(command, input=sql, text=True, check=True)
     mode = "dry-run（巻き戻した）" if args.dry_run else "投入"

@@ -1,4 +1,4 @@
--- Rollback of 0018 (back to the 0017 state)
+-- 0018 の巻き戻し（0017 の状態へ戻す）
 DROP POLICY IF EXISTS ctx_deviation_lookup ON app.deviations;
 
 CREATE OR REPLACE FUNCTION catalog.risk_criteria_default_immutable() RETURNS trigger

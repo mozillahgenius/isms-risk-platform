@@ -9,8 +9,8 @@ export const metadata = { title: '施策マスタ' };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-// budget_amount/resource_fte: postgres.js returns numeric as strings, so
-// convert with Number() only right before display (added 2026-09-02).
+// budget_amount/resource_fte は postgres.js が numeric を文字列で返すため、
+// 表示直前でのみ Number() へ変換する（2026-09-02追加）。
 function formatBudget(value: string | null): string {
   if (value === null) return '—';
   return `¥${Number(value).toLocaleString('ja-JP')}`;

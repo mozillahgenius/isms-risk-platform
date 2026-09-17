@@ -1,17 +1,17 @@
 -- @run-as: admin
--- 0069: Receptacle for technical vulnerability management (A.8.8) (4th item of design doc 2026-09-11 §4).
+-- 0069: 技術的脆弱性の管理（A.8.8）の受け皿（設計書 2026-09-11 §4 の 4 本目）。
 --
--- A.8.8 is the control requiring that information on technical vulnerabilities be obtained, exposure evaluated, and appropriate measures taken.
--- As an Annex A control, whether it applies is decided by the Statement of Applicability. The step page only shows the count and does not make it mandatory
--- (design decision 2026-09-12).
+-- A.8.8 は、技術的脆弱性の情報を得て、さらされ具合を評価し、適切な処置をとることを求める統制。
+-- 附属書 A の統制なので、適用するかは適用宣言書で決まる。段階の画面では件数を出すだけで必須にしない
+-- （2026-09-12 goto-twin 決定）。
 --
--- Status: detected (open) -> in progress (in_progress) -> mitigated (mitigated), or false positive (false_positive).
--- There is no "accept without fixing" status: per the decision not to create a new approval flow (2026-09-12),
--- and because it does not fit existing exceptions (attached to findings) either. If accepted, handle it as a risk in the risk register.
--- Claiming closed (mitigated / false positive) requires a closed date; a false positive requires a reason.
--- Only one open record per identifier (CVE etc.) and asset (recurrence after closing is entered as a new record).
--- Linking to an asset is optional (a relation named by the design doc). No approval is attached. No content data is inserted.
--- Formatting, RLS, and down policy are the same as 0065-0068. The table is written only by the records UI, so 0067's role policies are applied too.
+-- 状態は 検知（open）→ 対応中（in_progress）→ 対処済み（mitigated）、または 誤検知（false_positive）。
+-- 「直さずに受け入れる」状態は置かない。新しい承認の流れを作らない決定（2026-09-12 goto-twin）で、
+-- 既存の例外（指摘に付く）にも乗らないため。受け入れるなら、リスクとしてリスク台帳で扱う。
+-- 閉じた（対処済み・誤検知）と言うなら閉じた日が要り、誤検知なら理由が要る。
+-- 同じ識別子（CVE 等）・同じ資産の、開いている記録は 1 つだけ（閉じた後の再発は新しい記録として入る）。
+-- 資産への結び付けは任意（設計書が名指しした関係）。承認は付けない。中身のデータは入れない。
+-- 書式・RLS・down の方針は 0065〜0068 と同じ。記録の画面だけが書く表なので、0067 の役割ポリシーも張る。
 
 SET ROLE schema_owner;
 
@@ -19,7 +19,7 @@ CREATE TABLE app.vulnerabilities (
   id               uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id        uuid NOT NULL,
   title            text NOT NULL,
-  -- CVE number, vendor advisory number, etc. Empty if none.
+  -- CVE 番号・ベンダーの勧告番号など。無ければ空。
   identifier       text NOT NULL DEFAULT '',
   source           text NOT NULL CHECK (source IN ('scan','advisory','report','pentest','other')),
   asset_id         uuid,
@@ -40,19 +40,19 @@ CREATE TABLE app.vulnerabilities (
   FOREIGN KEY (tenant_id, owner_user_id) REFERENCES app.users(tenant_id, id),
   CHECK (title ~ '[^[:space:]]'),
   CONSTRAINT vulnerabilities_due_after_detected CHECK (due_date IS NULL OR due_date >= detected_on),
-  -- A closed date is present only when closed (mitigated / false positive). Rejects open-with-closed-date and closed-without-one.
+  -- 閉じた（対処済み・誤検知）ときだけ閉じた日が入る。開いているのに閉じた日がある、閉じたのに無い、を拒否する。
   CONSTRAINT vulnerabilities_resolved_iff_closed CHECK (
     (status IN ('mitigated','false_positive')) = (resolved_on IS NOT NULL)
   ),
   CONSTRAINT vulnerabilities_resolved_after_detected CHECK (resolved_on IS NULL OR resolved_on >= detected_on),
-  -- If claiming a false positive, write why it is not a vulnerability.
+  -- 誤検知と言うなら、なぜ脆弱性でないかを書く。
   CONSTRAINT vulnerabilities_false_positive_reason CHECK (
     status <> 'false_positive' OR resolution_note ~ '[^[:space:]]'
   )
 );
--- Open (detected / in progress) records: only one per identifier and asset.
--- Separate indexes for with-asset and without-asset. Substituting a fixed UUID for no-asset would confuse it with the asset having that UUID
--- (Codex review 2026-09-12). NULLS NOT DISTINCT requires PostgreSQL 15+, so it is not used.
+-- 開いている（検知・対応中）記録は、同じ識別子・同じ資産で 1 つだけ。
+-- 資産あり・資産なしで索引を分ける。資産なしを固定の UUID に置き換えると、その UUID の資産と取り違える
+-- （Codex レビュー 2026-09-12）。NULLS NOT DISTINCT は PostgreSQL 15 以降なので使わない。
 CREATE UNIQUE INDEX vulnerabilities_open_identifier ON app.vulnerabilities (tenant_id, identifier)
   WHERE identifier <> '' AND asset_id IS NULL AND status IN ('open','in_progress');
 CREATE UNIQUE INDEX vulnerabilities_open_identifier_asset ON app.vulnerabilities (tenant_id, identifier, asset_id)
@@ -70,7 +70,7 @@ BEGIN
     EXECUTE format('REVOKE ALL ON app.%I FROM PUBLIC',t);
     EXECUTE format('GRANT SELECT ON app.%I TO app_ro',t);
     EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON app.%I TO app_rw',t);
-    -- Same role policies as 0067 (names, shape, and target tables are pinned by check_rls.sql).
+    -- 0067 と同じ役割ポリシー（名前・形・対象表は check_rls.sql が固定する）。
     EXECUTE format('CREATE POLICY records_role_insert ON app.%I AS RESTRICTIVE FOR INSERT TO app_rw '
                    'WITH CHECK ((SELECT app.records_role_allows(%L)))', t, 'vulnerability');
     EXECUTE format('CREATE POLICY records_role_update ON app.%I AS RESTRICTIVE FOR UPDATE TO app_rw '
@@ -84,8 +84,8 @@ END $$;
 COMMENT ON TABLE app.vulnerabilities IS
   '技術的脆弱性（A.8.8）。閉じた（mitigated / false_positive）ときだけ resolved_on が入る。誤検知は理由必須。開いている記録は同じ識別子・資産で 1 つだけ。';
 
--- Add vulnerability to the permission table: owner / admin / manager (operational business records). Auditors may not write.
--- Only one kind added to the 0068 version (down restores the 0068 version).
+-- 許可の表に vulnerability を足す: owner / admin / manager（業務の運用の記録）。監査人には書かせない。
+-- 0068 の版に種類を 1 つ足しただけ（down で 0068 の版へ戻す）。
 CREATE OR REPLACE FUNCTION app.records_role_allows(p_kind text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 DECLARE

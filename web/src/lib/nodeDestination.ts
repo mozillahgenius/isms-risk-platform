@@ -1,15 +1,15 @@
-// Pure function that decides which screen to send a diagram node ID to.
+// 図のノード ID から「どの画面へ送るか」を決める純関数。
 //
-// The diagram renderer (ported as is from another implementation) only knows how to push to `/n/<id>`.
-// This module's job is to decode the ID and send it to the matching screen. Derived nodes (intermediate headings, not DB rows)
-// have no detail page, so they go to a list filtered by that condition. IDs whose destination cannot be determined return null.
+// 図の描画側（Kaname から移植したまま）は `/n/<id>` へ push することしか知らない。
+// ID を解いて対応する画面へ送るのがここの役目。導出ノード（DB の行ではない中間の見出し）には
+// 詳細ページが無いので、その条件で絞り込んだ一覧へ送る。行き先が決められない ID は null。
 
 import { parseGroupKey } from './nodeid';
 
-// Even if the ID's shape is correct, its content may not be valid as an identifier of the target
-// (e.g. control.<base64url("abc")> decodes but is not a uuid).
-// Sending malformed ones to a destination would 307-redirect to a page that 404s,
-// making "broken ID" indistinguishable from "deleted item". Stop them here.
+// ID の形が正しくても、中身が対象の識別子として成立しないことがある
+// （例: control.<base64url("abc")> は decode できるが uuid ではない）。
+// 形の合わないものを遷移先へ送ると、404 になるページへ 307 で飛ばすことになり、
+// 「壊れた ID」と「消えた項目」が区別できなくなる。ここで止める。
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_RE = /^[a-z0-9_]{1,64}$/;
 const FRAMEWORK_RE = /^[A-Za-z0-9:.\-]{1,64}$/;
@@ -55,14 +55,14 @@ function groupDestination(key: string): string | null {
         }[path[0]] ?? null
       );
     case 'theme': {
-      // path = [framework_key, ...theme segments]
+      // path = [framework_key, ...theme の段]
       const [framework, ...parts] = path;
       if (!framework || parts.length === 0) return null;
       const q = new URLSearchParams({ framework, theme: parts.join(' / ') });
       return `/catalog/controls?${q.toString()}`;
     }
     case 'dept': {
-      // A division alone does not determine the domain (there are several with a Phase), so pass it as a search term.
+      // 部門だけでは domain が決まらない（Phase 付きが複数ある）ので、検索語として渡す。
       if (!path[0]) return null;
       return `/catalog/risks?q=${encodeURIComponent(path[0])}`;
     }

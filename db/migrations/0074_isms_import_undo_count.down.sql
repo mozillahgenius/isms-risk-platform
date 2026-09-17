@@ -1,5 +1,5 @@
 -- @run-as: admin
--- Rollback of 0074. Restores undo counting to 0073's version (distinguished by xmin only). Functions only; no data is lost.
+-- 0074 の巻き戻し。取り消しの件数の数え方を 0073 の版（xmin だけで見分ける）へ戻す。関数だけで、データは失われない。
 
 SET ROLE schema_owner;
 

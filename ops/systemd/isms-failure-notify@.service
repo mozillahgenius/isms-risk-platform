@@ -1,0 +1,7 @@
+[Unit]
+Description=Notify Codzilla that %i failed
+
+[Service]
+Type=oneshot
+# %i には失敗した unit 名が入る（OnFailure=isms-failure-notify@%n.service）。
+ExecStart=/opt/isms-platform/releases/isms/current/ops/runtime/notify-failure.sh %i

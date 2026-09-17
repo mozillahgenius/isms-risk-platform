@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Run the acceptance tests (rls_test / domain_test) on a **throwaway DB**.
+# 受入試験（rls_test / domain_test）を**使い捨ての DB**で走らせる。
 #
-# Why separate them:
-#   These tests add rows to both catalog (= the projection of Git) and app. They need FK targets, so
-#   inserting into catalog is correct by design. The problem was **running them on the shared isms_dev**.
-#   domain_test's TEST-FW / T.1 (theme NULL) actually remained in isms_dev,
-#   and later the UI's /graph returned 500. The control count was also off by one from the seed.
+# なぜ分けるか:
+#   これらの試験は catalog（＝ Git の投影）にも app にも行を足す。FK の相手が要るので
+#   catalog へ入れるのは設計上正しい。問題は、それを**共有の isms_dev で流していた**こと。
+#   実際に domain_test の TEST-FW / T.1（theme が NULL）が isms_dev に残り、
+#   後から画面の /graph が 500 になった。統制の件数も 304 → 305 にずれていた。
 #
-#   Adding cleanup is not enough. The tests delete audit.audit_log, app.risk_criteria is
-#   history and cannot be deleted, and rls_test leaves fixtures at the end. "Throwing away" is more
-#   reliable than "restoring", and needs only one way of verifying.
+#   後始末を足すだけでは足りない。試験は audit.audit_log を消し、app.risk_criteria は
+#   履歴なので消せず、rls_test は最後に fixture を残す。「元へ戻す」より
+#   「使い捨てる」方が確実で、確かめ方も 1 つで済む。
 #
-# What it checks:
-#   1. All tests pass
-#   2. **The shared DB ($ISMS_DB, default isms_dev) has not changed by a single row between before and after the tests**
-#      - compares catalog key sets and contents by hash. This is the invariant that broke this time.
+# 見るもの:
+#   1. 試験が全て通る
+#   2. **共有 DB（$ISMS_DB、既定 isms_dev）が試験の前後で 1 行も変わっていない**
+#      — catalog のキー集合と内容をハッシュで突合する。これが今回壊れた不変条件。
 #
-# Where we err on the safe side:
-#   - **Do not run if the throwaway DB ($ISMS_TEST_DB, default isms_test_<pid>) already exists**.
-#     It is DROPped at the end, so do not create a path that deletes someone else's DB
-#   - Do not run if it has the same name as the shared DB
-#   - Print the connection target (host / port) first, to make creation on an unintended cluster visible
-#   - If a fingerprint cannot be taken, **fail instead of skipping** (do not read "could not take" as "unchanged")
+# 安全側に倒していること:
+#   - 使い捨て DB（$ISMS_TEST_DB、既定 isms_test_<pid>）が**既に在るなら実行しない**。
+#     最後に DROP するので、他人の DB を消す経路を作らない
+#   - 共有 DB と同名でも実行しない
+#   - 接続先（host / port）を最初に表示する。意図しないクラスタで作ってしまうのを見えるようにする
+#   - 指紋が取れなかったら**飛ばさずに落とす**（取れないことを「変わっていない」と読まない）
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,9 +33,9 @@ ylw() { printf '\033[33m%s\033[0m\n' "$*"; }
 grn() { printf '\033[32m%s\033[0m\n' "$*"; }
 die() { red "[test] $*"; exit 1; }
 
-# If DATABASE_URL is set, migrate.sh and the tests connect there. Specify the throwaway DB explicitly.
-# Do not unset PGHOST / PGPORT / PGSERVICE (pointing at another cluster can be a legitimate setting).
-# Instead, print where we are connected.
+# DATABASE_URL が居ると migrate.sh もテストもそちらへ繋ぐ。使い捨て DB を明示する。
+# PGHOST / PGPORT / PGSERVICE は消さない（別クラスタを指すのは正当な設定であり得る）。
+# 代わりに、どこへ繋いでいるかを表示する。
 unset DATABASE_URL || true
 
 db_exists() { # $1 = dbname
@@ -44,8 +44,8 @@ db_exists() { # $1 = dbname
   [ "$n" = "1" ]
 }
 
-# Fingerprint of catalog. Counts alone let "added 1 row and deleted 1 row" pass.
-# md5 the contents of every table and list them with table names. **Do not swallow failures.**
+# catalog の指紋。件数だけでは「1 行足して 1 行消した」が素通りする。
+# 全テーブルの中身を md5 にして、テーブル名つきで並べる。**失敗は握り潰さない。**
 fingerprint() { # $1 = dbname
   psql -At -d "$1" -v ON_ERROR_STOP=1 <<'SQL'
 SELECT coalesce(string_agg(t || ' ' || h, E'\n' ORDER BY t), '(catalog にテーブルが無い)')
@@ -63,7 +63,7 @@ FROM (
 SQL
 }
 
-# Delete only if this run created it. If we fail before creating, do nothing.
+# この実行で作った時だけ消す。作る前に落ちたら何もしない。
 CREATED=0
 cleanup() {
   local rc=$?
@@ -76,19 +76,19 @@ cleanup() {
   exit "$rc"
 }
 trap cleanup EXIT
-# Interrupts exit with the conventional exit code. The EXIT trap runs once and cleans up.
+# 割り込みは既定の終了コードで抜ける。EXIT トラップが 1 度だけ走って後始末する。
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Over a Unix socket, both inet_server_addr() and inet_server_port() are NULL.
-# If either is NULL the whole concatenation becomes NULL and the connection target shows as blank.
+# Unix ソケット接続では inet_server_addr() も inet_server_port() も NULL になる。
+# 片方でも NULL だと連結ごと NULL になり、接続先が空欄で表示されてしまう。
 CONN=$(psql -At -d postgres -c \
   "SELECT coalesce(inet_server_addr()::text, 'unix') || ':' || coalesce(inet_server_port()::text, current_setting('port'))" \
   2>/dev/null) || die "PostgreSQL へ繋げませんでした（psql -d postgres）"
 [ -n "$CONN" ] || CONN='(不明)'
 echo "== 受入試験（接続先 ${CONN}／使い捨て DB: ${DB}／共有 DB: ${SHARED} は触らない） =="
 
-# The throwaway DB is DROPped at the end. If it points at an existing DB, that DB would be deleted.
+# 使い捨て DB は最後に DROP する。既存の DB を指していたら消してしまう。
 [ "$DB" != "$SHARED" ] || die "使い捨て DB 名が共有 DB と同じです（${DB}）。DROP するので実行しません"
 db_exists "$DB"; ex=$?
 case "$ex" in
@@ -97,8 +97,8 @@ case "$ex" in
   *) die "使い捨て DB ${DB} の存在を確認できませんでした" ;;
 esac
 
-# "Before" fingerprint of the shared DB. If it does not exist, skip the check (what does not exist cannot be polluted).
-# If it exists but cannot be fingerprinted, **fail instead of skipping**.
+# 共有 DB の「前」の指紋。存在しなければ検査を飛ばす（無いものは汚せない）。
+# 存在するのに取れない場合は**飛ばさずに落とす**。
 db_exists "$SHARED"; ex=$?
 case "$ex" in
   0) SHARED_PRESENT=1 ;;
@@ -121,8 +121,8 @@ SNAPSHOT_DIR="$ROOT/db/seeds/snapshots"
   || die "seed（CSV snapshot）の SHA-256 検証が失敗"
 
 "$ROOT/scripts/migrate.sh" up >/dev/null 2>&1 || die "migration の適用が失敗"
-# RLS quality gate. Until now it ran only inside agent_acceptance_test.sh, so changes to the check never ran in this acceptance test
-# (found 2026-09-12; we missed that the check of permission functions with no identified user fails on a plain connection).
+# RLS の品質ゲート。これまで agent_acceptance_test.sh の中でしか流れず、この受入試験では検査の変更が一度も実行されていなかった
+# （2026-09-12 に判明。本人不明の許可関数の検査が素の接続で落ちるのを見逃した）。
 psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$ROOT/scripts/ci/check_rls.sql" >/dev/null || die "RLS の品質ゲート（check_rls.sql）が落ちた"
 
 psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$ROOT/db/seeds/0001_dom_2026_1.sql" >/dev/null \
@@ -133,9 +133,11 @@ psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$ROOT/db/seeds/0002_checks_core.sql" >/d
   || die "seed（チェック）が失敗"
 
 rc=0
+"$ROOT/tests/down_guard_messages_test.sh" || rc=1
 "$ROOT/tests/rls_test.sh"    || rc=1
 "$ROOT/tests/domain_test.sh" || rc=1
 "$ROOT/tests/isms_risk_read_model.sh" || rc=1
+"$ROOT/tests/analysis_isms_scope.sh" || rc=1
 ISMS_TEST_DB="${DB}_management_workflows" "$ROOT/tests/management_workflows.sh" || rc=1
 ISMS_TEST_DB="${DB}_0046_reverse" "$ROOT/tests/management_0046_reverse_fixture.sh" || rc=1
 ISMS_TEST_DB="${DB}_isms_records" "$ROOT/tests/isms_records.sh" || rc=1

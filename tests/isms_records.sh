@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Acceptance for 0063: roles, invariants, approvals, and tenant isolation of ISMS operation records (internal audits,
-# findings, corrective actions, management reviews, control effectiveness evaluations). Runs on a throwaway DB.
+# 0063 の受入: ISMS の運用記録（内部監査・指摘・是正処置・マネジメントレビュー・統制の有効性評価）の
+# 役割・不変条件・承認・テナント分離。使い捨ての DB で走らせる。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="${ISMS_TEST_DB:-isms_records_$$}"
 die() { printf '[isms records] %s\n' "$*" >&2; exit 1; }
 pass() { printf '  PASS %s\n' "$*"; }
-# Check not only that it failed but "whether it failed for the intended reason" (prevents vacuous passes when it fails for another reason).
+# 落ちたことだけでなく「狙った理由で落ちたか」を確かめる（別の理由で落ちても通ってしまう空振りを防ぐ）。
 expect_fail_because() {
   local want="$1"; shift
   local out
@@ -17,11 +17,11 @@ expect_fail_because() {
 sql() { psql -w -q -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 
 [ "$DB" != "isms_dev" ] || die "refuse shared db"
-# Every psql uses -w (never prompt for a password). If credentials are missing, fail immediately instead of hanging
-# (on an unattended deployment psql waited for password input and the acceptance test hung for 30 minutes. 2026-09-13).
-# In deployments, this DB's credentials are written to PGPASSFILE by scripts/configure_db_roles.py (fixture_databases).
+# どの psql も -w（パスワードを聞かない）。資格情報が足りなければ、止まらずにすぐ落とす
+# （無人の配備で psql がパスワードの入力を待ち、受入試験が30分止まった。2026-09-13）。
+# 配備では、この DB の資格情報は scripts/configure_runtime_db_roles.py が PGPASSFILE に書く（fixture_databases）。
 CREATED_DB=0
-# Always drop the created DB. If it cannot be dropped, fail the test (do not overlook leftover DBs; same as run_isolated.sh).
+# 作った DB は必ず消す。消せなければ試験を失敗にする（残った DB を見逃さない。run_isolated.sh と同じ）。
 cleanup() {
   local rc=$?
   if [ "$CREATED_DB" = 1 ] && ! dropdb -w --if-exists "$DB" >/dev/null 2>&1; then
@@ -56,7 +56,7 @@ INSERT INTO app.users(tenant_id,id,email,display_name) VALUES
 INSERT INTO app.memberships(tenant_id,user_id,role_key) VALUES
  ('$T1','$CISO','ciso'), ('$T1','$ADMIN','secretariat'), ('$T1','$MANAGER','risk_owner'),
  ('$T1','$MEMBER','employee'), ('$T1','$AUDITOR','auditor'), ('$T2','$OTHER','secretariat'),
- -- Executive of another tenant. Confirms that even with approval privileges, another tenant's review is not found.
+ -- 他テナントの経営層。承認の権限があっても、別テナントのレビューは見つからないことを確かめるため。
  ('$T2','$OTHER','ciso');
 SQL
 
@@ -120,7 +120,7 @@ expect_fail_because 'row-level security' call_as manager-token-00000000000000000
 pass "マネージャーは関数を通さずに有効性評価を直接書いても、表の側で拒否される（0067）"
 call_as admin-token-000000000000000000000000000000002 \
   "INSERT INTO app.control_effectiveness(tenant_id,measure_id,criteria,evaluated_on,evaluator_user_id,result) VALUES(app.current_tenant(),'10000000-0000-4000-8000-000000000031','アクセス権棚卸で不要権限0件',current_date,'$ADMIN','effective');" >/dev/null
-# call_as also prints the result row of set_tenant_context, so read the count from the last line.
+# call_as は set_tenant_context の結果行も出すので、件数は最後の 1 行で見る。
 [ "$(call_as other-token-00000000000000000000000000000006 "SELECT count(*) FROM app.control_effectiveness;" | tail -n1)" = 0 ] || die "tenant leak"
 [ "$(call_as admin-token-000000000000000000000000000000002 "SELECT count(*) FROM app.control_effectiveness;" | tail -n1)" = 1 ] || die "own tenant cannot read"
 pass "他テナントからは見えない"
@@ -160,8 +160,8 @@ call_as manager-token-0000000000000000000000000000003 "SELECT app.require_record
 call_as auditor-token-0000000000000000000000000000005 "SELECT app.require_records_role('audit');" >/dev/null && pass "0064 の後も監査人は監査を書ける（差し替えで壊していない）"
 
 echo '== up/down/up'
-# Rolling back past 0063 (0064 and later) removes only the second-stage kinds; 0063's kinds remain.
-# Count the number of steps to roll back so we can still return to right after 0063 as migrations are added.
+# 0063 より後（0064 以降）を戻すと第 2 段の種類だけが消え、0063 の種類は残る。
+# 後から migration が増えても 0063 の直後まで戻せるよう、戻す本数は数えて決める。
 AFTER_0063=$(ls "$ROOT/db/migrations" | grep -E '^[0-9]+_.*\.up\.sql$' | sed -E 's/^([0-9]+)_.*/\1/' | awk '$1 + 0 > 63' | wc -l | tr -d ' ')
 "$ROOT/scripts/migrate.sh" down "$AFTER_0063" >/dev/null
 expect_fail_because 'unknown record kind' call_as ciso-token-0000000000000000000000000000000001 "SELECT app.require_records_role('exception');"
@@ -173,7 +173,7 @@ pass "有効性評価の記録があるうちは 0063 を巻き戻さない"
 sql -c "DELETE FROM app.control_effectiveness" >/dev/null
 "$ROOT/scripts/migrate.sh" down 1 >/dev/null
 [ "$(sql -At -c "SELECT to_regclass('app.control_effectiveness') IS NULL")" = t ] || die "down left table"
-# Count names by exact match (a prefix match would also catch the existing corrective_actions_effectiveness_result_check).
+# 名前は完全一致で数える（前方一致だと既存の corrective_actions_effectiveness_result_check まで拾う）。
 [ "$(sql -At -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('corrective_actions_effectiveness_complete','corrective_actions_effectiveness_after_completion','corrective_actions_reviewer_not_owner')")" = 0 ] || die "down left constraints"
 [ "$(sql -At -c "SELECT count(*) FROM pg_constraint WHERE conname = 'corrective_actions_effectiveness_result_check'")" = 1 ] || die "down removed a pre-existing constraint"
 "$ROOT/scripts/migrate.sh" up >/dev/null

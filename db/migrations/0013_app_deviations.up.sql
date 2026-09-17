@@ -1,4 +1,4 @@
--- 0013 app: deviations (design doc 2.5 / 1.11) and the view resolving effective risk criteria
+-- 0013 app: 逸脱（設計書 2.5 / 1.11）と有効なリスク基準の解決ビュー
 
 CREATE TABLE app.deviations (
   id            uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -6,29 +6,29 @@ CREATE TABLE app.deviations (
   kind          text NOT NULL CHECK (kind IN (
                   'risk_band','check_disable','check_threshold',
                   'calendar_extend','policy_edit')),
-  target_key    text NOT NULL,                     -- key on the catalog side
-  override      jsonb NOT NULL,                    -- value after override
+  target_key    text NOT NULL,                     -- catalog 側のキー
+  override      jsonb NOT NULL,                    -- 上書き後の値
   reason        text NOT NULL CHECK (length(btrim(reason)) > 0),
-  compensating_control text,                       -- required for check_disable
+  compensating_control text,                       -- check_disable では必須
   status        text NOT NULL DEFAULT 'requested'
                   CHECK (status IN ('requested','active','expired','withdrawn','rejected')),
   requested_by  uuid NOT NULL, requested_at timestamptz NOT NULL DEFAULT now(),
   approved_by   uuid,          approved_at  timestamptz,
-  expires_at    timestamptz,                       -- required when active
+  expires_at    timestamptz,                       -- active では必須
   withdrawn_at  timestamptz,
-  weight        numeric(4,1) NOT NULL,             -- weight for the standard conformance score (design doc 1.12)
+  weight        numeric(4,1) NOT NULL,             -- 標準適合度スコアの重み（設計書 1.12）
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),
 
   CHECK (kind <> 'check_disable' OR length(btrim(coalesce(compensating_control,''))) > 0),
-  -- approved_at is required too. The design doc only requires approved_by and expires_at, but
-  -- if approved_at is NULL the expiry-cap CHECK below becomes a NULL comparison, and although
-  -- "expiry is required" the cap never applies (NULL passes a CHECK).
+  -- approved_at も必須にする。設計書は approved_by と expires_at しか要求していないが、
+  -- approved_at が NULL だと下の期限上限 CHECK が NULL 比較になり、
+  -- 「期限は必須」と書いてあるのに上限が一切効かない（NULL は CHECK を通る）。
   CHECK (status <> 'active'
          OR (approved_by IS NOT NULL AND approved_at IS NOT NULL AND expires_at IS NOT NULL)),
   CHECK (approved_at IS NULL OR expires_at IS NULL OR expires_at > approved_at),
-  -- expiry cap (design doc 1.11.3)
+  -- 期限上限（設計書 1.11.3）
   CHECK (status <> 'active' OR expires_at <= approved_at + CASE kind
            WHEN 'check_disable'   THEN interval '180 days'
            WHEN 'check_threshold' THEN interval '180 days'
@@ -37,14 +37,14 @@ CREATE TABLE app.deviations (
 CREATE INDEX deviations_active
   ON app.deviations (tenant_id, kind, target_key) WHERE status = 'active';
 
--- Risk criteria deviations: "one at a time per tenant".
--- Allowing several active ones makes effective_risk_criteria return multiple rows for a tenant,
--- leaving it undecided which criteria are effective (the design doc's view ignores target_key).
+-- リスク基準の逸脱は「テナントにつき同時に 1 本」。
+-- 複数の active を許すと effective_risk_criteria が同一テナントに複数行を返し、
+-- どれが有効な基準なのかが決まらない（設計書のビュー定義は target_key を見ていない）。
 CREATE UNIQUE INDEX deviations_one_active_risk_band
   ON app.deviations (tenant_id)
   WHERE kind = 'risk_band' AND status = 'active';
 
--- Move expired ones from active → expired daily (automatic return to standard; acceptance #4)
+-- 期限切れを毎日 active → expired へ落とす（標準へ自動復帰。受入 #4）
 CREATE OR REPLACE FUNCTION app.expire_deviations() RETURNS int
 LANGUAGE sql SET search_path = pg_catalog, app AS $$
   WITH x AS (
@@ -57,16 +57,16 @@ REVOKE ALL ON FUNCTION app.expire_deviations() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.expire_deviations() TO app_rw;
 
 -- ------------------------------------------------------------------
--- Effective settings must always be resolved through this view (if the app reads
--- catalog directly, it behaves as if deviations did not exist).
+-- 有効な設定値の解決は必ずこのビュー経由にする（アプリが catalog を
+-- 直接読むと逸脱を無視した挙動になる）。
 --
--- Two fixes relative to design doc 2.5 (rationale in docs/DECISIONS.md D-03):
---   1. Set security_invoker = true explicitly. By default (evaluated with definer rights)
---      the underlying tables are read with the view owner's rights, not the caller's, bypassing RLS.
---   2. The design doc writes (d.override->>'band_top_priority')::int[], but
---      ->> returns a JSON array as the string '[15, 16]', which cannot be cast to int[]
---      (PostgreSQL array literals look like '{15,16}').
---      The array is built via jsonb_array_elements_text instead.
+-- 設計書 2.5 からの修正 2 点（理由は docs/DECISIONS.md D-03）:
+--   1. security_invoker = true を明示する。既定（definer 権限で評価）だと
+--      呼出者ではなくビュー所有者の権限で下位表を読み、RLS を迂回する。
+--   2. 設計書は (d.override->>'band_top_priority')::int[] と書いているが、
+--      ->> は JSON 配列を '[15, 16]' という文字列で返すため int[] へ
+--      キャストできない（PostgreSQL の配列リテラルは '{15,16}'）。
+--      jsonb_array_elements_text を通して配列を組み立てる。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.jsonb_to_int_array(p jsonb) RETURNS int[]
 LANGUAGE sql IMMUTABLE SET search_path = pg_catalog AS $$

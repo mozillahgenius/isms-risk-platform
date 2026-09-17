@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Consistency check for splitting organization management into 4 tabs.
+"""組織管理を 4 タブへ割ったときの整合の検査。
 
-What used to be one screen was split into Members / Departments / Systems in use / Organization info.
-The quietest breakage after a split is "saving sends you to a different tab",
-and it passes type checking, build, and lint (none of them look at string contents).
+1 画面だったものを メンバー / 部門 / 利用システム / 組織情報 に割った。
+割った後に一番静かに壊れるのは「保存したら別のタブへ飛ばされる」で、
+型検査もビルドも lint も通ってしまう（どれも文字列の中身は見ない）。
 
-Three things are pinned here.
+ここで固定するのは 3 つ。
 
-1. Each server action's return target (redirect / parseOrRedirect) resolves to exactly one tab
-2. The actions a tab's screen calls are only actions that return to that tab
-3. No hard-coded `/organization?...` remains (the pre-split return target)
+1. 各サーバーアクションの戻り先（redirect / parseOrRedirect）が 1 つのタブに揃っていること
+2. あるタブの画面が呼ぶアクションは、そのタブへ戻るアクションだけであること
+3. `/organization?...` の直書きが残っていないこと（割る前の戻り先）
 
-2 is needed because 1 alone cannot catch a form that was moved to another tab.
+2 が要るのは、フォームを別のタブへ移したときに 1 だけでは気づけないため。
 """
 import os
 import re
@@ -20,7 +20,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, 'web', 'src', 'app', 'organization')
 
-# tab key -> file of that screen
+# タブの key → その画面のファイル
 PAGES = {
     'members': os.path.join(APP, 'page.tsx'),
     'departments': os.path.join(APP, 'departments', 'page.tsx'),
@@ -32,7 +32,7 @@ FAILED = []
 
 
 def action_tabs(actions_src):
-    """Action name -> set of tabs that action returns to."""
+    """アクション名 → そのアクションが戻すタブの集合。"""
     tabs = {}
     parts = re.split(r'(?m)^export async function (\w+)\(form: FormData\) \{', actions_src)
     for i in range(1, len(parts), 2):
@@ -50,20 +50,20 @@ def check(actions_src, pages_src):
     if not tabs:
         return ['アクションを 1 つも読み取れなかった（書式が変わった可能性）']
 
-    # 1. one action, one tab
+    # 1. 1 アクション 1 タブ
     for name, found in sorted(tabs.items()):
         if len(found) == 0:
             failures.append(f'{name}: 戻り先のタブが無い')
         elif len(found) > 1:
             failures.append(f'{name}: 戻り先が複数のタブに割れている（{sorted(found)}）')
 
-    # 3. whether pre-split hard-coded targets remain
+    # 3. 割る前の直書きが残っていないか
     for literal in re.findall(r"'/organization\?[^']*'", actions_src):
         failures.append(f'割る前の戻り先が残っている: {literal}')
     for literal in re.findall(r"`/organization\?[^`]*`", actions_src):
         failures.append(f'割る前の戻り先が残っている: {literal}')
 
-    # 2. whether the actions a screen calls match that screen's tab
+    # 2. 画面が呼ぶアクションと、その画面のタブが一致するか
     for tab, src in pages_src.items():
         used = set(re.findall(r'<form\b[^>]*action=\{(\w+)\}', src))
         if not used:
@@ -76,7 +76,7 @@ def check(actions_src, pages_src):
                 failures.append(
                     f'{tab} の画面が {name} を呼んでいるが、戻り先は {sorted(tabs[name])}'
                 )
-        # forms carry the current mode (without it the mode is dropped on every save)
+        # フォームは今のモードを持って出す（持たないと保存のたびにモードが落ちる）
         forms = len(re.findall(r'<form\b[^>]*action=\{\w+\}', src))
         fields = src.count('<ModeField mode={mode} />')
         if forms != fields:
@@ -94,8 +94,8 @@ pages_src = {tab: read(path) for tab, path in PAGES.items()}
 
 FAILED += check(actions_src, pages_src)
 
-# Reverse verification: confirm with broken input that this check actually fails.
-# If it does not fail, do not count it as "a check exists" (norm: reverse verification).
+# 逆向き検証: 壊した入力で、この検査が実際に落ちることを見る。
+# 落ちないなら「検査が有る」と数えない（規範｜逆向き検証）。
 REVERSE = [
     ('戻り先を別のタブへ差し替える',
      actions_src.replace("redirect(orgHref('systems', form, { saved: '1' }))",

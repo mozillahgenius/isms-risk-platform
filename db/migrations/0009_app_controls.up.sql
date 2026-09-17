@@ -1,11 +1,11 @@
--- 0009 app: controls (design doc 2.8)
+-- 0009 app: 統制（設計書 2.8）
 CREATE TABLE app.control_implementations (
   id          uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id   uuid NOT NULL,
   control_id  uuid NOT NULL REFERENCES catalog.controls(id),
-  applicability text NOT NULL DEFAULT 'applicable'   -- applicable by default (design doc 1.10)
+  applicability text NOT NULL DEFAULT 'applicable'   -- 既定は適用（設計書 1.10）
                   CHECK (applicability IN ('applicable','excluded')),
-  rationale   text,                                  -- required when excluded
+  rationale   text,                                  -- excluded では必須
   status      text NOT NULL DEFAULT 'not_started'
                   CHECK (status IN ('not_started','designing','operating','verified')),
   owner_user_id uuid,
@@ -29,7 +29,7 @@ CREATE TABLE app.risk_control_links (
   FOREIGN KEY (control_id) REFERENCES catalog.controls(id)
 );
 
--- A primary key cannot contain expressions, so an id is added and uniqueness expressed with a partial index
+-- 主キーに式は書けないため、id を立てて一意制約を部分インデックスで表現する
 CREATE TABLE app.control_evidence_links (
   id          uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id   uuid NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE app.control_evidence_links (
   evidence_id uuid,
   check_key   text REFERENCES catalog.checks(key),
   PRIMARY KEY (tenant_id, id),
-  CHECK (num_nonnulls(evidence_id, check_key) = 1)   -- exactly one of the two
+  CHECK (num_nonnulls(evidence_id, check_key) = 1)   -- どちらか一方だけ
 );
 CREATE UNIQUE INDEX control_evidence_links_by_evidence
   ON app.control_evidence_links (tenant_id, control_id, evidence_id)

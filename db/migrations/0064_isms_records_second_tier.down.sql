@@ -1,5 +1,5 @@
 -- @run-as: admin
--- Rollback of 0064: revert the role kinds to 0063's version (audit / corrective / effectiveness / management_review).
+-- 0064 の巻き戻し: 役割の種類を 0063 の版（audit / corrective / effectiveness / management_review）へ戻す。
 
 SET ROLE schema_owner;
 

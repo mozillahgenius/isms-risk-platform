@@ -1,4 +1,4 @@
--- Rollback of 0011 (reverse dependency order)
+-- 0011 の巻き戻し（依存の逆順）
 DROP TABLE IF EXISTS app.approvals;
 DROP TABLE IF EXISTS app.tasks;
 DROP TABLE IF EXISTS app.incidents;
@@ -17,6 +17,6 @@ DROP TABLE IF EXISTS app.policy_acknowledgements;
 DROP TABLE IF EXISTS app.policy_versions;
 DROP TABLE IF EXISTS app.policies;
 DROP TABLE IF EXISTS app.corrective_actions;
--- First drop the FK that was added later to exceptions from 0010
+-- 0010 の exceptions に後付けした FK を先に外す
 ALTER TABLE IF EXISTS app.exceptions DROP CONSTRAINT IF EXISTS exceptions_finding_fk;
 DROP TABLE IF EXISTS app.findings;

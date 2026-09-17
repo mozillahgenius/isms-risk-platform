@@ -1,17 +1,17 @@
 -- @run-as: admin
--- Rollback of 0071. Remove the import-record tables and triggers, and restore the permission table to 0070's version.
--- Assets and risks created by imports are not deleted (they are register rows, not import records).
+-- 0071 の巻き戻し。取り込みの記録の表・トリガを外し、許可の表を 0070 の版へ戻す。
+-- 取り込みで作った資産・リスクそのものは消さない（台帳の行で、取り込みの記録ではない）。
 --
--- **Don't roll back while records exist** (same as 0055; don't silently delete import audit records in down).
--- The guard is placed before SET ROLE, and for each table takes a SHARE lock and counts only if it exists (same as 0065's down).
+-- **記録があるときは巻き戻さない**（0055 と同じ。取り込みの監査の記録を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、表ごとに、在るときだけ SHARE ロックを取って数える（0065 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE
   n integer;
   t text;
 BEGIN
-  -- Lock starting from the parent (import_batches). The import side INSERTs the parent and then the details, so
-  -- locking from the child would deadlock (Codex review 2026-09-12). Keep the lock order consistent.
+  -- 親（import_batches）から順にロックする。取り込み側は親を INSERT してから明細を INSERT するので、
+  -- 子から取ると相互待ちになる（Codex レビュー 2026-09-12）。取る順番をそろえる。
   FOREACH t IN ARRAY ARRAY['import_batches','import_batch_items','import_undos'] LOOP
     IF to_regclass('app.' || t) IS NOT NULL THEN
       EXECUTE format('LOCK TABLE app.%I IN SHARE MODE', t);
@@ -25,7 +25,7 @@ END $$;
 
 SET ROLE schema_owner;
 
--- Dropping the tables also drops the attached policies, triggers, and indexes.
+-- 表を消すと、張ってあるポリシー・トリガ・索引も一緒に消える。
 DROP TABLE IF EXISTS app.import_undos;
 DROP TABLE IF EXISTS app.import_batch_items;
 DROP TABLE IF EXISTS app.import_batches;

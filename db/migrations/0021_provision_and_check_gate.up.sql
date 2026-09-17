@@ -1,36 +1,36 @@
 -- @run-as: admin
--- 0021 Tenant creation path, and the pass gate for checks.
+-- 0021 テナントの作成経路と、チェックの合格ゲート。
 --
--- Run as admin. CREATE ROLE does not work as schema_owner (NOCREATEROLE).
--- Everything other than role creation is done via SET ROLE schema_owner, keeping ownership consistent.
+-- admin で流す。CREATE ROLE は schema_owner（NOCREATEROLE）では通らないため。
+-- ロール作成以外は SET ROLE schema_owner で行い、所有者を揃える。
 --
--- What this adds:
---   (A) app.provision_tenant() - creates the tenant, initial user, membership, and expanded standard policies
---       as one unit. Without it, not a single tenant can be created, so
---       operational data stays empty forever (the UI can say nothing beyond "cannot read").
---   (B) A pass gate on app.check_runs - **checks that have not been confirmed to fail when broken
---       cannot be recorded as pass**. This is a DB constraint, not an operational good intention.
+-- ここで足すもの:
+--   (A) app.provision_tenant() — テナント・初期利用者・membership・標準規程の展開を
+--       ひとまとまりで作る。これが無いと、テナントが 1 つも作れないため
+--       運用データが永遠に空のままになる（画面も「読めない」以上のことを言えない）。
+--   (B) app.check_runs の合格ゲート — **壊して落ちることを確かめていないチェックを
+--       pass として記録させない**。これを運用の心がけではなく DB の制約として置く。
 --
--- Why put (B) in the DB:
---   A check becomes a check only by "failing when it should", not by "passing".
---   If it relies on human confirmation, it gets skipped on busy days and green rows pile up.
---   If the recording side has no choice but to obey a constraint, skipping means it cannot be recorded.
+-- なぜ (B) を DB に置くか:
+--   検査は「通ったこと」ではなく「落ちるべき時に落ちること」で初めて検査になる。
+--   人が確認する運用にすると、忙しい日に飛ばされ、そのまま緑が並ぶ。
+--   記録する側が制約に従うほかない形にすれば、飛ばした時点で記録できない。
 
 SET ROLE schema_owner;
 
--- ============================================================ (A) creation path
+-- ============================================================ (A) 作成経路
 
--- Marker set only during creation. The provisioning policy below lets through only rows matching this value.
--- Narrowed from "schema_owner can insert anything" to "only rows of the tenant currently being created".
+-- 作成中だけ立てる目印。下の provisioning ポリシーはこの値と一致する行しか通さない。
+-- 「schema_owner なら何でも入れられる」ではなく「いま作っているテナントの行だけ」に絞る。
 CREATE OR REPLACE FUNCTION app.provisioning_target() RETURNS uuid
 LANGUAGE sql STABLE SET search_path = pg_catalog AS $$
   SELECT NULLIF(pg_catalog.current_setting('app.provisioning', true), '')::uuid
 $$;
 ALTER FUNCTION app.provisioning_target() OWNER TO schema_owner;
 
--- INSERT policy for the definer (schema_owner).
--- schema_owner is NOLOGIN; only SECURITY DEFINER functions written by the owner can pass here.
--- Even so, do not make it "can insert rows for any tenant".
+-- 定義者（schema_owner）向けの INSERT ポリシー。
+-- schema_owner は NOLOGIN で、ここを通れるのは所有者が書いた SECURITY DEFINER 関数だけ。
+-- それでも「どのテナントの行でも入れられる」形にはしない。
 CREATE POLICY prov_tenant_insert ON app.tenants
   FOR INSERT TO schema_owner WITH CHECK (id = app.provisioning_target());
 CREATE POLICY prov_user_insert ON app.users
@@ -42,8 +42,8 @@ CREATE POLICY prov_policy_insert ON app.policies
 CREATE POLICY prov_policy_version_insert ON app.policy_versions
   FOR INSERT TO schema_owner WITH CHECK (tenant_id = app.provisioning_target());
 
--- The only path for creating a tenant.
--- Expands the 12 standard policies as-is (the foundation of acceptance #1 "standards active right after tenant creation").
+-- テナントを作る唯一の経路。
+-- 標準規程 12 本をそのまま展開する（受入 #1「テナント作成直後に標準が有効」の土台）。
 CREATE OR REPLACE FUNCTION app.provision_tenant(
   p_name text, p_domain text, p_admin_email text, p_admin_name text,
   p_fiscal_start_month smallint DEFAULT 4, p_industry_preset text DEFAULT 'general'
@@ -65,7 +65,7 @@ BEGIN
     RAISE EXCEPTION '現行 DOM がありません。先に DOM を投入してください';
   END IF;
 
-  -- Creation marker. Effective only within the transaction (third argument of set_config is true).
+  -- 作成中の目印。トランザクション内だけで効く（set_config の第3引数 true）。
   PERFORM pg_catalog.set_config('app.provisioning', v_tenant::text, true);
 
   INSERT INTO app.tenants (id, name, domain, fiscal_start_month, industry_preset, dom_version_id)
@@ -74,18 +74,18 @@ BEGIN
   INSERT INTO app.users (id, tenant_id, email, display_name)
   VALUES (v_user, v_tenant, p_admin_email, p_admin_name);
 
-  -- The first user is the executive (CISO). Never create an organization with no one to make acceptance decisions and approvals.
+  -- 最初の 1 人は経営責任者（CISO）。受容判断と承認の担い手が居ない組織を作らない。
   INSERT INTO app.memberships (tenant_id, user_id, role_key) VALUES (v_tenant, v_user, 'ciso');
 
-  -- Expand standard policies. Bodies are copied as-is from the DOM standard.
-  -- Differences are the tenant's decision, and those differences are recorded as deviations (design doc 1.6).
+  -- 標準規程の展開。本文は DOM の標準をそのまま写す。
+  -- 差分を持たせるのはテナント側の判断で、その差分が逸脱として記録される（設計書 1.6）。
   --
-  -- **Do not use INSERT ... RETURNING.** RETURNING requires a SELECT policy on the returned rows,
-  -- and the definer has no read policy, so it fails there (measured).
-  -- Working around it by widening reads would give the definer visibility into all tenants just for creation.
-  -- Deciding the id up front removes the need to read it back.
+  -- **INSERT ... RETURNING を使わない。** RETURNING は返す行に SELECT のポリシーを要求し、
+  -- 定義者には読み取りのポリシーを与えていないため、そこで落ちる（実測）。
+  -- 読み取りを広げて回避すると、作成のためだけに定義者へ全テナントの閲覧を渡すことになる。
+  -- id を先に決めてしまえば、書き戻して読む必要が無い。
   WITH src AS MATERIALIZED (
-    -- gen_random_uuid() is volatile. It is referenced twice, so fix it exactly once.
+    -- gen_random_uuid() は volatile。2 度参照するので必ず 1 回で確定させる。
     SELECT public.gen_random_uuid() AS policy_id, d.key, d.title_ja, d.body_md
       FROM catalog.policies_default d
       JOIN catalog.dom_versions v ON v.id = d.dom_version_id AND v.is_current
@@ -105,9 +105,9 @@ END $$;
 ALTER FUNCTION app.provision_tenant(text, text, text, text, smallint, text) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.provision_tenant(text, text, text, text, smallint, text) FROM PUBLIC;
 
--- Role dedicated to creation. It gets no table privileges (it can only call this function).
--- Giving this to app_rw would let the business connection create tenants.
--- CREATE ROLE does not work as schema_owner, so only here do we switch back to admin.
+-- 作成専用のロール。表への権限は持たせない（この関数を呼ぶことしかできない）。
+-- app_rw に持たせると、業務用の接続がテナントを作れることになる。
+-- CREATE ROLE は schema_owner では通らないので、ここだけ admin へ戻す。
 RESET ROLE;
 DO $$
 BEGIN
@@ -120,14 +120,14 @@ ALTER ROLE provisioner NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB
 GRANT USAGE ON SCHEMA app TO provisioner;
 GRANT EXECUTE ON FUNCTION app.provision_tenant(text, text, text, text, smallint, text) TO provisioner;
 
--- ============================================================ (B) pass gate
+-- ============================================================ (B) 合格ゲート
 
 SET ROLE schema_owner;
 
--- negative_verified: whether running the check's negative_fixture confirmed that **the check actually
---   detected a violation**.
--- verified_digest: fingerprint of query_sql and negative_fixture at the time of confirmation.
---   If the check's contents are rewritten, the earlier confirmation no longer counts.
+-- negative_verified: そのチェックの negative_fixture を流し、**検査が実際に違反を
+--   検出したこと**を確認できたか。
+-- verified_digest: 確認した時点の query_sql と negative_fixture の指紋。
+--   チェックの中身が書き換わったら、前の確認は根拠にならない。
 ALTER TABLE app.check_runs
   ADD COLUMN negative_verified boolean NOT NULL DEFAULT false,
   ADD COLUMN verified_digest   text;

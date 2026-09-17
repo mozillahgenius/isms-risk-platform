@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 
-// Sub-navigation under the catalog. So that the current location shows even on detail pages (/catalog/controls/[id] etc.),
-// match by prefix **at segment boundaries**. A plain startsWith would
-// highlight "Controls" even on a different page like /catalog/controls-extra.
-// The entry (/catalog) is matched by exact match only (a prefix match would match every page).
+// カタログ配下の副ナビ。詳細ページ（/catalog/controls/[id] 等）でも現在地が出るように、
+// **セグメント境界での**前方一致で判定する。単なる startsWith だと
+// /catalog/controls-extra のような別ページでも「統制」が光る。
+// 入口（/catalog）は完全一致だけで見る（前方一致にすると全ページに一致する）。
 
 const TABS: { href: string; label: string }[] = [
   { href: '/catalog', label: '入口' },

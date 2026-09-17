@@ -1,11 +1,11 @@
--- 0060: Checklist / questionnaire templates for external resources
+-- 0060: 外部リソース向けチェックリスト／アンケートのテンプレート
 --
--- Background (measured): web/src/app/operations/external-resources/actions.ts hard-coded
---   5 questions. What to ask differs between contractors, cloud providers, and outsourcees,
---   yet re-asking meant rewriting code each time. Move the templates into a register.
+-- 背景（実測）: web/src/app/operations/external-resources/actions.ts が 5 問を
+--   ハードコードしていた。委託先・クラウド事業者・業務委託先で聞くことは違うのに、
+--   問い直すたびにコードを書き換えることになる。テンプレートを台帳へ出す。
 --
--- Don't build the delivery channel first. Templates are internal data, reusable whether distributed by
--- email, PDF, or paper. Keep them independent of the outlet (0059's app.mail_outbox).
+-- 送信経路を先に作らない。テンプレートは社内データで、メール・PDF・紙のどれで
+-- 配っても再利用できる。出口（0059 の app.mail_outbox）とは独立させる。
 
 SET ROLE schema_owner;
 
@@ -46,14 +46,14 @@ CREATE TABLE app.questionnaire_template_questions (
   FOREIGN KEY (tenant_id, template_id)
     REFERENCES app.questionnaire_templates(tenant_id, id) ON DELETE CASCADE,
   CHECK (jsonb_typeof(options) = 'array'),
-  -- With single_choice and empty options, we'd send a questionnaire the respondent can't answer.
-  -- 0057's external_questionnaire_questions has the same hole, but it is
-  -- already applied so we don't fix it (policy: add under new numbers). Stop it on the template side.
+  -- single_choice で選択肢が空だと、回答者が選べない質問票を送ってしまう。
+  -- 0057 の external_questionnaire_questions は同じ穴を持つが、そちらは
+  -- 適用済みなので直さない（新しい番号で足す方針）。テンプレート側で止める。
   CHECK (answer_type <> 'single_choice' OR jsonb_array_length(options) >= 2)
 );
 
--- Record which template it was created from. Even if the template is edited later, the sent questionnaire's contents
--- have already been copied into external_questionnaire_questions and don't change (intentional).
+-- どの雛形から作ったかを残す。雛形を後から直しても、送った質問票の中身は
+-- external_questionnaire_questions に複写済みなので変わらない（意図的）。
 ALTER TABLE app.external_questionnaires
   ADD COLUMN template_id uuid,
   ADD CONSTRAINT external_questionnaires_template_fk
@@ -80,7 +80,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- Creating / revising / retiring templates requires manager or above (same boundary as 0057's questionnaire_manage).
+-- 雛形の作成・改廃はマネージャー以上（0057 の questionnaire_manage と同じ境界）。
 CREATE OR REPLACE FUNCTION app.guard_questionnaire_template() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN

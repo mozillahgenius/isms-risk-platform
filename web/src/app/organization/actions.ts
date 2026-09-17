@@ -4,10 +4,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { withTenantWrite } from '@/lib/tenant';
 
-// Based as-is on the implementation from before it was removed in 27c56ef. The input-validation conventions
-// (no truncation, reject UUIDs and dates by format, today in JST) were settled in
-// Codex review at the time, so do not change them. What was added: member
-// registration, suspension, reactivation, and department updates (4 in total).
+// 27c56ef で消える前の実装をそのまま土台にしている。入力検証の規約
+// （切り詰めない・UUID と日付は形式で弾く・JST 基準の今日）は当時の
+// Codex レビューで固まったものなので変えない。足したのはメンバーの
+// 登録・停止・再開・部門の更新の 4 つ。
 
 const text = (form: FormData, key: string, max = 1000): string => {
   const value = String(form.get(key) ?? '').trim();
@@ -15,9 +15,9 @@ const text = (form: FormData, key: string, max = 1000): string => {
   return value;
 };
 
-// Reject values over the limit rather than silently truncating (Codex review 2026-09-03: truncation
-// silently alters data). Callers try/catch and route to a friendly
-// ?error=invalid_input.
+// 上限超過は黙って切り詰めず拒否する(Codexレビュー2026-09-03指摘: 切り詰めは
+// データの黙った改変になる)。呼び出し側でtry/catchしてフレンドリーな
+// ?error=invalid_input へ寄せる。
 const optionalText = (form: FormData, key: string, max = 4000): string | null => {
   const value = String(form.get(key) ?? '').trim();
   if (value.length > max) throw new Error(`${key} が長すぎます`);
@@ -43,7 +43,7 @@ const roleKeyText = (form: FormData, key: string): string => {
   return value;
 };
 
-// Same mapping as app.current_management_role() in 0057. Do not add roles here.
+// 0057 の app.current_management_role() と同じ写像。ここでロールを増やさない。
 const MANAGEMENT_ROLES = ['owner', 'admin', 'manager', 'member', 'auditor'] as const;
 type ManagementRoleInput = (typeof MANAGEMENT_ROLES)[number];
 const ROLE_KEY_FOR: Record<ManagementRoleInput, string> = {
@@ -55,7 +55,7 @@ const managementRole = (form: FormData, key: string): ManagementRoleInput => {
   return value as ManagementRoleInput;
 };
 
-// citext treats case as equal, but normalize to lowercase before inserting for display and matching.
+// citext なので大小は同一視されるが、表示と突合のために小文字へそろえてから入れる。
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emailText = (form: FormData, key: string): string => {
   const value = text(form, key, 254).toLowerCase();
@@ -63,7 +63,7 @@ const emailText = (form: FormData, key: string): string => {
   return value;
 };
 
-// Follows the policy established from 0037 onward as-is.
+// 0037以降で確立した方針をそのまま踏襲する。
 const optionalIsoDate = (form: FormData, key: string, label: string): string | null => {
   const raw = String(form.get(key) ?? '').trim();
   if (!raw) return null;
@@ -76,17 +76,17 @@ const optionalIsoDate = (form: FormData, key: string, label: string): string | n
   return raw;
 };
 
-// "Today" in JST. new Date().toISOString() is UTC-based, so between 0-9 JST it shifts
-// to the previous day (same convention as established in screen 1 riskRegister.ts; Codex review 2026-09-03).
+// JST基準の「今日」。new Date().toISOString()はUTC基準なのでJST 0-9時に前日へ
+// ずれる(画面①riskRegister.tsで確立した規約と同じ、Codexレビュー2026-09-03指摘)。
 const todayJst = (): string => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 
 /**
- * Which tab to return to after saving.
+ * 保存後にどのタブへ戻すか。
  *
- * Since the screen is split per master, returning every action to a single /organization
- * would mean "saving a department sends you to the member roster". The return target is
- * fixed on the action side (taking it from the form means a screen that forgot the hidden
- * field silently falls back to the default tab = the hardest breakage to notice).
+ * 画面をマスタごとに割ったので、どの操作もひとつの /organization へ戻していると
+ * 「部門を保存したらメンバー名簿に飛ばされる」ことになる。戻り先はアクション側に
+ * 固定して持つ（フォームから貰う形にすると、隠しフィールドを付け忘れた画面が
+ * 黙って既定のタブへ落ちる＝一番気づきにくい壊れ方をする）。
  */
 const ORG_TAB = {
   members: '/organization',
@@ -98,8 +98,8 @@ type OrgTab = keyof typeof ORG_TAB;
 
 const ORG_ROUTES = Object.values(ORG_TAB);
 
-/** mode (isms / risk) switches the whole nav. Dropping it on every save would send
- *  someone working in risk-management mode back to the ISMS ordering each time. */
+/** mode（isms / risk）はナビ全体の切り替えに使う。保存のたびに落としていると、
+ *  リスク管理モードで作業している人が毎回 ISMS 側の並びへ戻される。 */
 function orgHref(tab: OrgTab, form: FormData, params: Record<string, string>): string {
   const query = new URLSearchParams();
   const mode = String(form.get('_mode') ?? '').trim();
@@ -109,8 +109,8 @@ function orgHref(tab: OrgTab, form: FormData, params: Record<string, string>): s
   return qs ? `${ORG_TAB[tab]}?${qs}` : ORG_TAB[tab];
 }
 
-/** The 4 tabs are just different views of the same data, so invalidate them together.
- *  Manually maintaining "this action only affects this tab" inevitably goes stale somewhere. */
+/** 4 タブは同じデータを別の切り口で見ているだけなので、まとめて捨てる。
+ *  「この操作はこのタブにしか響かない」を手で維持すると必ずどこかが古びる。 */
 function revalidateOrganization(): void {
   for (const route of ORG_ROUTES) revalidatePath(route);
 }
@@ -146,9 +146,9 @@ export async function saveDepartment(form: FormData) {
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'org_manage')`;
     if (ownerUserId) {
-      // Prevent retired/suspended users from being made the responsible person. Lock the target row
-      // with FOR UPDATE before checking (closes the TOCTOU where another transaction changes status
-      // after the check and before the INSERT). The DB trigger in 0043 is the real backstop.
+      // 退職・停止済みユーザーを責任者にできないようにする。FOR UPDATE で対象行を
+      // ロックしてから確認する（確認後・INSERT前に別トランザクションが status を
+      // 変える TOCTOU を塞ぐ）。0043 の DB トリガーが真のバックストップ。
       const owner = await sql<{ id: string }[]>`
         SELECT id FROM app.users
          WHERE tenant_id = app.current_tenant() AND id = ${ownerUserId}::uuid AND status = 'active'
@@ -169,12 +169,12 @@ export async function saveDepartment(form: FormData) {
 }
 
 /**
- * Rename a department, change its parent department, or replace its head (manager).
+ * 部門の改称・上位部門の変更・責任者（マネージャー）の差し替え。
  *
- * The old implementation had only INSERT, so a mistakenly created department could not be fixed.
- * Allowing the parent to change makes cycles possible, so detect and reject cycles here
- * (OrgChart's "cycle or hierarchy too deep" display is the last line of defense;
- * preventing creation comes first).
+ * 旧実装は INSERT しか無く、間違えて作った部門を直せなかった。親を変えられる
+ * ようにすると循環参照が作れてしまうので、ここで閉路を検出して拒む
+ * （OrgChart 側の「循環参照または階層が深すぎる」表示は最後の砦であって、
+ * そもそも作らせないのが先）。
  */
 export async function updateDepartment(form: FormData) {
   const { id, name, parentId, ownerUserId } = parseOrRedirect('departments', form, () => ({
@@ -194,7 +194,7 @@ export async function updateDepartment(form: FormData) {
       if (owner.length === 0) return 'inactive_owner' as const;
     }
     if (parentId) {
-      // Walk from the new parent to the root; if we come back to ourselves, it is a cycle.
+      // 新しい親から根まで辿り、自分に戻ってきたら閉路。
       const cycle = await sql<{ cycle: boolean }[]>`
         WITH RECURSIVE ancestors(id, parent_id, depth) AS (
           SELECT d.id, d.parent_id, 1
@@ -235,16 +235,16 @@ export async function saveMembership(form: FormData) {
   }));
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'role_manage')`;
-    // Lock the target user row with FOR UPDATE to serialize concurrent assignments to the same user.
-    // Without the lock, 0005's auditor dual-role prohibition trigger misses each other's uncommitted rows.
+    // 対象ユーザー行を FOR UPDATE でロックし、同一ユーザーへの同時割当を直列化する。
+    // ロックが無いと 0005 の監査人兼任禁止トリガーが互いの未コミット行を見落とす。
     const lockedUser = await sql<{ id: string }[]>`
       SELECT id FROM app.users
        WHERE tenant_id = app.current_tenant() AND id = ${userId}::uuid AND status = 'active'
        FOR UPDATE`;
     if (lockedUser.length === 0) return 'inactive_user' as const;
 
-    // (tenant_id, user_id, role_key) is UNIQUE. If a revoked row remains,
-    // reassignment becomes a duplicate, so write it as un-revoking that row.
+    // (tenant_id, user_id, role_key) は UNIQUE。失効済みの行が残っていると
+    // 再割当が duplicate になるので、失効を戻す形で書く。
     const rows = await sql<{ id: string }[]>`
       INSERT INTO app.memberships
         (tenant_id, user_id, role_key, department_id, granted_at, granted_by, created_by, updated_by)
@@ -269,12 +269,12 @@ export async function saveMembership(form: FormData) {
 }
 
 /**
- * Add one member.
+ * メンバーを 1 人増やす。
  *
- * app.set_tenant_context_for_proxy(0050) only admits "people with status='active' and
- * exactly 1 active membership". So this is an **operation that grants access**,
- * not adding a name to a displayed roster. Only owners and admins can run it (0059's
- * member_manage). Only owners may grant owner privileges themselves.
+ * app.set_tenant_context_for_proxy(0050) は「status='active' かつ有効な所属が
+ * ちょうど 1 件ある人」しか通さない。つまりここは**アクセス権を配る操作**であり、
+ * 表示上の名簿追加ではない。オーナーと管理者だけが実行できる（0059 の
+ * member_manage）。オーナー権限そのものを配れるのはオーナーだけにする。
  */
 export async function addMember(form: FormData) {
   const { displayName, email, role, departmentId } = parseOrRedirect('members', form, () => ({
@@ -317,11 +317,11 @@ export async function addMember(form: FormData) {
 }
 
 /**
- * Replace a member's management role.
+ * メンバーの管理ロールを差し替える。
  *
- * Revoke all existing management roles, then re-create exactly one. With several, the
- * CASE in app.current_management_role() lets the higher one win, and the displayed and actual
- * permissions diverge. Auditors end up single-role due to 0005's dual-role prohibition trigger.
+ * 既存の管理ロールをすべて失効させてから 1 つだけ立て直す。複数立てると
+ * app.current_management_role() の CASE で上位が勝ち、画面の表示と実際の
+ * 権限が食い違う。監査人は 0005 の兼任禁止トリガーがあるので単独になる。
  */
 export async function saveMemberRole(form: FormData) {
   const { userId, role } = parseOrRedirect('members', form, () => ({
@@ -330,12 +330,12 @@ export async function saveMemberRole(form: FormData) {
   }));
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_management_permission(NULL::text, NULL::uuid, 'role_manage')`;
-    // If owners drop to 0, role_manage passes for nobody and permissions can no longer be restored
-    // from the UI. 0059's constraint trigger is the last line of defense, but being DEFERRED it only
-    // fails at COMMIT and cannot give a reason. Check here first and return readable wording.
+    // オーナーが 0 人になると role_manage が誰にも通らず、画面から権限を戻せなく
+    // なる。0059 の制約トリガーが最後の砦だが、DEFERRED なので COMMIT 時にしか
+    // 落ちず理由を出せない。ここで先に見て、読める言葉で返す。
     if (role !== 'owner') {
-      // Take a tenant-scoped advisory lock before counting. Otherwise two operations demoting different
-      // owners at the same time each see "the other one remains" and both succeed.
+      // 数える前にテナント単位の助言ロックを取る。取らないと、別々のオーナーを
+      // 同時に降ろす 2 つの操作が互いに「相手が残っている」と見て両方通る。
       await sql`SELECT app.lock_owner_guard(app.current_tenant())`;
       const owners = await sql<{ n: number }[]>`
         SELECT count(*)::int AS n
@@ -371,9 +371,9 @@ export async function saveMemberRole(form: FormData) {
 }
 
 /**
- * Change membership status. Suspending blocks set_tenant_context_for_proxy =
- * effectively suspending access. You cannot suspend yourself (the moment you do, your own
- * permissions vanish, and one click could create a state nobody can undo).
+ * 在籍状態の変更。停止すると set_tenant_context_for_proxy を通れなくなる＝
+ * 実質のアクセス停止。自分自身は止められない（止めた瞬間に自分の権限も消え、
+ * 誰も戻せない状態を 1 クリックで作れてしまう）。
  */
 export async function setMemberStatus(form: FormData) {
   const { userId, status } = parseOrRedirect('members', form, () => {
@@ -452,22 +452,22 @@ export async function saveCertificationBody(form: FormData) {
 }
 
 // ------------------------------------------------------------------
-// Systems in use (0061)
+// 利用システム（0061）
 //
-// The source of truth is app.application_catalog. Created in 0045 as the parent for ID/license integration
-// and left empty, it has been promoted to the list of "systems we use".
-// No new systems table is built, so as not to create a 4th "system-like thing" after
-// app.vendors (outsourcing vendors) and assets.asset_type (free text);
-// otherwise nobody could say which one is the source of truth.
+// 正本は app.application_catalog。ID・ライセンス連携の親として 0045 で
+// 作られたまま空だったものを「うちが使っているシステム」の一覧に昇格させた。
+// 新しいシステム表を建てないのは、app.vendors（委託先）と
+// assets.asset_type（自由記述）に続く 4 つ目の「システムらしきもの」を
+// 作らないため。どれが正本か言えなくなる。
 // ------------------------------------------------------------------
 
 /**
- * Build an app_key from the name.
+ * 名称から app_key を作る。
  *
- * 0045's CHECK is `^[a-z0-9][a-z0-9_.-]{0,99}$`. The table is already applied, so
- * the constraint is left as is and this side produces values that satisfy it. **Users are not
- * asked to enter an app_key** (people on the ground use system names, not a key scheme).
- * In case nothing alphanumeric remains (e.g. Japanese names), use 'system' as the base when empty.
+ * 0045 の CHECK は `^[a-z0-9][a-z0-9_.-]{0,99}$`。適用済みのテーブルなので
+ * 制約は変えず、こちら側が満たす値を作る。**利用者に app_key を入力させない**
+ * （現場が使うのはシステムの名前であって、キーの体系ではない）。
+ * 日本語名など英数字が残らない場合に備えて、空になったら 'system' を土台にする。
  */
 function systemSlug(name: string): string {
   const base = name
@@ -486,7 +486,7 @@ export async function saveSystem(form: FormData) {
     if (!SYSTEM_STATUSES.includes(rawStatus as (typeof SYSTEM_STATUSES)[number])) {
       throw new Error('status の形式が不正です');
     }
-    // provider is also normalized to lowercase alphanumerics to match 0045's CHECK. unknown if empty.
+    // provider も 0045 の CHECK に合わせて小文字英数へ寄せる。空なら unknown。
     const rawProvider = (optionalText(form, 'provider', 100) ?? '')
       .toLowerCase()
       .replace(/[^a-z0-9_.-]+/g, '-')
@@ -499,7 +499,7 @@ export async function saveSystem(form: FormData) {
   });
   const result = await withTenantWrite(async (sql) => {
     await sql`SELECT app.require_system_edit_permission()`;
-    // app_key is unique. If a system with the same name already exists, append a sequence number.
+    // app_key は一意。同じ名前のシステムが既にあれば連番を足す。
     const base = systemSlug(name);
     const taken = await sql<{ app_key: string }[]>`
       SELECT app_key FROM app.application_catalog
@@ -509,8 +509,8 @@ export async function saveSystem(form: FormData) {
     let appKey = base;
     for (let n = 2; used.has(appKey) && n < 1000; n += 1) appKey = `${base}-${n}`;
     if (used.has(appKey)) return 'duplicate_system' as const;
-    // 0045 revokes DML on application_catalog from app_rw, so
-    // go through 0061's dedicated RPC instead of a direct INSERT.
+    // 0045 が app_rw から application_catalog の DML を剥奪しているので、
+    // 直接 INSERT せず 0061 の専用 RPC を通す。
     await sql`SELECT app.create_system(${appKey}, ${name}, ${provider}, ${status})`;
     return 'ok' as const;
   });
@@ -540,10 +540,10 @@ export async function updateSystem(form: FormData) {
     };
   });
   const result = await withTenantWrite(async (sql) => {
-    // Before retiring, check whether any asset references it as its location.
-    // Retiring while references remain yields a register where "information lives in a place that no longer exists".
-    // The RPC has the same check and is the real backstop. This is an early check so we can
-    // return readable wording.
+    // 廃止にする前に、所在場所として参照している資産が無いか見る。
+    // 参照が残ったまま廃止すると「もう無い場所に情報がある」台帳になる。
+    // RPC 側にも同じ検査があり、そちらが真のバックストップ。ここは読める
+    // 言葉を返すための先出し。
     if (status === 'retired') {
       const linked = await sql<{ n: number }[]>`
         SELECT count(*)::int AS n FROM app.assets
@@ -561,7 +561,7 @@ export async function updateSystem(form: FormData) {
   redirect(orgHref('systems', form, { saved: '1' }));
 }
 
-/** How a department uses the system. Only record the usage (the asset register is the source of truth for the information handled). */
+/** 部門がそのシステムをどう使っているか。使い方だけを書く（扱う情報は資産台帳が正本）。 */
 export async function saveDepartmentSystem(form: FormData) {
   const { departmentId, applicationId, usageNote } = parseOrRedirect('systems', form, () => ({
     departmentId: uuidText(form, 'department_id'),

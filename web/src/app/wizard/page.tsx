@@ -4,9 +4,9 @@ import { getWizardSteps } from '@/lib/organizationRegister';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'ISMS構築ウィザード' };
 
-// Deep links to the actual screen (existing page) for each step. Key logic from the spec:
-// "Each step is a path to an existing screen and has no new data model"
-// (only steps 1 and 2, initial organization setup and certification body info, are new).
+// 各ステップの実体(既存画面)へのディープリンク。仕様書の主要ロジック:
+// 「各ステップは既存画面への導線であり、新しいデータモデルは持たない」
+// (ステップ1・2の組織初期設定・審査機関情報のみ新規)。
 const STEP_LINKS: Record<number, { href: string; label: string }> = {
   1: { href: '/organization/profile', label: '組織情報へ' },
   2: { href: '/organization/profile', label: '組織情報へ' },

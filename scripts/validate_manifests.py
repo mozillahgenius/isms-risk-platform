@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Static validation of connector manifests (connectors/**/v*.yaml).
+"""コネクタマニフェスト（connectors/**/v*.yaml）の静的検証。
 
-Design doc 3.1 / 3.4 / 3.7. Does not touch the DB (pure validation).
+設計書 3.1 / 3.4 / 3.7。DB には触らない（純粋な検証）。
 
-**Why checking scopes alone is not enough.**
-A manifest is an execution policy: "this is exactly what will be run in the future".
-Even if the credential's scopes are read-only, if the manifest can declare POST or arbitrary URLs,
-writes and external exfiltration become possible at run time. So here we validate three things separately:
+**なぜスコープ検査だけでは足りないか。**
+マニフェストは「将来この通りに実行する」という実行ポリシーである。
+資格情報のスコープが read-only でも、マニフェストに POST や任意の URL を書けたら、
+実行時には書き込みも外部送出もできてしまう。したがってここでは
 
-  - the permissions the credential holds (auth.scopes)
-  - the requests that can be issued at run time (http.methods / http.allowed_hosts / endpoint shape)
-  - where fetched data goes (map_to and fields)
+  - 資格情報が持つ権限（auth.scopes）
+  - 実行時に出せる要求（http.methods / http.allowed_hosts / endpoint の形）
+  - 取ったものの行き先（map_to と fields）
 
-If any one of them is loose, the other two being strict is meaningless.
+の 3 つを別々に検証する。どれか 1 つでも緩いと、他の 2 つが厳しくても意味がない。
 
-Usage:
-    python3 scripts/validate_manifests.py [path...]
-    Without paths, checks every *.yaml under connectors/.
-    Exit code 1 if even one fails.
+使い方:
+    python3 scripts/validate_manifests.py [パス...]
+    パスを省略すると connectors/ 配下の *.yaml を全部見る。
+    1 件でも落ちたら終了コード 1。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from pathlib import Path
 
 try:
     import yaml
-except ModuleNotFoundError:  # pragma: no cover - CI checks separately for missing dependencies
+except ModuleNotFoundError:  # pragma: no cover - 依存が無いことは CI が別に検査する
     sys.stderr.write(
         "PyYAML が要ります。`python3 -m pip install -r requirements.txt` を実行してください。\n"
     )
@@ -36,8 +36,8 @@ except ModuleNotFoundError:  # pragma: no cover - CI checks separately for missi
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# --- vocabulary (fixed) -----------------------------------------------------
-# Loosening these loosens validation. When adding, add together with the landing place (DB table/column).
+# --- 語彙（固定）------------------------------------------------------------
+# ここを緩めると検証が緩む。増やすときは着地先（DB の表・列）と対で増やす。
 
 KINDS = {"reader", "elevated_reader", "writer"}
 AUTH_TYPES = {"oauth2", "service_account_dwd", "api_key"}
@@ -54,22 +54,22 @@ BACKOFF = {"exponential_jitter", "exponential", "fixed"}
 RATE_STRATEGY = {"token_bucket", "leaky_bucket", "fixed_window"}
 SYNC_CADENCE = {"hourly", "daily", "weekly", "monthly", "manual"}
 
-# Read-only methods. reader / elevated_reader cannot declare anything else.
+# 読み取りしかできないメソッド。reader / elevated_reader はこれ以外を宣言できない。
 READ_METHODS = {"GET", "HEAD"}
 ALL_METHODS = READ_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
 
-# Derivations that can be written as `$derive.<name>`. Only implemented ones are allowed.
+# `$derive.<名前>` で書ける導出。実装が在るものだけを許す。
 DERIVATIONS = {"permission_subject_kind"}
 
-# map_to → logical field names accepted by the normalizer.
+# map_to → 正規化側が受け取る論理フィールド名。
 #
-# **These are not column names themselves.** For edges (memberships_graph / app_grants),
-# what the manifest passes is "an external ID for looking up the other side", not a column.
-# The normalizer resolves it to an internal ID. This is the contract for that input.
+# **列名そのものではない。** 辺（memberships_graph / app_grants）では、
+# マニフェストが渡すのは「相手を引くための外部 ID」であって列ではない。
+# 正規化側がそれを内部 ID へ解決する。ここはその入力の契約。
 #
-# `db_table` is "the table where that map_to finally lands". It exists so that a map_to with
-# no landing place cannot be written (the design doc's manifest had 2 mappings with no
-# landing place; they were added in 0024).
+# `db_table` は「その map_to が最終的に着地する表」。着地先の無い map_to を
+# 書けないようにするために持つ（設計書のマニフェストには着地先の無い写像が
+# 2 つあった。0024 で足した）。
 MAP_TO: dict[str, dict[str, object]] = {
     "accounts": {
         "db_table": "app.accounts",
@@ -129,8 +129,8 @@ MAP_TO: dict[str, dict[str, object]] = {
     },
 }
 
-# Columns the normalizer fills itself. They cannot be mapped from a manifest
-# (no crossing tenants, no audit timestamps from external input).
+# 正規化側が自分で埋める列。マニフェストから写像させない
+# （テナントを跨がせない・監査の時刻を外部入力にしない）。
 FORBIDDEN_TARGETS = {
     "id",
     "tenant_id",
@@ -153,11 +153,11 @@ RESOURCE_OPTIONAL = {"params", "iterate_over", "incremental", "depends_on", "on_
 
 CONNECTOR_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 RESOURCE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-# endpoint may not contain a host (the host is decided by http.allowed_hosts).
-# A relative path that only allows `{var}` bindings.
+# endpoint はホストを書かせない（ホストは http.allowed_hosts が決める）。
+# `{var}` の束縛だけを許す相対パス。
 ENDPOINT_RE = re.compile(r"^[A-Za-z0-9._~\-/]+(\{[a-z_][a-z0-9_]*\}[A-Za-z0-9._~\-/]*)*$")
 
-# Shape of Google read-only scopes: ending in .readonly, or an explicit allowlist.
+# Google の read-only スコープの形。末尾 .readonly、または明示の許可一覧。
 READONLY_SCOPE_SUFFIXES = (".readonly", ".read_only")
 READONLY_SCOPE_ALLOWLIST = {
     "https://www.googleapis.com/auth/admin.reports.audit.readonly",
@@ -172,10 +172,10 @@ class Problem(Exception):
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
-    """Do not silently let the later value win for duplicate YAML keys.
+    """YAML の重複キーを黙って後勝ちにしない。
 
-    The default SafeLoader overwrites with the later value when a key appears twice.
-    In a manifest, "scopes written twice and only one takes effect" can happen, so fail.
+    既定の SafeLoader は同じキーが 2 度出ると後の値で上書きする。
+    マニフェストでは「scopes を 2 回書いて片方だけが効く」が起こり得るので落とす。
     """
 
 
@@ -207,7 +207,7 @@ def _check_keys(d: dict, required: set, optional: set, where: str):
         raise Problem(f"{where}: 必須のキーがありません: {sorted(missing)}")
     unknown = keys - required - optional
     if unknown:
-        # Unknown keys produce "written but has no effect". Do not silently ignore them.
+        # 未知のキーは「書いたのに効かない」を生む。黙って無視しない。
         raise Problem(f"{where}: 知らないキーがあります: {sorted(unknown)}")
 
 
@@ -269,7 +269,7 @@ def validate_paging(paging: dict, where: str):
     ptype = _need(paging, "type", f"{where}.paging")
     if ptype not in PAGING_TYPES:
         raise Problem(f"{where}.paging.type が語彙外です: {ptype}")
-    # Required per scheme. Writing only type and forgetting param fetches just 1 page at run time.
+    # 方式ごとの必須。type だけ書いて param を忘れると、実行時に 1 ページしか取れない。
     if ptype == "page_token":
         _check_keys(paging, {"type", "param"}, {"size"}, f"{where}.paging")
     elif ptype == "offset":
@@ -327,7 +327,7 @@ def validate_fields(fields, map_to: str, where: str):
                 )
             continue
         if source in sources:
-            # Mapping the same source to two destinations is usually a mistake.
+            # 同じ取得元を 2 つの行き先へ写すのは、たいてい書き間違い。
             raise Problem(
                 f"{where}.fields: 取得元 {source} が {sources[source]} と {target} に二重写像されています"
             )
@@ -378,7 +378,7 @@ def validate_resource(res: dict, index: int, names: set[str]) -> dict:
     if params is not None and not isinstance(params, dict):
         raise Problem(f"{where}.params は表です")
 
-    # Every {var} in endpoint must be filled by iterate_over.bind.
+    # endpoint の {var} は iterate_over.bind で必ず埋まること。
     bound = set()
     it = res.get("iterate_over")
     if it is not None:
@@ -404,10 +404,10 @@ def validate_resource(res: dict, index: int, names: set[str]) -> dict:
 
 
 def validate_graph(resources: list[dict]):
-    """Inspect the dependency graph combining iterate_over and depends_on.
+    """iterate_over と depends_on を合わせた依存グラフを見る。
 
-    Checks for references to nonexistent resources and for cycles.
-    A cycle means execution never terminates.
+    実在しない resource を指していないか、循環していないか。
+    循環すると実行が止まらない。
     """
     names = {r["name"] for r in resources}
     edges: dict[str, set[str]] = {n: set() for n in names}
@@ -431,7 +431,7 @@ def validate_graph(resources: list[dict]):
                     raise Problem(f"resources[{name}].depends_on が自分自身を指しています")
                 edges[name].add(d)
 
-    state: dict[str, int] = {}  # 0=unvisited 1=visiting 2=done
+    state: dict[str, int] = {}  # 0=未訪問 1=訪問中 2=完了
 
     def visit(n: str, path: list[str]):
         if state.get(n) == 2:
@@ -473,7 +473,7 @@ def validate_manifest(path: Path) -> dict:
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise Problem(f"version は 1 以上の整数です: {version!r}")
 
-    # The file's location and its content must agree.
+    # ファイルの置き場所と中身が食い違わないこと。
     # connectors/<connector>/v<version>.yaml
     expected = ROOT / "connectors" / connector / f"v{version}.yaml"
     if path.resolve() != expected.resolve():

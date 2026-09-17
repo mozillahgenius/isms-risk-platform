@@ -1,5 +1,5 @@
 -- @run-as: admin
--- Durable, tenant-scoped idempotency receipts for fixed management-adapter actions.
+-- Durable, tenant-scoped idempotency receipts for fixed Codzilla management actions.
 CREATE TABLE app.internal_management_operations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   operation_id text NOT NULL CHECK (operation_id ~ '^[a-f0-9]{12,64}$'),

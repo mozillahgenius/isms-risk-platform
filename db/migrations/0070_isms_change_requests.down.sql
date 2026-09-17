@@ -1,15 +1,15 @@
 -- @run-as: admin
--- Rollback of 0070. Removes the change request table, decision function and transition trigger, and restores the permission table to the 0069 version.
--- Approval records left in app.approvals are not deleted (audit records are never rewritten afterwards; same as 0063).
+-- 0070 の巻き戻し。変更の申請の表・判断の関数・遷移のトリガを外し、許可の表を 0069 の版へ戻す。
+-- app.approvals に残った承認の記録は消さない（監査の記録を後から書き換えない。0063 と同じ）。
 --
--- **Do not roll back when data exists** (same as 0055; A.8.32 records must not silently vanish on down).
--- The guard goes before SET ROLE, and takes a SHARE lock and counts only when the table exists (same as 0065's down).
+-- **データがあるときは巻き戻さない**（0055 と同じ。A.8.32 の記録を down で黙って消さない）。
+-- guard は SET ROLE の前に置き、表が在るときだけ SHARE ロックを取って数える（0065 の down と同じ）。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;
 BEGIN
-  -- Lock the approval records first. The decision function touches request (FOR UPDATE) -> approval record (INSERT) in that order, so
-  -- going request -> approval record here would make the two wait on each other (Codex review 2026-09-12). Align the lock order.
+  -- 承認の記録を先にロックする。判断の関数は申請（FOR UPDATE）→ 承認の記録（INSERT）の順に触るので、
+  -- こちらが申請 → 承認の記録の順だと相互待ちになる（Codex レビュー 2026-09-12）。取る順番をそろえる。
   LOCK TABLE app.approvals IN SHARE MODE;
   IF to_regclass('app.change_requests') IS NOT NULL THEN
     LOCK TABLE app.change_requests IN SHARE MODE;
@@ -18,7 +18,7 @@ BEGIN
       RAISE EXCEPTION '0070 rollback refused: change requests would be lost (% rows)', n;
     END IF;
   END IF;
-  -- Also do not roll back while approval records (change_request) remain. Rolling back and recreating would link old approvals to a request with the same ID.
+  -- 承認の記録（change_request）が残っているときも戻さない。戻して作り直すと、古い承認が同じ ID の申請に結び付く。
   SELECT count(*) INTO n FROM app.approvals WHERE target_type = 'change_request';
   IF n > 0 THEN
     RAISE EXCEPTION '0070 rollback refused: change request approvals remain (% rows)', n;
@@ -28,7 +28,7 @@ END $$;
 SET ROLE schema_owner;
 
 DROP FUNCTION IF EXISTS app.decide_change_request(uuid, boolean, text);
--- Dropping the table also drops its policies, triggers and indexes.
+-- 表を消すと、張ってあるポリシー・トリガ・索引も一緒に消える。
 DROP TABLE IF EXISTS app.change_requests;
 DROP FUNCTION IF EXISTS app.change_requests_guard();
 

@@ -1,25 +1,25 @@
 -- @run-as: admin
 
--- **Do not roll back when data exists.** Information security objectives and their achievement evaluations are
--- 6.2 records and must not silently disappear on down.
+-- **データがあるときは巻き戻さない。** 情報セキュリティ目的とその達成評価は
+-- 6.2 の記録であり、down で黙って消えてよいものではない。
 --
--- The guard goes **before SET ROLE**. After switching to schema_owner,
--- the RLS policy management_definer_access requires app.current_tenant(), and
--- a migration without a tenant context fails before it can count rows (measured).
--- The connecting user is superuser with BYPASSRLS, so it can count across all tenants
--- (measured in production: postgres / super=true / bypassrls=true).
+-- guard は **SET ROLE の前**に置く。schema_owner に切り替えたあとだと
+-- RLS の management_definer_access が app.current_tenant() を要求し、
+-- テナント文脈の無い migration では件数を数える前に落ちる（実測）。
+-- 接続ユーザーは superuser かつ BYPASSRLS なので、全テナントを数えられる
+-- （本番で実測: postgres / super=true / bypassrls=true）。
 --
--- **Take the lock before counting.** Without it, another session could INSERT between count and DROP,
--- and those rows would be dropped right after the 0-row verdict.
--- migrate.sh's run_file wraps both up and down in BEGIN ... COMMIT, so
--- the lock taken here is held until DROP TABLE (confirmed by measurement).
+-- **数える前にロックを取る。** ロックが無いと count と DROP の間に
+-- 別セッションが INSERT でき、0 件と判定した直後の行ごと消える。
+-- migrate.sh の run_file が up/down とも BEGIN 〜 COMMIT で包むので、
+-- ここで取ったロックは DROP TABLE まで保持される（実測で確認）。
 --
--- **SHARE is enough.** What we want to block is INSERT/UPDATE/DELETE (ROW EXCLUSIVE);
--- SHARE conflicts with that while letting SELECT through. ACCESS EXCLUSIVE would
--- make us wait, before even returning the refusal, merely because some session is reading.
+-- **SHARE で足りる。** 止めたいのは INSERT/UPDATE/DELETE（ROW EXCLUSIVE）で、
+-- SHARE はそれと競合しつつ SELECT は通す。ACCESS EXCLUSIVE にすると
+-- 読み取り中のセッションがあるだけで、拒否を返す前に待たされる。
 --
--- Bound the lock wait so deployment does not hang. If the lock cannot be taken, fail,
--- turning "unknown whether it can be rolled back" into "do not roll back".
+-- ロック待ちで配備が固まらないよう時間を切る。取れなければ落として、
+-- 「巻き戻せるか分からない」を「巻き戻さない」に倒す。
 SET LOCAL lock_timeout = '10s';
 DO $$
 DECLARE n integer;

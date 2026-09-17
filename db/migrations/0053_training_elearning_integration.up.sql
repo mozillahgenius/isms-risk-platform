@@ -1,4 +1,4 @@
--- 0053: Training records, and citing/evaluating eLearning completion results
+-- 0053: 教育・訓練の記録と eLearning 受講実績の引用・評価
 
 SET ROLE schema_owner;
 

@@ -1,7 +1,7 @@
 -- @run-as: admin
--- Rollback of 0062: revert the schema_owner policies to calling app.current_tenant() directly.
--- Reverting makes new_tenant.py and the seeds fail again on a fresh DB (see 0062's up).
--- For the same reason as up, no SET ROLE schema_owner (table owners are mixed).
+-- 0062 の巻き戻し: schema_owner 向けポリシーを app.current_tenant() の直呼びへ戻す。
+-- 戻すと新規 DB で new_tenant.py と seed が再び落ちる（0062 の up を参照）。
+-- up と同じ理由で SET ROLE schema_owner はしない（表の所有者が混在している）。
 
 DO $$
 DECLARE

@@ -1,13 +1,13 @@
 -- @run-as: admin
--- 0064: Second tier of ISMS operational records (design doc 2026-09-11 §5.3, item 2: information security objectives, vendor assessments, evidence, exceptions).
+-- 0064: ISMS の運用記録の第 2 段（設計書 2026-09-11 §5.3 の 2 番目: 情報セキュリティ目的・委託先評価・証跡・例外）。
 --
--- All tables already exist (0010 / 0011 / 0055). All that is added is the kinds that roles may write:
---   objective  registering information security objectives (6.2) and evaluating achievement : owner / admin
---   evidence   registering manual evidence                                                : owner / admin / manager
---              (these are records of control operation, so auditors, who don't write business data, can't write them)
---   exception  approving exceptions to findings (accepting as risk instead of correcting): owner only (an executive decision)
--- Vendor assessments use the existing app.require_work_permission('vendor_assessment', …) (aligned with work assignment).
--- Don't rewrite 0063; only replace the function (down restores 0063's version).
+-- 表はすべて既存（0010 / 0011 / 0055）。足すのは、書いてよい役割の種類だけ:
+--   objective  情報セキュリティ目的（6.2）の登録と達成の評価 : owner / admin
+--   evidence   手作業の証跡の登録                          : owner / admin / manager
+--              （統制の運用の記録なので、業務データを書かない監査人には書かせない）
+--   exception  指摘の例外の承認（是正せずリスクとして受け入れる）: owner のみ（経営層の判断）
+-- 委託先評価は既存の app.require_work_permission('vendor_assessment', …) を使う（作業の割り振りと揃える）。
+-- 0063 は書き換えず、関数だけ差し替える（down で 0063 の版へ戻す）。
 
 SET ROLE schema_owner;
 
@@ -32,7 +32,7 @@ BEGIN
   IF v_allowed IS NULL THEN
     RAISE EXCEPTION 'unknown record kind: %', p_kind;
   END IF;
-  -- Also reject when the role is NULL (same as 0063; NULL = ANY yields NULL, so the IF would slip through).
+  -- 役割が NULL のときも拒否する（0063 と同じ。NULL = ANY は NULL で IF が素通りするため）。
   IF v_role IS NULL OR NOT (v_role = ANY (v_allowed)) THEN
     RAISE EXCEPTION 'records role required' USING ERRCODE = 'insufficient_privilege';
   END IF;

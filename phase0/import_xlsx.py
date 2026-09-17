@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Import a karte risk-map xlsx into the DB (first half of Phase 0).
+"""カルテ_リスクマップ の xlsx を DB へ取り込む（Phase 0 の前半）。
 
   python3 phase0/import_xlsx.py --xlsx in.xlsx --tenant <uuid> [--replace]
 
-Column mapping (same as NORMALIZATION.md; this is the only implementation):
-  RiskItem     -> app.risk_scenarios.area + phase (functional area and Phase)
-  Big          -> app.risk_scenarios.theme      (issue theme)
-  Mid          -> app.risk_scenarios.measure    (measure)
+列の対応（NORMALIZATION.md と同じ。ここが唯一の実装）:
+  RiskItem     -> app.risk_scenarios.area + phase（機能領域とPhase）
+  Big          -> app.risk_scenarios.theme      （課題テーマ）
+  Mid          -> app.risk_scenarios.measure    （施策）
   Frame        -> app.risk_scenarios.frame
   Summary      -> app.risk_scenarios.summary
   ProbBefore   -> app.risk_assessments.prob
@@ -15,7 +15,7 @@ Column mapping (same as NORMALIZATION.md; this is the only implementation):
   ProbAfter    -> app.risk_treatments.prob_after
   ImpactAfter  -> app.risk_treatments.impact_biz_after
 
-Data goes into the DB via psql's \\copy (no additional Python driver).
+DB へは psql の \\copy で流す（追加の Python ドライバを増やさない）。
 """
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ def main():
                     help='取り込み前にそのテナントのリスク台帳を空にする')
     args = ap.parse_args()
 
-    # Strictly validate as a uuid before embedding in SQL (closes the string-interpolation entry point).
-    # Use the normalized form; the input string itself is never passed to SQL.
+    # SQL へ埋める前に uuid として厳密に検証する（文字列補間の入口を塞ぐ）。
+    # 正規化した表現を使い、入力文字列そのものは SQL へ渡さない。
     try:
         tenant = str(_uuid.UUID(args.tenant))
     except (ValueError, AttributeError, TypeError):
@@ -130,8 +130,8 @@ BEGIN
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE 'risk_scenarios: % 件', v_n;
 
-  -- Looking rows up again by business key alone would also attach to retired scenarios and past assessment versions.
-  -- Take only the rows created now via RETURNING and build the dependent rows from those ids.
+  -- 業務キーだけで引き直すと、retired なシナリオや過去版の評価にもぶら下げてしまう。
+  -- 今回作った行だけを RETURNING で受けて、その id で後続を作る。
   INSERT INTO app.risk_assessments
     (tenant_id, risk_scenario_id, risk_criteria_id, prob, impact_biz,
      assessed_by, valid_from, created_by)
@@ -165,10 +165,10 @@ BEGIN
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE 'risk_treatments: % 件', v_n;
 
-  -- Check that the number of imported rows equals the number of current register rows **that correspond to the input**
-  -- (do not silently pass JOIN misses or double assignment).
-  -- Comparing against the whole tenant would always fail for additive imports without --replace,
-  -- so limit the comparison to the business keys present in karte_in.
+  -- 取り込んだ行数と、**入力に対応する**台帳の現行行数が一致することを確かめる
+  -- （JOIN の取りこぼし・二重付与を黙って通さない）。
+  -- テナント全体と比べると、--replace なしの追加取り込みが必ず失敗するので、
+  -- 比較対象は karte_in に載っている業務キーの分だけに限る。
   SELECT count(*) INTO v_n FROM karte_in;
   IF v_n <> (SELECT count(*)
                FROM karte_in k

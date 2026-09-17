@@ -1,12 +1,12 @@
--- 0006 app: tenant context (implements design doc 9.2; but the design doc's plain implementation
--- fails acceptance #7, so signature verification is added. For the reason for the deviation and
--- "the scope of properties that can be proven", see docs/DECISIONS.md D-01 / D-02).
+-- 0006 app: テナント文脈（設計書 9.2 の実装。ただし設計書の素の実装は
+-- 受入 #7 を満たさないため署名検証を足している。逸脱の理由と
+-- 「証明できる性質の範囲」は docs/DECISIONS.md D-01 / D-02）。
 --
--- Depends on: 0005's app.sessions / app.memberships, 0001's pgcrypto.
+-- 依存: 0005 の app.sessions / app.memberships、0001 の pgcrypto。
 
 -- ------------------------------------------------------------------
--- Signing key. Only schema_owner can touch it. Never granted to app_rw / app_ro.
--- It is a singleton (only one row allowed) and read with SELECT ... INTO STRICT.
+-- 署名鍵。schema_owner だけが触れる。app_rw / app_ro には一切与えない。
+-- singleton（1 行しか置けない）にして SELECT ... INTO STRICT で読む。
 -- ------------------------------------------------------------------
 CREATE TABLE app.tenant_context_keys (
   id         smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -19,9 +19,9 @@ REVOKE ALL ON TABLE app.tenant_context_keys FROM app_rw, app_ro, auditlogd, audi
 INSERT INTO app.tenant_context_keys (id, secret) VALUES (1, gen_random_bytes(32));
 
 -- ------------------------------------------------------------------
--- Signature material. Make the delimiter and version explicit to remove ambiguity (prevents concatenation misreads).
--- pg_stat_activity is not used (inside SECURITY DEFINER the owner cannot see other roles'
--- session rows, so backend_start can be NULL).
+-- 署名の材料。区切りと版を明示して曖昧さを消す（連結の解釈揺れを防ぐ）。
+-- pg_stat_activity は使わない（SECURITY DEFINER 内で所有者から他ロールの
+-- セッション行が見えず backend_start が NULL になり得るため）。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.tenant_context_signature(p_tenant uuid) RETURNS text
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -41,15 +41,15 @@ BEGIN
 END $$;
 ALTER FUNCTION app.tenant_context_signature(uuid) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.tenant_context_signature(uuid) FROM PUBLIC;
--- Only the two functions below may call this. App roles are not given EXECUTE
--- (granting it would let them forge signatures for any tenant).
+-- 呼び出せるのは下の 2 関数だけ。アプリロールには EXECUTE を与えない
+-- （与えると任意テナントの署名を作れてしまう）。
 
 -- ------------------------------------------------------------------
--- Set the context. The argument is "a secret held by the caller" = the session token itself.
--- The DB holds only the hash, so anyone who does not know the token cannot create a context.
--- set_config(..., true) = equivalent to SET LOCAL. It disappears at transaction end
--- (no context lingers after returning to the connection pool = acceptance #8).
--- Call sequence: BEGIN -> set_tenant_context -> business queries -> COMMIT.
+-- 文脈の設定。引数は「呼出者が保持する秘密」＝セッショントークンそのもの。
+-- DB にはハッシュしか無いので、トークンを知らない者は文脈を作れない。
+-- set_config(..., true) = SET LOCAL 相当。トランザクション終了で消える
+-- （接続プールへ返した後に文脈が残らない＝受入 #8）。
+-- 呼び方は BEGIN → set_tenant_context → 業務クエリ → COMMIT。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.set_tenant_context(p_token text) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER
@@ -59,9 +59,9 @@ BEGIN
   IF p_token IS NULL OR pg_catalog.length(p_token) < 32 THEN
     RAISE EXCEPTION 'invalid session' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  -- Do not keep sessions alive for users/tenants suspended after issuance.
-  -- Looking only at expiry and revocation, access would continue with a token already in hand
-  -- even after offboarding a user or closing a tenant.
+  -- 発行後に停止された利用者・テナントのセッションを生かしたままにしない。
+  -- 期限切れと失効だけを見ていると、退職処理やテナント閉鎖をしても
+  -- 手持ちのトークンでアクセスが続く。
   SELECT m.tenant_id INTO v_tenant
     FROM app.sessions s
     JOIN app.memberships m
@@ -86,8 +86,8 @@ REVOKE ALL ON FUNCTION app.set_tenant_context(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.set_tenant_context(text) TO app_rw, app_ro;
 
 -- ------------------------------------------------------------------
--- Read the context. Do not trust the GUC blindly; recompute and compare the signature.
--- A connection that did a direct SET app.tenant_id cannot produce a signature, so it fails here.
+-- 文脈の参照。GUC を素通しで信じず、署名を再計算して照合する。
+-- 直接 SET app.tenant_id した接続は署名を作れないので、ここで落ちる。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.current_tenant() RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -115,17 +115,17 @@ BEGIN
 END $$;
 ALTER FUNCTION app.current_tenant() OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.current_tenant() FROM PUBLIC;
--- app_ro also calls this when evaluating RLS policy expressions, so it needs EXECUTE.
+-- app_ro も RLS ポリシー式の評価で呼ぶので EXECUTE が要る。
 GRANT EXECUTE ON FUNCTION app.current_tenant() TO app_rw, app_ro;
 
 -- ------------------------------------------------------------------
--- Issue a session. The caller generates the token with a CSPRNG and passes it in; only the hash stays in the DB.
+-- セッション発行。トークンは呼出側が CSPRNG で作って渡し、DB にはハッシュだけが残る。
 --
--- **Execute privilege is granted only to auth_svc, not to app_rw.**
--- If app_rw could call this, it could issue a session for any tenant's uuid
--- and pass set_tenant_context() with that token. Signature verification and
--- token hash comparison mean nothing if issuance itself is unrestricted.
--- Only the authentication path (login handling) connects as auth_svc.
+-- **実行権限は auth_svc だけに与える。app_rw には与えない。**
+-- app_rw がこれを呼べると、任意テナントの uuid を指定してセッションを発行し、
+-- そのトークンで set_tenant_context() を通せてしまう。署名検証も
+-- トークンのハッシュ照合も、発行そのものが自由なら意味を成さない。
+-- 認証経路（ログイン処理）だけが auth_svc で接続する。
 -- ------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.create_session(
   p_tenant uuid, p_user uuid, p_token text, p_ttl interval DEFAULT interval '12 hours')
@@ -134,7 +134,7 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog AS $$
 DECLARE v_id uuid;
 BEGIN
-  -- Reject fewer than 32 characters as insufficient minimum entropy (recommended: hex of 32 CSPRNG bytes = 64 characters)
+  -- 32 文字未満は最低エントロピー不足として拒否（推奨は 32 バイト CSPRNG の hex = 64 文字）
   IF p_token IS NULL OR pg_catalog.length(p_token) < 32 THEN
     RAISE EXCEPTION 'session token is too short';
   END IF;
@@ -160,7 +160,7 @@ ALTER FUNCTION app.create_session(uuid, uuid, text, interval) OWNER TO schema_ow
 REVOKE ALL ON FUNCTION app.create_session(uuid, uuid, text, interval) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.create_session(uuid, uuid, text, interval) TO auth_svc;
 
--- Revocation. Rotation is done as "create_session with a new token -> revoke the old one".
+-- 失効。ローテーションは「新しいトークンで create_session → 旧を revoke」で行う。
 CREATE OR REPLACE FUNCTION app.revoke_session(p_token text) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog AS $$
@@ -174,8 +174,8 @@ BEGIN
 END $$;
 ALTER FUNCTION app.revoke_session(text) OWNER TO schema_owner;
 REVOKE ALL ON FUNCTION app.revoke_session(text) FROM PUBLIC;
--- Only someone who knows the token can revoke it (cutting off one's own session is legitimate).
+-- 失効はトークンを知っている者にしかできない（自分のセッションを切るのは正当）。
 GRANT EXECUTE ON FUNCTION app.revoke_session(text) TO auth_svc, app_rw;
 
--- auth_svc must not touch context establishment or business data. Its only role is issuing sessions.
+-- auth_svc は文脈確立や業務データへは触らせない。セッション発行だけの役。
 GRANT USAGE ON SCHEMA app TO auth_svc;

@@ -1,22 +1,22 @@
 -- @run-as: admin
--- 0067: Restrict writes to the records tables by role in the DB as well (Codex review 2026-09-12 round 3; user decision "enforce it in the DB too").
+-- 0067: 記録の表の書き込みを、DB でも役割で絞る（Codex レビュー 2026-09-12 3 巡目・ユーザー判断「DB でも強制する」）。
 --
--- Until now the design was that server actions call app.require_records_role(kind) and then write via app_rw (0063).
--- Calling the function is merely a caller-side convention; a forgotten call or another write path would let anyone in the tenant
--- (even auditors or members) write. As a prerequisite for offering this to other companies (design doc §6), the table side rejects too.
+-- これまでは、サーバーアクションが app.require_records_role(kind) を呼んでから app_rw で書く設計だった（0063）。
+-- 関数を呼ぶのは呼び出し側の約束でしかなく、呼び忘れや別の書き込み経路があると、テナント内の誰でも
+-- （監査人・メンバーでも）書けてしまう。他社提供（設計書 §6）の前提として、表の側でも拒否する。
 --
--- Targets are the new tables written only by the records screens (created in 0063-0066):
---   control_effectiveness (effectiveness), context_issues / interested_parties (context), legal_requirements (legal)
--- Existing tables (audits, findings, corrective actions, reviews, objectives, evidence, exceptions, vendor assessments) have other write
--- paths such as check execution and work assignment, so they are not restricted here (that would break those paths; roles are checked in server actions as before).
+-- 対象は、記録の画面だけが書く新しい表（0063〜0066 で作ったもの）:
+--   control_effectiveness（effectiveness）・context_issues / interested_parties（context）・legal_requirements（legal）
+-- 既存の表（監査・指摘・是正処置・レビュー・目的・証跡・例外・委託先評価）は、チェックの実行や作業の割り振りなど
+-- 別の書き込み経路があるので、ここでは絞らない（絞ると別の経路を壊す。役割は従来どおりサーバーアクションで確かめる）。
 --
--- Shape:
---   - Per-kind permissions live in one place, app.records_role_allows(kind); require_records_role just calls it
---     (so the table policies and the function never disagree on the permission table). Future kinds only replace records_role_allows.
---   - Each table gets 3 RESTRICTIVE policies for INSERT / UPDATE / DELETE. Reads are not restricted (readable regardless of role).
---     RESTRICTIVE is ANDed with the existing tenant_isolation (PERMISSIVE), so the tenant boundary is unchanged.
---   - The condition takes the form (SELECT app.records_role_allows('<kind>')) (the role is not looked up again per row).
---   - Names, shape and target tables are fixed by check_rls.sql.
+-- 形:
+--   - 種類ごとの許可を app.records_role_allows(kind) の 1 か所に置き、require_records_role はそれを呼ぶだけにする
+--     （表のポリシーと関数とで許可の表が食い違わないように）。以後の種類の追加は records_role_allows だけを差し替える。
+--   - 各表に RESTRICTIVE のポリシーを INSERT / UPDATE / DELETE の 3 枚。読み取りは絞らない（役割に関係なく読める）。
+--     RESTRICTIVE は既存の tenant_isolation（PERMISSIVE）と AND で効くので、テナント境界はそのまま。
+--   - 条件は (SELECT app.records_role_allows('<kind>')) の形（行ごとに役割を引き直さない）。
+--   - 名前と形・張る表は check_rls.sql が固定する。
 
 SET ROLE schema_owner;
 
@@ -40,12 +40,12 @@ BEGIN
   IF v_allowed IS NULL THEN
     RAISE EXCEPTION 'unknown record kind: %', p_kind;
   END IF;
-  -- Deny when the actor is unknown (no session).
+  -- 本人が分からない（セッションが無い）ときは許さない。
   IF app.current_session_user() IS NULL THEN
     RETURN false;
   END IF;
   v_role := app.current_management_role();
-  -- NULL = ANY yields NULL (not false), so NULL is explicitly turned into false.
+  -- NULL = ANY は NULL（偽ではない）なので、NULL は明示して偽にする。
   RETURN v_role IS NOT NULL AND v_role = ANY (v_allowed);
 END $$;
 ALTER FUNCTION app.records_role_allows(text) OWNER TO schema_owner;
@@ -55,14 +55,14 @@ GRANT EXECUTE ON FUNCTION app.records_role_allows(text) TO app_rw;
 COMMENT ON FUNCTION app.records_role_allows(text) IS
   '記録の種類ごとに、今の本人の役割で書いてよいか。許可の表の唯一の置き場所（require_records_role と各表の records_role_* ポリシーが使う）。';
 
--- The role check function holds no permission table and just calls records_role_allows (behavior same as 0066).
+-- 役割の確認関数は、許可の表を持たずに records_role_allows を呼ぶだけにする（振る舞いは 0066 と同じ）。
 CREATE OR REPLACE FUNCTION app.require_records_role(p_kind text) RETURNS text
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, app AS $$
 BEGIN
   IF app.current_session_user() IS NULL THEN
     RAISE EXCEPTION 'records role required' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  -- Unknown kinds are rejected by records_role_allows with 'unknown record kind'.
+  -- 知らない種類は records_role_allows が 'unknown record kind' で落とす。
   IF NOT app.records_role_allows(p_kind) THEN
     RAISE EXCEPTION 'records role required' USING ERRCODE = 'insufficient_privilege';
   END IF;

@@ -1,24 +1,24 @@
-# Deployment layout from design doc 11.2. Intended to run inside a closed network (internal only).
+# 設計書 11.2 の配備構成。Mac mini 上で Tailscale 越しに社内限定で動かす想定。
 #
-# Currently only postgres and minio have content. web / worker / scheduler /
-# auditlogd will be added once their Phase 1+ implementations land (listing empty services
-# would make them look like they "already exist", so they are left out).
+# 現時点で中身があるのは postgres と minio だけ。web / worker / scheduler /
+# auditlogd は Phase 1 以降の実装が入ってから追加する（空のサービスを並べると
+# 「もう在る」ように見えるので置かない）。
 #
-# Relocatability constraints from design doc 11.3:
-#   - Do not write state to the local filesystem (Postgres and MinIO only)
-#   - Do not embed host names or paths in code (pass them via environment variables)
-#   - Do not depend on macOS-specific features (the scheduler is a dedicated container; no launchd)
+# 設計書 11.3 の移設可能性の制約:
+#   - ローカルファイルシステムに状態を書かない（Postgres と MinIO のみ）
+#   - ホスト名・パスをコードに埋めない（環境変数で渡す）
+#   - macOS 固有機能に依存しない（スケジューラは専用コンテナ。launchd を使わない）
 services:
   postgres:
-    # Design doc 11.1 specifies PostgreSQL 16. The dev machine has no Docker and is verified on 17, so
-    # treat this as authoritative and run CI on PG16 (docs/DECISIONS.md D-11).
+    # 設計書 11.1 は PostgreSQL 16。開発機は Docker が無く 17 で検証しているため、
+    # ここを正として PG16 で CI を回すこと（docs/DECISIONS.md D-11）。
     image: postgres:16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-isms}
       POSTGRES_USER: ${POSTGRES_USER:-isms_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD は必須。既定値を持たせない}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"   # internal only. Do not expose on 0.0.0.0
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"   # 社内限定。0.0.0.0 で公開しない
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

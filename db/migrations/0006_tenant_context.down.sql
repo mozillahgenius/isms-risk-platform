@@ -1,5 +1,5 @@
--- Rollback of 0006. Drop functions first, then the key table.
--- current_tenant() is restored to 0001's provisional definition (just reads the GUC).
+-- 0006 の巻き戻し。関数を先に落としてから鍵テーブルを落とす。
+-- current_tenant() は 0001 の仮定義（GUC を読むだけ）へ戻す。
 DROP FUNCTION IF EXISTS app.revoke_session(text);
 DROP FUNCTION IF EXISTS app.create_session(uuid, uuid, text, interval);
 DROP FUNCTION IF EXISTS app.set_tenant_context(text);

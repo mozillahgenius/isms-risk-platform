@@ -14,10 +14,10 @@ function fmt(value: string | Date | null): string {
   return new Date(value).toLocaleString('ja-JP');
 }
 
-// Only for effective_from (date type). fmt() assumes timestamptz (approved_at etc., which carry real time),
-// and used as is on a date type, toLocaleString() depends on the runtime timezone
-// and the displayed date can shift (Codex review 2026-09-02 finding). This value is already a
-// YYYY-MM-DD string via ::text on the SQL side, so display it as is.
+// effective_from(date型)専用。fmt()は timestamptz(approved_at等、実時刻を持つ)を
+// 前提にしており、date型にそのまま使うとtoLocaleString()が実行環境のtimezoneに
+// 依存して表示日がずれうる(Codexレビュー2026-09-02指摘)。この値はSQL側で
+// ::text済みのYYYY-MM-DD文字列なので、そのまま表示する。
 function fmtDate(value: string | null): string {
   return value ?? '—';
 }
@@ -108,7 +108,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
             </p>
             <div className="flex flex-col gap-3">
               {detail.versions.map((v, idx) => {
-                const prev = detail.versions[idx + 1]; // The previous version (+1 because the list is in descending order)
+                const prev = detail.versions[idx + 1]; // 一つ古い版（降順表示のため+1）
                 const compareBase = prev ?? (detail.catalogBody !== null ? { body_md: detail.catalogBody, version: 0 } : null);
                 const compareLabel = prev ? `v${prev.version}` : detail.catalogBody !== null ? '標準規程' : null;
                 return (
@@ -117,7 +117,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                       <span className="text-[13px] font-semibold">version {v.version}</span>
                       <VersionBadge v={v} />
                       {v.is_placeholder && <span className="badge badge-lead">仮置き本文</span>}
-                      <span className="ms-auto text-[11px] text-[var(--muted)]">作成: {fmt(v.created_at)}</span>
+                      <span className="ml-auto text-[11px] text-[var(--muted)]">作成: {fmt(v.created_at)}</span>
                     </div>
                     <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-[var(--muted)] md:grid-cols-4">
                       <div><dt className="inline">承認: </dt><dd className="inline">{fmt(v.approved_at)}</dd></div>
@@ -143,7 +143,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                           <label className="text-[11px] text-[var(--muted)]">
                             有効化日
                             <input
-                              className="input ms-1 h-7 w-[140px] text-[12px]"
+                              className="input ml-1 h-7 w-[140px] text-[12px]"
                               type="date"
                               name="effective_from"
                               defaultValue={new Date().toISOString().slice(0, 10)}

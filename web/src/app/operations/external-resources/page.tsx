@@ -39,8 +39,8 @@ export default async function ExternalResourcesPage({ searchParams }: { searchPa
   const error = first(sp.error);
   const result = await getExternalResourceWorkspace({ templateId: first(sp.template) });
   const data = result.ok ? result.data : null;
-  // Bind to a const before use. With data.selectedTemplate as is, the null-excluding
-  // narrowing does not apply inside the map callback.
+  // const に束ねてから使う。data.selectedTemplate のままだと、map の
+  // コールバック内で null 除外の絞り込みが効かない。
   const selectedTemplate = data ? data.selectedTemplate : null;
   const modeInput = mode === 'isms' || mode === 'risk' ? <input type="hidden" name="mode" value={mode} /> : null;
   const withMode = (href: string) => (mode ? `${href}${href.includes('?') ? '&' : '?'}mode=${mode}` : href);
@@ -262,7 +262,7 @@ export default async function ExternalResourcesPage({ searchParams }: { searchPa
                       </label>
                       <div className="md:col-span-2">
                         <button className="btn btn-primary" type="submit" disabled={data.vendors.length === 0}>質問票を作成する</button>
-                        {data.vendors.length === 0 && <span className="ms-2 text-[12px] text-[var(--muted)]">先に外部リソースを登録してください。</span>}
+                        {data.vendors.length === 0 && <span className="ml-2 text-[12px] text-[var(--muted)]">先に外部リソースを登録してください。</span>}
                       </div>
                     </form>
                   </div>

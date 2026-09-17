@@ -1,15 +1,15 @@
-// Determines whether a policy body is "actually written".
+// 規程の本文が「実際に書かれているか」の判定。
 //
-// The 12 policies in DOM 2026.1 currently contain only a heading and the single phrase "(standard body)".
-// Listing these as bodies makes it look as if the policies already exist. Measured, the bodies are only 19-39 characters.
-// This decision lives here so screens can say there is no content (do not write it per screen).
+// DOM 2026.1 の規程 12 本は、いまのところ見出しと「（標準本文）」の一言しか入っていない。
+// これを本文として並べると、規程がもう在るように見える。実測すると本文は 19〜39 文字しかない。
+// 中身が無いことを画面が言えるようにするための判定をここに置く（画面ごとに書かない）。
 
 const PLACEHOLDER_MARK = '（標準本文';
 
-/** true if the body is a placeholder (heading only). */
+/** 本文が仮置き（見出しだけ）なら true。 */
 export function isPlaceholderBody(body: string): boolean {
   const text = body ?? '';
-  // The substantive body excluding heading lines (# ...).
+  // 見出し行（# …）を除いた実質の本文。
   const lines = text
     .split('\n')
     .map((l) => l.trim())
@@ -17,6 +17,6 @@ export function isPlaceholderBody(body: string): boolean {
   const rest = lines.join('');
   if (rest.length === 0) return true;
   if (rest.startsWith(PLACEHOLDER_MARK)) return true;
-  // Also treat it as a placeholder if it contains only parenthetical notes.
+  // 括弧書きの注記しか無い場合も仮置きとみなす。
   return lines.every((l) => /^[（(].*[）)]$/.test(l));
 }

@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Create one tenant and issue a session token.
+"""テナントを 1 つ作り、セッショントークンを発行する。
 
-  python3 scripts/new_tenant.py --name "Example Inc." --domain example.com \
-      --admin-email alice@example.com --admin-name "Alice Example"
+  python3 scripts/new_tenant.py --name "Example Organization" --domain example.invalid \
+      --admin-email admin@example.invalid --admin-name "管理者"
 
-Creates: tenant / admin (CISO) / deployment of standard policies (all of those in catalog) / session.
+作るもの: テナント / 管理者（CISO）/ 標準規程の展開（catalog に在る全数）/ セッション。
 
-## Privilege separation
-- Tenant creation calls `app.provision_tenant()` as the **provisioner** role.
-  provisioner has no table privileges and can only call this function.
-- Only the **auth_svc** role can issue sessions.
-  If app_rw issued them, a business connection could create tokens for any tenant.
+## 権限の分け方
+- テナントの作成は **provisioner** ロールで `app.provision_tenant()` を呼ぶ。
+  provisioner は表への権限を持たず、この関数を呼ぶことしかできない。
+- セッションの発行は **auth_svc** ロールだけができる。
+  app_rw に発行させると、業務用の接続が任意テナントのトークンを作れてしまう。
 
-## Token handling
-Printed once to stdout. **Never written to a file or the repository.**
-The DB keeps only the hash, so if it is lost, create a new one (re-run this script).
+## トークンの扱い
+標準出力へ 1 度だけ出す。**ファイルにもリポジトリにも書かない。**
+DB にはハッシュしか残らないので、失くしたら作り直す（このスクリプトを再実行する）。
 """
 from __future__ import annotations
 

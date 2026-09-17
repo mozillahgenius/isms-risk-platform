@@ -1,11 +1,11 @@
--- 0005 app: tenants, people, roles (design doc 2.3)
+-- 0005 app: テナント・人・ロール（設計書 2.3）
 -- tenants → users → departments → memberships → sessions
--- The order differs from the design doc: departments is created before memberships (dependency order).
+-- 掲載順は設計書と異なる。departments を memberships より先に作る（依存順）。
 
 CREATE TABLE app.tenants (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL,
-  domain        text NOT NULL,                    -- primary domain
+  domain        text NOT NULL,                    -- プライマリドメイン
   fiscal_start_month smallint NOT NULL DEFAULT 4
                   CHECK (fiscal_start_month BETWEEN 1 AND 12),
   industry_preset text NOT NULL DEFAULT 'general',
@@ -14,8 +14,8 @@ CREATE TABLE app.tenants (
                   CHECK (status IN ('active','suspended','closed')),
   created_at    timestamptz NOT NULL DEFAULT now()
 );
--- app.tenants has no tenant_id of its own (id is that). 0015's bulk RLS application
--- targets only tables with a tenant_id column, so it is set explicitly here.
+-- app.tenants は自分自身が tenant_id を持たない（id がそれ）。0015 の RLS 一括適用は
+-- tenant_id 列を持つ表だけを対象にするため、ここで明示的に張る。
 ALTER TABLE app.tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.tenants FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON app.tenants FOR ALL TO app_rw
@@ -41,7 +41,7 @@ CREATE TABLE app.departments (
   tenant_id uuid NOT NULL,
   name      text NOT NULL,
   parent_id uuid,
-  owner_user_id uuid,                              -- risk owner
+  owner_user_id uuid,                              -- リスクオーナー
   created_at timestamptz NOT NULL DEFAULT now(), created_by uuid,
   updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid,
   PRIMARY KEY (tenant_id, id),
@@ -65,7 +65,7 @@ CREATE TABLE app.memberships (
   UNIQUE (tenant_id, user_id, role_key)
 );
 
--- Auditors cannot hold other roles (design doc 1.3 / acceptance #14)
+-- 監査人の兼任禁止（設計書 1.3 / 受入 #14）
 CREATE OR REPLACE FUNCTION app.check_auditor_exclusivity() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, app AS $$
 BEGIN
@@ -86,16 +86,16 @@ CREATE TRIGGER trg_auditor_exclusivity BEFORE INSERT OR UPDATE ON app.membership
 -- ------------------------------------------------------------------
 -- app.sessions
 --
--- The design doc has only id (uuid), but then "anyone who knows another person's session UUID
--- can switch into another tenant". To tie set_tenant_context's argument to a secret held by the caller,
--- we store the hash of a bearer token (a deviation from the design doc;
--- rationale in docs/DECISIONS.md D-02). Raw tokens are never stored in the DB.
+-- 設計書は id(uuid) のみだが、それでは「他人のセッション UUID を知っていれば
+-- 他テナントへ切り替えられる」。set_tenant_context の引数を呼出者が保持する
+-- 秘密に紐付けるため、ベアラトークンのハッシュを持つ（設計書からの逸脱。
+-- 理由は docs/DECISIONS.md D-02）。生トークンは DB に保存しない。
 --
--- This table is "definer-only". app_rw / app_ro get no table privileges at all
--- (excluded from 0015's bulk GRANT). Reads/writes go only through the SECURITY DEFINER
--- functions in 0006. The owner schema_owner is also subject to FORCE RLS, so a dedicated policy
--- lets the definer read it (without it, set_tenant_context could not
--- validate its own argument: a chicken-and-egg problem).
+-- この表は「定義者専用」。app_rw / app_ro には一切のテーブル権限を与えない
+-- （0015 の一括 GRANT から除外する）。読み書きは 0006 の SECURITY DEFINER
+-- 関数経由のみ。所有者 schema_owner も FORCE RLS の対象なので、定義者が
+-- 読めるように専用ポリシーを張る（張らないと set_tenant_context が
+-- 自分の引数を検証できず鶏と卵になる）。
 -- ------------------------------------------------------------------
 CREATE TABLE app.sessions (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -114,16 +114,16 @@ CREATE INDEX sessions_active ON app.sessions (tenant_id, user_id)
 
 ALTER TABLE app.sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.sessions FORCE ROW LEVEL SECURITY;
--- Only the definer (schema_owner) can look up sessions across all tenants.
--- No policies for app_rw / app_ro (they get no table privileges at all).
+-- 定義者（schema_owner）だけが全テナントのセッションを引ける。
+-- app_rw / app_ro 向けのポリシーは作らない（テーブル権限自体を与えないため）。
 CREATE POLICY ctx_session_lookup ON app.sessions FOR ALL TO schema_owner
   USING (true) WITH CHECK (true);
 
--- For the same reason, memberships / users / tenants are made readable by the definer before the context is established.
--- set_tenant_context and create_session in 0006 read these 3 tables to verify that the session owner and
--- the tenant are valid. FORCE RLS applies to the owner too, so
--- without policies the definer "sees nothing", and
--- even a correct token is judged to have "no valid membership" (hit in practice).
+-- memberships / users / tenants も同じ理由で、文脈確立前に定義者が引けるようにする。
+-- 0006 の set_tenant_context と create_session は、セッションの持ち主と
+-- テナントが有効かを確かめるためにこの 3 表を読む。FORCE RLS は所有者にも
+-- 効くので、ポリシーを張らないと定義者が「何も見えない」状態になり、
+-- 正しいトークンでも「有効な所属が無い」と判定されてしまう（実測で踏んだ）。
 CREATE POLICY ctx_membership_lookup ON app.memberships FOR SELECT TO schema_owner
   USING (true);
 CREATE POLICY ctx_user_lookup ON app.users FOR SELECT TO schema_owner

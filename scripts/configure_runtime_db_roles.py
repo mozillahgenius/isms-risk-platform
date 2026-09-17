@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate per-role Management DSNs from an owner-only pgpass."""
+"""RUNTIMEのowner-only pgpassからManagement用role別DSNを生成する。"""
 
 from __future__ import annotations
 
@@ -157,17 +157,17 @@ def provision_mail_worker_role(
     host: str, port: str, database: str, admin_user: str, admin_password: str,
     proxy_secret: str, mail_env: Path,
 ) -> None:
-    """Reissue the mail_worker password and rewrite the mail worker's DSN.
+    """mail_worker のパスワードを配り直し、送信ワーカーの DSN を書き換える。
 
-    As with management_web, the password is **derived every time rather than stored**
-    (sha256("mail-worker:" + existing secret)). The label differs, so the value
-    differs from management_web while there is still only one secret.
-    This way every deploy converges on the same value, and a hand-set password
-    cannot drift from the env into "it sent yesterday but not today"
-    (on 2026-09-08 it had been set by hand).
+    management_web と同じで、パスワードは**保存せずに毎回導出する**
+    （sha256("mail-worker:" + 既存の秘密)）。ラベルが違うので
+    management_web とは別の値になり、秘密は1つのままで済む。
+    こうしておくと、デプロイのたびに同じ値へ収束し、手で付けた
+    パスワードが env と食い違って「昨日は送れたのに今日は送れない」に
+    ならない（2026-09-08 は手で付けていた）。
 
-    The mail env also holds SMTP credentials and the mail worker token, so
-    instead of rewriting the whole file, **only the DSN line** is replaced.
+    mail 用 env は SMTP 資格情報と送信ワーカー用トークンも持っているので、
+    ファイルごと書き換えず **DSN の行だけ**差し替える。
     """
     password = hashlib.sha256(f"mail-worker:{proxy_secret}".encode()).hexdigest()
     sql = "ALTER ROLE mail_worker PASSWORD '" + password + "';\n"
@@ -186,7 +186,7 @@ def provision_mail_worker_role(
 
 
 def replace_env_value(target: Path, key: str, value: str) -> None:
-    """Replace a single line of the env. Other lines (SMTP credentials etc.) are left alone."""
+    """env の1行だけを差し替える。他の行（SMTP 資格情報等）は触らない。"""
     if target.is_symlink() or not target.is_file():
         raise ValueError(f"{target} must be a regular non-symlink file")
     mode = stat.S_IMODE(target.stat().st_mode)
@@ -237,9 +237,9 @@ def write_pgpass(
     admin_user: str | None,
     admin_password: str | None,
 ) -> None:
-    # DBs of the sub-tests that run_isolated.sh runs with ISMS_TEST_DB="${DB}_<suffix>". DBs not listed here have
-    # no credentials, and in unattended deploys psql stalls waiting for a password (2026-09-13: stalled 30 minutes
-    # when isms_records / isms_registers were added). When a sub-test is added to run_isolated.sh, add it here too.
+    # run_isolated.sh が ISMS_TEST_DB="${DB}_<suffix>" で走らせる下位の試験の DB。ここに無い DB へは
+    # 資格情報が無く、無人の配備で psql がパスワードの入力を待って止まる（2026-09-13、isms_records /
+    # isms_registers の追加時に30分止まった）。run_isolated.sh に下位の試験を足したら、ここにも足す。
     fixture_databases = (
         database,
         f"{database}_management_workflows",
@@ -264,8 +264,8 @@ def write_pgpass(
 
 
 def self_test_replace_env_value() -> None:
-    """Confirm that exactly one line is replaced, other lines and permissions are unchanged,
-    and that it fails when the target is missing (not only that it passes)."""
+    """1行だけ差し替わること・他の行と権限が変わらないこと・
+    対象が無ければ落ちることを確かめる（通ることだけを見ない）。"""
     with tempfile.TemporaryDirectory() as directory:
         target = Path(directory) / "isms-mail.env"
         target.write_text(
@@ -286,7 +286,7 @@ def self_test_replace_env_value() -> None:
             replace_env_value(target, "ISMS_MISSING_KEY", "x")
         except ValueError:
             pass
-        else:  # pragma: no cover - if it does not fail, the check is vacuous
+        else:  # pragma: no cover - 落ちなければ検査が空振りしている
             raise AssertionError("存在しないキーでも落ちなかった")
 
 
@@ -333,7 +333,7 @@ def self_test() -> None:
         assert ["127.0.0.1", "15432", "postgres", "postgres", r"admin:\pass"] in rows
         assert ["127.0.0.1", "15432", "isms_dev", "postgres", r"admin:\pass"] in rows
         assert ["127.0.0.1", "15432", "isms_test_0046_reverse", "postgres", r"admin:\pass"] in rows
-        # The DBs of run_isolated.sh sub-tests (isms_records / isms_registers) also have credentials (the 2026-09-13 deploy stall).
+        # run_isolated.sh の下位の試験（isms_records / isms_registers）の DB にも資格情報がある（2026-09-13 に配備で止まった件）。
         for suffix in ("isms_records", "isms_registers"):
             assert ["127.0.0.1", "15432", f"isms_test_{suffix}", "app_rw", "rw:pass"] in rows, suffix
             assert ["127.0.0.1", "15432", f"isms_test_{suffix}", "postgres", r"admin:\pass"] in rows, suffix
@@ -361,7 +361,7 @@ def self_test() -> None:
             "p" * 32,
         )
         assert "ISMS_WRITE_DATABASE_URL=" in two_role_environment.read_text(encoding="utf-8")
-    print("[configure-db-roles] self-test PASS")
+    print("[configure-runtime-db-roles] self-test PASS")
 
 
 def main() -> int:
@@ -375,10 +375,7 @@ def main() -> int:
     parser.add_argument("--pgpass-target", type=Path, help="write an owner-only pgpass file instead of role DSNs")
     parser.add_argument("--admin-user", help="optional exact admin pgpass entry user")
     parser.add_argument("--admin-password-env", help="environment variable containing the admin pgpass password")
-    parser.add_argument(
-        "--proxy-env-file", type=Path,
-        default=Path(os.environ.get("ISMS_PROXY_ENV_FILE", str(Path.home() / "target-env" / "isms.env"))),
-    )
+    parser.add_argument("--proxy-env-file", type=Path, default=Path("/opt/isms-platform/target-env/isms.env"))
     parser.add_argument(
         "--mail-env-file", type=Path,
         help="送信ワーカーの env（ISMS_MAIL_DATABASE_URL を持つ）。"
@@ -410,7 +407,7 @@ def main() -> int:
             args.admin_user,
             admin_password,
         )
-        print("[configure-db-roles] wrote owner-only isolated pgpass")
+        print("[configure-runtime-db-roles] wrote owner-only isolated pgpass")
     else:
         if not args.admin_user or not args.admin_password_env:
             parser.error("role environment generation requires admin credentials")
@@ -422,13 +419,13 @@ def main() -> int:
             args.host, args.port, args.database, args.admin_user, admin_password, proxy_secret
         )
         write_environment(args.target, args.host, args.port, args.database, found, proxy_secret)
-        print("[configure-db-roles] wrote owner-only role-separated environment")
+        print("[configure-runtime-db-roles] wrote owner-only role-separated environment")
         if args.mail_env_file:
             provision_mail_worker_role(
                 args.host, args.port, args.database, args.admin_user, admin_password,
                 proxy_secret, args.mail_env_file,
             )
-            print("[configure-db-roles] refreshed the mail worker role and DSN")
+            print("[configure-runtime-db-roles] refreshed the mail worker role and DSN")
     return 0
 
 

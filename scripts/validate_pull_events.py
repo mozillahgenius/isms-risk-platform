@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SOURCES = {"mkt", "ops", "backoffice", "knowledge", "automation", "el"}
+EXPECTED_SOURCES = {"mkt", "ops", "ssi", "kaname", "codzilla", "el"}
 REQUIRED_FIELDS = {
     "schema_version", "connector_id", "source_system", "target_system",
     "read_only", "credential_id", "scope", "snapshot_id", "observed_at",

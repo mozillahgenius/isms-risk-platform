@@ -1,4 +1,4 @@
--- Rollback of 0027. Revert new objects in dependency order.
+-- 0027 の巻き戻し。新規オブジェクトを依存順に戻す。
 
 ALTER TABLE app.risk_treatments
   DROP CONSTRAINT IF EXISTS risk_treatments_measure_fk;

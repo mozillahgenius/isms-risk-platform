@@ -1,6 +1,6 @@
--- Rollback of 0024
+-- 0024 の巻き戻し
 SET ROLE schema_owner;
--- Restore the provenance targets. The CHECK can't be narrowed while connector_manifests rows remain, so delete them first.
+-- 出所の対象を元へ戻す。connector_manifests の行が残っていると CHECK を狭められないので先に消す。
 DELETE FROM catalog.seed_provenance WHERE target = 'connector_manifests';
 ALTER TABLE catalog.seed_provenance DROP CONSTRAINT IF EXISTS seed_provenance_target_check;
 ALTER TABLE catalog.seed_provenance

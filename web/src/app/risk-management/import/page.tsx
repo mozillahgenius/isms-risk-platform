@@ -7,8 +7,8 @@ import { ImportForm } from './ImportForm';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '初期データの取り込み' };
 
-// Initial data import (design doc 2026-09-11 §8). Imports assets, risks, departments, and membership assignments via CSV, and keeps a record of imports and their reversals.
-// Only the top executive and administrators can import (also checked in the server action and the DB).
+// 初期データの取り込み（設計書 2026-09-11 §8）。資産・リスク・部署・所属の割り当てを CSV で取り込み、取り込みの記録と取り消しを残す。
+// 取り込めるのは最高責任者・管理者だけ（サーバーアクションと DB でも確かめる）。
 
 const ERROR_LABEL: Record<string, string> = {
   invalid_input: '入力を確かめてください',
@@ -20,11 +20,11 @@ const ERROR_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = {
   assets: '資産', risks: 'リスク', departments: '部署', assignments: '所属の割り当て', policies: '規程（下書き）',
 };
-// What the reversal did (assets and risks are retired, departments are deleted, assignments are returned to the original department).
+// 取り消しで何をしたか（資産・リスクは退役、部署は削除、割り当ては元の部署へ戻す）。
 const UNDO_LABEL: Record<string, string> = {
   assets: '退役', risks: '退役', departments: '削除', assignments: '元の部署へ戻した', policies: '削除',
 };
-// Reason it was excluded (the same condition the reversal logic checks).
+// 対象外にした理由（取り消しの処理が見ている条件と同じもの）。
 const SKIP_REASON: Record<string, string> = {
   assets: '対象外は、取り込み後に直された資産か、他の記録（リスク・脆弱性・変更の申請）が参照している資産です。',
   risks: '対象外は、取り込み後に直されたリスクか、他の記録（評価・受容・管理策・指摘・インシデントなど）が参照しているリスクです。',
@@ -94,7 +94,7 @@ export default async function ImportPage({
                       <tr key={b.id} className="border-b border-[var(--border)] align-top last:border-0">
                         <td className="px-3 py-2">{b.imported_at}</td>
                         <td className="px-3 py-2">{KIND_LABEL[b.kind] ?? b.kind}</td>
-                        {/* CSV row count, same as the display right after import (the number of detail entries differs from the row count for policies and assignments) */}
+                        {/* 取り込み直後の表示と同じく CSV の行数（明細の数は規程・割り当てで行数と食い違う） */}
                         <td className="px-3 py-2">{b.row_count} 行</td>
                         <td className="px-3 py-2">{b.importer_name ?? '—'}</td>
                         <td className="px-3 py-2 font-mono text-[11px]">{b.sha256.slice(0, 16)}…</td>
