@@ -30,8 +30,9 @@ export function managementAgentOrigin(env: NodeJS.ProcessEnv = process.env): str
     const url = new URL(raw);
     const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) return null;
-    if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) return null;
-    return url.origin;
+    if (url.username || url.password || url.search || url.hash) return null;
+    // Keep the configured path so the app can be served under a basePath (same as agentWebOrigin).
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
   } catch {
     return null;
   }

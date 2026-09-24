@@ -23,7 +23,10 @@ export function agentWebOrigin(env: NodeJS.ProcessEnv = process.env): string | n
   try {
     const url = new URL(raw);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
-    return url.origin;
+    // Keep the configured path. When the app is served under a basePath (e.g. /risk),
+    // returning only the origin would send install links, installer scripts and the
+    // agent's server URL to the parent app (404). Callers append '/...' themselves.
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
   } catch {
     return null;
   }
