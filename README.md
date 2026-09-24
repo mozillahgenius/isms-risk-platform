@@ -49,6 +49,9 @@ docs/            設計書からの逸脱（DECISIONS.md）と受入トレーサ
 `docker-compose.yml` は設計書 11.2 の配備構成。ローカルの PostgreSQL に対しては
 `make db-reset` で同じスキーマを作れる。
 
+**新しい組織の環境へ導入するときは、先に [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を読むこと。**
+機能ごとに必要な設定の束、必須の定期ジョブ（テナントセッションは最長 24 時間）、手順と受入確認をまとめてある。
+
 ## 既存資産の再利用（設計書 Part XIII）
 
 帳票生成は 1 行も書き直さない。外部で管理する `build_risk_map.py` /
