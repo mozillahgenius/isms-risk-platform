@@ -58,7 +58,7 @@
 | 本人識別つきの画面（メンバーマスタ・書き込み） | `ISMS_PROXY_DATABASE_URL`、`ISMS_WRITE_DATABASE_URL`、本人識別（`ISMS_DEVICE_CONTROL_PROXY_SECRET` と前段の `x-forwarded-email`、または組み込み先からの引き渡し） |
 | 端末エージェントの受信（登録・状態報告） | `ISMS_AGENT_DATABASE_URL`、`ISMS_AGENT_INGEST_SECRET`（`scripts/set_agent_ingest_key.py` で DB 側にも登録）、前段で `/api/agent/v1/*` を通す |
 | 端末の配布（招待・Google アカウントでの有効化） | `ISMS_WEB_BASE_URL`、`ISMS_AGENT_ENROLLMENT_ORIGIN`、`NEXT_PUBLIC_ISMS_AGENT_ENROLLMENT_ORIGIN`（デバイス管理画面の案内に表示する接続先。**ビルド時**に埋め込まれ、未設定だと例示用のホスト名が表示される）、`ISMS_AGENT_LOGIN_ENROLLMENT_ENABLED=true`、`ISMS_AGENT_ARTIFACT_DIR`（ビルド済みのバイナリ） |
-| 招待メールの送信 | Web とは別のファイルに `ISMS_SMTP_HOST` / `ISMS_SMTP_USER` / `ISMS_SMTP_PASSWORD` / `ISMS_SMTP_FROM`（`ISMS_SMTP_PORT` は任意、既定 587・STARTTLS）、`ISMS_MAIL_DATABASE_URL`（`mail_worker`）、`ISMS_MAIL_TENANT_TOKEN`（送信用のテナントセッション。`scripts/send_mail_outbox.py` 自体は環境変数を読まないので、`ops/runtime/send-mail-outbox.sh` のように `--token=` で渡す。値が `-` で始まることがあるため、`--token` と値を分けずに `=` でつなぐ）、**送信ジョブと送信用セッション更新ジョブ**（詳細は [MAIL_OUTBOX.md](MAIL_OUTBOX.md)） |
+| 招待メールの送信 | Web とは別のファイルに `ISMS_SMTP_HOST` / `ISMS_SMTP_USER` / `ISMS_SMTP_PASSWORD` / `ISMS_SMTP_FROM`（`ISMS_SMTP_PORT` は任意、既定 587・STARTTLS）、`ISMS_MAIL_DATABASE_URL`（`mail_worker`）、`ISMS_MAIL_TENANT_TOKEN`（送信用のテナントセッション。`scripts/send_mail_outbox.py` はこのトークンを環境変数から読まないので、`ops/runtime/send-mail-outbox.sh` のように `--token=` で渡す。値が `-` で始まることがあるため、`--token` と値を分けずに `=` でつなぐ）、**送信ジョブと送信用セッション更新ジョブ**（詳細は [MAIL_OUTBOX.md](MAIL_OUTBOX.md)） |
 | 任意: 外部の実行基盤からの端末操作 | `CODZILLA_ISMS_DISPATCH_URL` / `CODZILLA_ISMS_DISPATCH_TOKEN` / `CODZILLA_ISMS_DISPATCH_VIEW_TOKEN` |
 | 任意: Google Workspace の月次取り込み | `GOOGLE_WORKSPACE_SERVICE_ACCOUNT_KEY`、`ISMS_GWS_SUBJECT` ほか（`ops/launchd/...google-workspace-monthly.plist`） |
 
