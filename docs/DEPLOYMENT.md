@@ -19,7 +19,7 @@
 
 設定値を書き始める前に、次を決めてください。ここが決まっていないと、後の設定をいくら揃えても一部の画面が動きません。
 
-- **公開形態**: ホスト直下で公開するか、既存アプリの下のパス（例: `/risk`）で公開するか。パス配下で公開するなら、第4節の公開 URL（`ISMS_WEB_BASE_URL` / `ISMS_AGENT_ENROLLMENT_ORIGIN`）には**パスまで含めます**。同梱の実装は、ホスト名しか扱わない前提で書かれている箇所があるので、パス配下では URL の組み立てを確認してください。
+- **公開形態**: ホスト直下で公開するか、既存アプリの下のパス（例: `/risk`）で公開するか。**同梱の実装はホスト直下での公開を前提にしています。** `web/src/lib/agentDistribution.ts` の `agentWebOrigin()` は `ISMS_WEB_BASE_URL` のパスを捨て、`web/src/lib/managementEnrollment.ts` の `managementAgentOrigin()` はパス付きの値を拒否します（その場合、登録開始は 503 になります）。パス配下で公開する場合は、Next.js の `basePath` に加えて、この 2 つの関数をパスを保つように改修し、公開 URL の設定（第4節）にもパスまで含めてください。改修しないと、招待リンク・導入スクリプト・エージェントの接続先が親側へ届いて 404 になります。
 - **本人識別の渡し方**: 「いま画面を操作しているのは誰か」を画面へどう渡すか。前段のプロキシ（OAuth 等）が `x-forwarded-email` と共有秘密ヘッダを付ける方式（`ISMS_DEVICE_CONTROL_PROXY_SECRET`）が標準です。既存アプリに組み込む場合は、そのアプリから署名付きで引き渡す仕組みを用意します。**これが無いと、メンバーマスタ・端末配布・書き込み系の画面はすべて止まります。**
 - **名簿の正本**: 既存アプリの利用者名簿と、このシステムの `app.users` が二重になる場合、どちらを正とし、どう揃えるか。
 - **実行環境**: 常駐と定期ジョブを systemd（`ops/systemd/`）で持つか、launchd（`ops/launchd/`）で持つか、それ以外か。
@@ -58,7 +58,7 @@
 | 本人識別つきの画面（メンバーマスタ・書き込み） | `ISMS_PROXY_DATABASE_URL`、`ISMS_WRITE_DATABASE_URL`、本人識別（`ISMS_DEVICE_CONTROL_PROXY_SECRET` と前段の `x-forwarded-email`、または組み込み先からの引き渡し） |
 | 端末エージェントの受信（登録・状態報告） | `ISMS_AGENT_DATABASE_URL`、`ISMS_AGENT_INGEST_SECRET`（`scripts/set_agent_ingest_key.py` で DB 側にも登録）、前段で `/api/agent/v1/*` を通す |
 | 端末の配布（招待・Google アカウントでの有効化） | `ISMS_WEB_BASE_URL`、`ISMS_AGENT_ENROLLMENT_ORIGIN`、`NEXT_PUBLIC_ISMS_AGENT_ENROLLMENT_ORIGIN`（**ビルド時**に効く）、`ISMS_AGENT_LOGIN_ENROLLMENT_ENABLED=true`、`ISMS_AGENT_ARTIFACT_DIR`（ビルド済みのバイナリ） |
-| 招待メールの送信 | Web とは別のファイルに `ISMS_SMTP_HOST` / `ISMS_SMTP_PORT` / `ISMS_SMTP_USER` / `ISMS_SMTP_PASSWORD` / `ISMS_SMTP_FROM`、`ISMS_MAIL_DATABASE_URL`（`mail_worker`）、`ISMS_MAIL_TENANT_TOKEN`、**送信ジョブと送信用セッション更新ジョブ**（詳細は [MAIL_OUTBOX.md](MAIL_OUTBOX.md)） |
+| 招待メールの送信 | Web とは別のファイルに `ISMS_SMTP_HOST` / `ISMS_SMTP_USER` / `ISMS_SMTP_PASSWORD` / `ISMS_SMTP_FROM`（`ISMS_SMTP_PORT` は任意、既定 587・STARTTLS）、`ISMS_MAIL_DATABASE_URL`（`mail_worker`）、`ISMS_MAIL_TENANT_TOKEN`、**送信ジョブと送信用セッション更新ジョブ**（詳細は [MAIL_OUTBOX.md](MAIL_OUTBOX.md)） |
 | 任意: 外部の実行基盤からの端末操作 | `CODZILLA_ISMS_DISPATCH_URL` / `CODZILLA_ISMS_DISPATCH_TOKEN` / `CODZILLA_ISMS_DISPATCH_VIEW_TOKEN` |
 | 任意: Google Workspace の月次取り込み | `GOOGLE_WORKSPACE_SERVICE_ACCOUNT_KEY`、`ISMS_GWS_SUBJECT` ほか（`ops/launchd/...google-workspace-monthly.plist`） |
 
@@ -113,7 +113,7 @@
 | 「テナントセッションまたは信頼済みの利用者識別が必要です」 | Web セッションの期限切れ（更新ジョブ）／本人識別が渡っていない／その人が名簿に居ない |
 | `42501 tenant context is not set` | Web セッションの期限切れ |
 | 登録開始が 403 `{"error":"closed"}` | `ISMS_AGENT_LOGIN_ENROLLMENT_ENABLED` |
-| 招待リンク・エージェントの接続先が 404 | 公開 URL にパスが入っているか |
+| 招待リンク・エージェントの接続先が 404、登録開始が 503 | パス配下での公開か（第1節の改修と、公開 URL にパスが入っているか） |
 | 招待メールが `queued` のまま | 送信ジョブ、SMTP の設定、送信用セッション |
 | 状態報告が 400 `{"error":"posture rejected"}` | `ISMS_AGENT_INGEST_SECRET` と DB 側の鍵（`app.agent_ingest_keys`） |
 
