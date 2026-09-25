@@ -10,6 +10,7 @@ import {
 } from '@/lib/deviceControl';
 import { dispatchDeviceControlAction, recoverDispatchAction } from './actions';
 import EnrollmentPanel from './EnrollmentPanel';
+import { revokeAgentInstallation } from './distribution-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,9 @@ const MANAGEMENT_STATUS_CLASS: Record<string, string> = {
 
 const ERROR_LABEL: Record<string, string> = {
   bad_request: '不正な入力です',
+  revoke_already_active: '登録済みの端末の招待は取り消せません',
+  revoke_not_found: '取り消す招待が見つかりません',
+  revoke_invalid_session: 'セッションが無効です。ページを再読み込みしてください。',
   unauthorized: 'この操作を実行する権限がありません',
   not_configured: 'この経路は設定されていません(CODZILLA_ISMS_DISPATCH_URL/TOKEN未設定)',
   timeout: '承認待ちが続いているか、応答がありません。実行自体は継続している可能性があります(下の履歴で確認してください)',
@@ -124,6 +128,7 @@ export default async function DeviceControlPage({
     : DEVICE_CONTROL_DEVICES[0]!.key;
   const dispatched = params.dispatched === '1';
   const recovered = params.recovered === '1';
+  const revoked = params.revoked === '1';
   const error = typeof params.error === 'string' ? params.error : null;
   const mode = params.mode === 'isms' ? 'isms' : 'risk';
   const selectedDeviceLabel = DEVICE_CONTROL_DEVICES.find((d) => d.key === selectedDevice)?.label ?? selectedDevice;
@@ -179,6 +184,10 @@ export default async function DeviceControlPage({
             <p className="max-w-[900px] text-[12px] text-[var(--muted)]">
               ここはManagement自身の登録台帳です。認証前の送付・導入状態も含め、登録経路の現在状態を表示します。
             </p>
+            {revoked && <p className="mt-2 text-[12px] text-[var(--success)]" role="status">招待を取り消しました。</p>}
+            {error?.startsWith('revoke_') && (
+              <p className="mt-2 text-[12px] text-[var(--danger)]" role="alert">取り消せませんでした: {ERROR_LABEL[error] ?? error}</p>
+            )}
           </div>
         </div>
         {managementInventory.state === 'unavailable' ? (
@@ -197,6 +206,7 @@ export default async function DeviceControlPage({
                   <th className="px-4 py-2 font-medium">登録状態</th>
                   <th className="px-4 py-2 font-medium">送付先</th>
                   <th className="px-4 py-2 font-medium">最終更新</th>
+                  <th className="px-4 py-2 font-medium">取り消し</th>
                 </tr>
               </thead>
               <tbody>
@@ -211,13 +221,25 @@ export default async function DeviceControlPage({
                       </td>
                       <td className="px-4 py-2 text-[12px] text-[var(--muted)]">{it.os_family}</td>
                       <td className="px-4 py-2">
+                        {/* 0084: 管理者が取り消した招待は「取り消し済み」と出す（状態は expired、理由 revoked_by_admin）。 */}
                         <span className={MANAGEMENT_STATUS_CLASS[it.status] ?? 'badge'}>
-                          {MANAGEMENT_STATUS_LABEL[it.status] ?? it.status}
+                          {it.failure_code === 'revoked_by_admin' ? '取り消し済み' : MANAGEMENT_STATUS_LABEL[it.status] ?? it.status}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-[12px]">{it.target_email}</td>
                       <td className="px-4 py-2 whitespace-nowrap text-[12px] text-[var(--muted)]">
                         {new Date(lastUpdated).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                      </td>
+                      <td className="px-4 py-2">
+                        {it.status !== 'active' && it.failure_code !== 'revoked_by_admin' ? (
+                          <form action={revokeAgentInstallation}>
+                            <input type="hidden" name="installation_id" value={it.id} />
+                            <input type="hidden" name="mode" value={mode} />
+                            <button type="submit" className="btn px-2 py-1 text-[11px]">招待を取り消す</button>
+                          </form>
+                        ) : (
+                          <span className="text-[11px] text-[var(--muted)]">—</span>
+                        )}
                       </td>
                     </tr>
                   );

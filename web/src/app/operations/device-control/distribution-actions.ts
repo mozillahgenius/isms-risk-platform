@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 
 import { withTenantWrite } from '@/lib/tenant';
 import { queueMail } from '@/lib/mailOutbox';
@@ -72,4 +73,25 @@ export async function issueAgentDistribution(
   if (!result.ok) return { error: result.detail ?? result.reason };
   revalidatePath('/operations/device-control');
   return { ok: true, deliveryStatus: 'queued', authMethod, installUrl: url, token };
+}
+
+/** 招待の取り消し（2026-09-25）。複数送った招待の古い分などを失効させる。
+ *  発行と同じ入口（withTenantWrite＝在籍する本人の書き込み）で、組織は DB 側が文脈から決める。
+ *  有効（登録済み）の端末は取り消さない（DB が already_active で断る）。 */
+export async function revokeAgentInstallation(formData: FormData): Promise<void> {
+  const id = String(formData.get('installation_id') ?? '').trim();
+  const mode = formData.get('mode') === 'isms' ? 'isms' : 'risk';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    redirect(`/operations/device-control?error=bad_request&mode=${mode}`);
+  }
+  const result = await withTenantWrite(async (sql) => {
+    const rows = await sql<{ result: { ok?: boolean; reason?: string } }[]>`
+      SELECT app.revoke_agent_installation(${id}::uuid) AS result
+    `;
+    return rows[0]?.result ?? { ok: false, reason: 'error' };
+  });
+  if (!result.ok) redirect(`/operations/device-control?error=revoke_${result.reason}&mode=${mode}`);
+  const data = result.data;
+  if (data.ok !== true) redirect(`/operations/device-control?error=revoke_${data.reason ?? 'error'}&mode=${mode}`);
+  redirect(`/operations/device-control?revoked=1&mode=${mode}`);
 }
