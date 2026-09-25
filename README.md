@@ -31,7 +31,7 @@ Phase 3a の端末 enrollment / posture 取り込み API は [`docs/PHASE3A_ACCE
 > 0001〜0015 はまだ配備先が無いため直接修正してきたが、最初の実配備で凍結する（[D-16](docs/DECISIONS.md)）。
 
 ```
-db/migrations/   0001〜0083。設計書 2.2 の適用順＋Phase 2/3a/3b 拡張。up と down が対
+db/migrations/   0001〜0086。設計書 2.2 の適用順＋Phase 2/3a/3b 拡張。up と down が対
 db/seeds/        catalog（DOM 2026.1・標準チェック）と既存 CSV マスタの投入、出所の記録
 scripts/         migrate.sh（適用・巻き戻し）、ci/（品質ゲート）
 phase0/          xlsx → DB → xlsx の往復と機械 diff。正規化規則は NORMALIZATION.md

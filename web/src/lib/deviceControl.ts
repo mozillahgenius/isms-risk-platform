@@ -443,6 +443,7 @@ export async function getDeviceBasics(): Promise<DeviceBasicsResult> {
       LIMIT 1
     ) s ON true
     WHERE d.tenant_id = app.current_tenant()
+      AND d.detached_at IS NULL -- 外した端末は出さない（0086）
     ORDER BY d.hostname
     LIMIT 200
   `);

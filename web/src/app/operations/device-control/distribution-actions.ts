@@ -95,3 +95,22 @@ export async function revokeAgentInstallation(formData: FormData): Promise<void>
   if (data.ok !== true) redirect(`/operations/device-control?error=revoke_${data.reason ?? 'error'}&mode=${mode}`);
   redirect(`/operations/device-control?revoked=1&mode=${mode}`);
 }
+
+/** 登録済みの端末を外す（2026-09-25。0086 app.detach_device）。
+ *  外した端末の報告は受けなくなり、再び使うには招待からの導入し直しが要る（画面で確認を出してから送る）。 */
+export async function detachDevice(formData: FormData): Promise<void> {
+  const id = String(formData.get('device_id') ?? '').trim();
+  const mode = formData.get('mode') === 'isms' ? 'isms' : 'risk';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    redirect(`/operations/device-control?error=bad_request&mode=${mode}`);
+  }
+  const result = await withTenantWrite(async (sql) => {
+    const rows = await sql<{ result: { ok?: boolean; reason?: string } }[]>`
+      SELECT app.detach_device(${id}::uuid) AS result
+    `;
+    return rows[0]?.result ?? { ok: false, reason: 'error' };
+  });
+  if (!result.ok) redirect(`/operations/device-control?error=detach_${result.reason}&mode=${mode}`);
+  if (result.data.ok !== true) redirect(`/operations/device-control?error=detach_${result.data.reason ?? 'error'}&mode=${mode}`);
+  redirect(`/operations/device-control?detached=1&mode=${mode}`);
+}
