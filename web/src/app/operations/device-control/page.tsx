@@ -4,6 +4,7 @@ import {
   DEVICE_CONTROL_DEVICES,
   DISPATCH_TEMPLATES,
   getDeviceControlHistory,
+  getDeviceBasics,
   getManagementDeviceInventory,
   isDeviceControlConfigured,
 } from '@/lib/deviceControl';
@@ -106,6 +107,12 @@ const RECOVERY_OUTCOME_LABEL: Record<string, string> = {
   undetermined: '人の確認: 分からないまま閉じた',
 };
 
+const OS_FAMILY_LABEL: Record<string, string> = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
+
+function yesNo(value: boolean | null): string {
+  return value === null ? '—' : value ? '有効' : '無効';
+}
+
 export default async function DeviceControlPage({
   searchParams,
 }: {
@@ -129,6 +136,7 @@ export default async function DeviceControlPage({
   const history = actorEmail ? await getDeviceControlHistory(selectedDevice) : null;
   // 登録状態はManagement自身の台帳を読む。Codzilla/Kanameの操作対象一覧とは別物。
   const managementInventory = await getManagementDeviceInventory();
+  const deviceBasics = await getDeviceBasics();
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -214,6 +222,63 @@ export default async function DeviceControlPage({
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* PC の基礎情報（2026-09-25）。登録済みの端末ごとに、最新の状態の報告から OS・スペック・保護の状態を出す。 */}
+      <section>
+        <div className="mb-3">
+          <h2 className="mb-1 text-[15px] font-semibold">端末の基礎情報</h2>
+          <p className="max-w-[900px] text-[12px] text-[var(--muted)]">
+            エージェントの最新の報告から表示します。CPU・コア数・メモリは macOS のエージェント（2026-09-25 版以降）が報告します。
+          </p>
+        </div>
+        {deviceBasics.state === 'unavailable' ? (
+          <div className="card p-4 text-[13px] text-[var(--muted)]">
+            基礎情報を読み取れなかった({MANAGEMENT_INVENTORY_UNAVAILABLE_LABEL[deviceBasics.reason] ?? deviceBasics.reason})
+          </div>
+        ) : deviceBasics.state === 'empty' ? (
+          <div className="card p-4 text-[13px] text-[var(--muted)]">登録済みの端末がまだ無い</div>
+        ) : (
+          <div className="card overflow-x-auto">
+            <table className="w-full min-w-[980px] border-collapse text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-left text-[12px] text-[var(--muted)]">
+                  <th className="px-4 py-2 font-medium">端末</th>
+                  <th className="px-4 py-2 font-medium">OS</th>
+                  <th className="px-4 py-2 font-medium">CPU</th>
+                  <th className="px-4 py-2 font-medium">コア</th>
+                  <th className="px-4 py-2 font-medium">メモリ</th>
+                  <th className="px-4 py-2 font-medium">保護の状態</th>
+                  <th className="px-4 py-2 font-medium">最終報告</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deviceBasics.items.map((d) => (
+                  <tr key={d.id} className="border-b border-[var(--border)] align-top">
+                    <td className="px-4 py-2">
+                      <div>{d.hostname}</div>
+                      {d.model && <div className="text-[11px] text-[var(--muted)]">{d.model}</div>}
+                    </td>
+                    <td className="px-4 py-2 text-[12px]">{OS_FAMILY_LABEL[d.os_family] ?? d.os_family}{d.os_version ? ` ${d.os_version}` : ''}</td>
+                    <td className="px-4 py-2 text-[12px]">{d.cpu ?? '—'}</td>
+                    <td className="px-4 py-2 text-[12px]">{d.cores ?? '—'}</td>
+                    <td className="px-4 py-2 text-[12px]">{d.memory ?? '—'}</td>
+                    <td className="px-4 py-2 text-[11px] leading-5">
+                      <div>ディスク暗号化: {yesNo(d.disk_encrypted)}</div>
+                      <div>画面ロック: {yesNo(d.screen_lock_enabled)}</div>
+                      <div>ファイアウォール: {yesNo(d.firewall_enabled)}</div>
+                      <div>OS の更新: {d.patch_current === null ? '—' : d.patch_current ? '最新' : '未適用あり'}</div>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-[12px] text-[var(--muted)]">
+                      {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : 'まだ無い'}
+                      {d.agent_version && <div className="text-[11px]">agent {d.agent_version}</div>}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

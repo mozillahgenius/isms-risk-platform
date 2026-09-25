@@ -393,6 +393,67 @@ export type ManagementDeviceInventoryResult =
   | { state: 'empty'; items: [] }
   | { state: 'unavailable'; reason: 'not_configured' | 'unauthorized' | 'invalid_session' | 'database_error'; items: [] };
 
+export type DeviceBasicsItem = {
+  id: string;
+  hostname: string;
+  model: string | null;
+  os_family: string;
+  os_version: string | null;
+  cpu: string | null;
+  cores: string | null;
+  memory: string | null;
+  last_seen_at: string | null;
+  agent_version: string | null;
+  disk_encrypted: boolean | null;
+  screen_lock_enabled: boolean | null;
+  firewall_enabled: boolean | null;
+  patch_current: boolean | null;
+};
+
+export type DeviceBasicsResult =
+  | { state: 'ok'; items: DeviceBasicsItem[] }
+  | { state: 'empty'; items: [] }
+  | { state: 'unavailable'; reason: 'unauthorized' | 'not_configured' | 'invalid_session' | 'database_error'; items: [] };
+
+/** PC の基礎情報（2026-09-25）。登録済みの端末と、その最新の状態の報告（OS・スペック・保護の状態）を並べる。
+ *  スペック（cpu・cores・memory）は報告の payload.hardware から取る（macOS のエージェント 2026-09-25 版以降。無ければ空）。 */
+export async function getDeviceBasics(): Promise<DeviceBasicsResult> {
+  if ((await authorizedViewerEmail()) === null) return { state: 'unavailable', reason: 'unauthorized', items: [] };
+  const result = await withTenant(async (sql) => sql<DeviceBasicsItem[]>`
+    SELECT
+      d.id::text,
+      d.hostname,
+      d.model,
+      d.os_family,
+      s.os_version,
+      s.payload->'hardware'->>'cpu' AS cpu,
+      s.payload->'hardware'->>'cores' AS cores,
+      s.payload->'hardware'->>'memory' AS memory,
+      d.last_seen_at::text,
+      s.agent_version,
+      s.disk_encrypted,
+      s.screen_lock_enabled,
+      s.firewall_enabled,
+      s.patch_current
+    FROM app.devices d
+    LEFT JOIN LATERAL (
+      SELECT * FROM app.device_snapshots x
+      WHERE x.device_id = d.id
+      ORDER BY x.collected_at DESC
+      LIMIT 1
+    ) s ON true
+    WHERE d.tenant_id = app.current_tenant()
+    ORDER BY d.hostname
+    LIMIT 200
+  `);
+  if (!result.ok) {
+    if (result.reason === 'no_token') return { state: 'unavailable', reason: 'not_configured', items: [] };
+    if (result.reason === 'invalid_session') return { state: 'unavailable', reason: 'invalid_session', items: [] };
+    return { state: 'unavailable', reason: 'database_error', items: [] };
+  }
+  return result.data.length > 0 ? { state: 'ok', items: result.data } : { state: 'empty', items: [] };
+}
+
 /** Management自身が保持するagent_installations台帳を表示用に読む。 */
 export async function getManagementDeviceInventory(): Promise<ManagementDeviceInventoryResult> {
   if ((await authorizedViewerEmail()) === null) return { state: 'unavailable', reason: 'unauthorized', items: [] };

@@ -91,6 +91,17 @@ function requiredInteger(value: unknown, field: string): asserts value is number
   }
 }
 
+const HARDWARE_FIELDS = new Set(['cpu', 'cores', 'memory']);
+
+/** hardware は { cpu?, cores?, memory? } の文字列だけ（各 200 文字まで）。知らない項目は断る。 */
+function validateHardware(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('hardware must be an object');
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!HARDWARE_FIELDS.has(key)) throw new Error('hardware fields do not match the fixed contract');
+    if (typeof item !== 'string' || item.length === 0 || item.length > 200) throw new Error(`hardware.${key} must be a short string`);
+  }
+}
+
 export function validateAgentPayload(value: unknown): AgentPayload {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('payload must be an object');
@@ -100,10 +111,13 @@ export function validateAgentPayload(value: unknown): AgentPayload {
     throw new Error('definition_version is unsupported');
   }
   const fields = payload.definition_version === 1 ? fieldsV1 : fieldsV2;
-  const keys = Object.keys(payload);
+  // hardware（PC の基礎情報）は固定の項目の外にある、あってもなくてもよい唯一の項目（2026-09-25）。
+  // 古いエージェントの報告（hardware が無い）も受ける。中身は validateHardware で形を確かめる。
+  const keys = Object.keys(payload).filter((key) => key !== 'hardware');
   if (keys.length !== fields.size || keys.some((key) => !fields.has(key))) {
     throw new Error('payload fields do not match the fixed posture contract');
   }
+  if ('hardware' in payload) validateHardware(payload.hardware);
 
   for (const field of [
     'device_id', 'collected_at', 'agent_version', 'definition_hash',

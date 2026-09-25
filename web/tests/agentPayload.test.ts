@@ -89,3 +89,23 @@ describe('posture の固定契約（OS ごとの保護機能）', () => {
       .toThrow('os_family is unsupported');
   });
 });
+
+// PC の基礎情報（hardware）は、あってもなくてもよい唯一の項目（2026-09-25）。
+describe('hardware（PC の基礎情報）', () => {
+  const mac = { ...common, os_family: 'macos', builtin_protection: macProtection };
+  it('無くても通る（古いエージェント）', () => {
+    expect(() => validateAgentPayload(mac)).not.toThrow();
+  });
+  it('cpu・cores・memory の文字列なら通る', () => {
+    expect(() => validateAgentPayload({ ...mac, hardware: { cpu: 'Apple M2', cores: '8', memory: '16 GB' } })).not.toThrow();
+  });
+  it('知らない項目は落ちる', () => {
+    expect(() => validateAgentPayload({ ...mac, hardware: { cpu: 'x', gpu: 'y' } })).toThrow('hardware fields do not match');
+  });
+  it('文字列でない値は落ちる', () => {
+    expect(() => validateAgentPayload({ ...mac, hardware: { memory: 48 } })).toThrow('hardware.memory');
+  });
+  it('hardware 以外の知らない項目は、これまでどおり落ちる', () => {
+    expect(() => validateAgentPayload({ ...mac, serial: 'x' })).toThrow('fixed posture contract');
+  });
+});

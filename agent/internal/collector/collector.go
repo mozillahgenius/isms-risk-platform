@@ -673,6 +673,17 @@ func parseDeviceIdentity(outputs []string) ([]map[string]any, error) {
 			row["model"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Model Name:"))
 		case strings.HasPrefix(trimmed, "Serial Number (system):"):
 			row["serial"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Serial Number (system):"))
+		// PC の基礎情報（2026-09-25）。Apple silicon は "Chip:"、Intel は "Processor Name:"。
+		case strings.HasPrefix(trimmed, "Chip:"):
+			row["cpu"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Chip:"))
+		case strings.HasPrefix(trimmed, "Processor Name:"):
+			if _, ok := row["cpu"]; !ok {
+				row["cpu"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Processor Name:"))
+			}
+		case strings.HasPrefix(trimmed, "Total Number of Cores:"):
+			row["cores"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Total Number of Cores:"))
+		case strings.HasPrefix(trimmed, "Memory:"):
+			row["memory"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "Memory:"))
 		}
 	}
 	row["hostname"] = strings.TrimSpace(outputs[1])
@@ -828,6 +839,9 @@ func Collect(ctx context.Context, d definition.Definition, runner QueryRunner, m
 				snapshot.Hostname = rowString(row, "hostname")
 				snapshot.Model = rowString(row, "model")
 				snapshot.OSFamily = rowString(row, "os_family")
+				if hw := (posture.Hardware{CPU: rowString(row, "cpu"), Cores: rowString(row, "cores"), Memory: rowString(row, "memory")}); hw != (posture.Hardware{}) {
+					snapshot.Hardware = &hw
+				}
 			}
 		case "off_premise":
 			// The value is an explicit enrollment attribute, not a location signal.

@@ -27,6 +27,7 @@ type Snapshot struct {
 	ExternalID                     string                    `json:"external_id"`
 	Hostname                       string                    `json:"hostname"`
 	Model                          string                    `json:"model"`
+	Hardware                       *Hardware                 `json:"hardware,omitempty"`
 	OSFamily                       string                    `json:"os_family"`
 	OffPremise                     bool                      `json:"off_premise"`
 	DiskEncrypted                  *bool                     `json:"disk_encrypted"`
@@ -43,6 +44,16 @@ type Snapshot struct {
 	PasswordManagerInstall         *bool                     `json:"password_manager_installed"`
 	UnapprovedApps                 []string                  `json:"unapproved_apps"`
 	ApplicationInventoryMismatches []string                  `json:"application_inventory_mismatches"`
+}
+
+// Hardware is the PC's basic specification shown on the management screen (2026-09-25).
+// It is read from the same `system_profiler SPHardwareDataType` output as the device identity
+// (no extra command, no change to the signed definition). Fields the OS did not report stay empty.
+// Windows does not fill this yet (its identity script is a signed definition).
+type Hardware struct {
+	CPU    string `json:"cpu,omitempty"`
+	Cores  string `json:"cores,omitempty"`
+	Memory string `json:"memory,omitempty"`
 }
 
 // BuiltinProtectionEvidence is the OS-specific builtin_protection object. The
@@ -241,6 +252,11 @@ func ParseSnapshot(raw []byte) (Snapshot, error) {
 		return Snapshot{}, errors.New("posture JSON contains trailing data")
 	}
 	fields := snapshotKeys()
+	var hardwareRaw json.RawMessage
+	if raw, ok := object[optionalHardwareKey]; ok {
+		hardwareRaw = raw
+		delete(object, optionalHardwareKey)
+	}
 	if len(object) != len(fields) {
 		return Snapshot{}, errors.New("posture fields do not match the fixed contract")
 	}
@@ -282,6 +298,15 @@ func ParseSnapshot(raw []byte) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("decode builtin_protection: %w", err)
 	}
 	snapshot.BuiltinProtection = protection
+	if hardwareRaw != nil {
+		var hw Hardware
+		hwDecoder := json.NewDecoder(bytes.NewReader(hardwareRaw))
+		hwDecoder.DisallowUnknownFields()
+		if err := hwDecoder.Decode(&hw); err != nil {
+			return Snapshot{}, fmt.Errorf("decode hardware: %w", err)
+		}
+		snapshot.Hardware = &hw
+	}
 	if err := snapshot.Validate(); err != nil {
 		return Snapshot{}, err
 	}
@@ -293,10 +318,17 @@ func snapshotKeys() []string {
 	keys := make([]string, 0, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name == optionalHardwareKey {
+			continue
+		}
 		keys = append(keys, name)
 	}
 	return keys
 }
+
+// optionalHardwareKey は固定の項目の外にある、あってもなくてもよい唯一の項目（2026-09-25）。
+// 古いエージェントの報告（hardware が無い）も、新しいエージェントの報告（hardware がある）も受ける。
+const optionalHardwareKey = "hardware"
 
 func (s *Snapshot) SortApps() {
 	if s.UnapprovedApps != nil {
