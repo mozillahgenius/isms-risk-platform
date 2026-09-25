@@ -31,6 +31,7 @@
 - PostgreSQL 16 以上（17 で検証）、拡張 `pgcrypto` / `btree_gist` / `citext`
 - Node.js（`web/` の Next.js）、Python 3.12 以上（`scripts/`）、`psql`
 - Go（端末エージェントのビルド。`scripts/build-agent-artifacts.sh`）
+  - macOS 用のバイナリは cgo を有効にして **macOS の上で**ビルドします（プロセスの実行ファイルのパスを読む収集が cgo を要するため。スクリプトは macOS 以外で macOS 用を作ろうとすると止まります）。`CGO_ENABLED=0` で作ったバイナリは収集が毎回失敗し、状態の報告が届きません。Windows / Linux 用は従来どおり cgo なしで作ります
 - Web は `127.0.0.1` で待ち受け、前段のリバースプロキシ経由で公開します。本番の起動スクリプト（`ops/runtime/start-isms.sh`）は `-H 127.0.0.1` で起動しますが、`web/package.json` の `start` は `0.0.0.0` で待ち受けます。`npm run start` で起動する場合は、前段を通らずに届く経路ができないよう待ち受けアドレスを確認してください。
 
 ## 3. DB ロール
@@ -116,6 +117,7 @@
 | 招待リンク・エージェントの接続先が 404 | パス配下で公開しているなら、公開 URL の設定にパスが入っているか（第1節） |
 | 招待メールが `queued` のまま | 送信ジョブ、SMTP の設定、送信用セッション |
 | 状態報告が 400 `{"error":"posture rejected"}` | `ISMS_AGENT_INGEST_SECRET` と DB 側の鍵（`app.agent_ingest_keys`） |
+| macOS の端末から状態報告が一度も届かない（エージェントのログに `kernel process path lookup is unsupported`） | macOS 用のバイナリが cgo なしでビルドされている（第2節） |
 
 ## 9. 調べる順番
 
